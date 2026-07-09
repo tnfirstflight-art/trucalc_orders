@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="view_trucalc_bid_tree" model="ir.ui.view">
+        <field name="name">trucalc.bid.tree</field>
+        <field name="model">trucalc.bid</field>
+        <field name="arch" type="xml">
+
+            <list>
+                <field name="vendor_id"/>
+                <field name="bid_amount"/>
+                <field name="turn_time_days"/>
+                <field name="status"/>
+
+                <button
+                    name="action_select_bid"
+                    type="object"
+                    string="Select"
+                />
+
+            </list>
+
+        </field>
+    </record>
+
+</odoo>

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="view_trucalc_document_tree" model="ir.ui.view">
+        <field name="name">trucalc.document.tree</field>
+        <field name="model">trucalc.document</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="name"/>
+                <field name="document_type"/>
+                <field name="order_id"/>
+                <field name="uploaded_by"/>
+                <field name="upload_date"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_trucalc_document_form" model="ir.ui.view">
+        <field name="name">trucalc.document.form</field>
+        <field name="model">trucalc.document</field>
+        <field name="arch" type="xml">
+            <form>
+                <sheet>
+
+                    <group>
+                        <field name="name"/>
+                        <field name="document_type"/>
+                    </group>
+
+                    <group>
+                        <field name="order_id"/>
+                        <field name="uploaded_by" readonly="1"/>
+                        <field name="upload_date" readonly="1"/>
+                    </group>
+
+                    <group>
+                        <field name="attachment" filename="filename"/>
+                        <field name="filename"/>
+                    </group>
+
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+</odoo>

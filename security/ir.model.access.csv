@@ -1,0 +1,12 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+
+access_trucalc_admin,trucalc admin,model_trucalc_order,trucalc_orders.group_trucalc_admin,1,1,1,1
+access_trucalc_reviewer,trucalc reviewer,model_trucalc_order,trucalc_orders.group_trucalc_reviewer,1,1,1,0
+access_trucalc_user,trucalc user,model_trucalc_order,base.group_user,1,1,1,0
+
+access_trucalc_vendor_admin,trucalc vendor admin,model_trucalc_vendor,trucalc_orders.group_trucalc_admin,1,1,1,1
+access_trucalc_vendor_reviewer,trucalc vendor reviewer,model_trucalc_vendor,trucalc_orders.group_trucalc_reviewer,1,1,1,0
+access_trucalc_vendor_user,trucalc vendor user,model_trucalc_vendor,base.group_user,1,1,1,0
+access_trucalc_document_user,access_trucalc_document_user,model_trucalc_document,base.group_user,1,1,1,1
+access_vendor_fee_user,access_vendor_fee_user,model_trucalc_vendor_fee,base.group_user,1,1,1,1
+access_trucalc_bid_user,access_trucalc_bid_user,model_trucalc_bid,base.group_user,1,1,1,1

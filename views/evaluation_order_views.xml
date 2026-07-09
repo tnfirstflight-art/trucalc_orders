@@ -1,0 +1,217 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- LIST VIEW -->
+
+    <record id="view_trucalc_order_list" model="ir.ui.view">
+        <field name="name">trucalc.order.list</field>
+        <field name="model">trucalc.order</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="order_number"/>
+                <field name="borrower"/>
+                <field name="loan_number"/>
+                <field name="property_address"/>
+                <field name="company_id"/>
+                <field name="status"/>
+                <field name="assigned_vendor_id"/>
+                <field name="due_date"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- FORM VIEW -->
+
+    <record id="view_trucalc_order_form" model="ir.ui.view">
+        <field name="name">trucalc.order.form</field>
+        <field name="model">trucalc.order</field>
+        <field name="arch" type="xml">
+
+            <form string="Evaluation Order">
+
+                <header>
+
+                    <button
+                        name="action_reopen_bidding"
+                        string="Reopen Bidding"
+                        type="object"
+                        class="btn-secondary"
+                        invisible="status != 'assigned'"/>
+
+                    <button
+                        name="action_assign_reviewer"
+                        string="Assign Reviewer"
+                        type="object"
+                        class="btn-primary"
+                        invisible="status != 'report_received'"/>
+
+                    <button
+                        name="action_start_review"
+                        string="Start Review"
+                        type="object"
+                        class="btn-primary"
+                        invisible="status != 'reviewer_assigned'"/>
+
+                    <button
+                        name="action_complete_review"
+                        string="Complete Review"
+                        type="object"
+                        class="btn-success"
+                        invisible="status != 'under_review'"/>
+
+                    <field
+                        name="status"
+                        widget="statusbar"
+                        statusbar_visible="new,bid_requested,assigned,report_received,reviewer_assigned,under_review,completed"/>
+
+                </header>
+
+                <sheet>
+
+                    <div class="oe_title">
+                        <h1>
+                            <field name="order_number" readonly="1"/>
+                        </h1>
+                    </div>
+
+                    <group>
+
+                        <group string="Borrower Information">
+
+                            <field name="borrower"/>
+                            <field name="loan_number"/>
+                            <field name="service_type"/>
+                            <field name="loan_amount"/>
+
+                        </group>
+
+                        <group string="Property Information">
+
+                            <group col="2">
+                                <field name="property_address"/>
+                                <field name="city"/>
+                                <field name="state"/>
+                                <field name="zip_code"/>
+                                <field name="property_type"/>
+                            </group>
+
+                        </group>
+
+                    </group>
+
+                    <group>
+
+                        <group string="Order Information">
+
+                            <field name="requestor_id" readonly="1"/>
+                            <field name="company_id"/>
+
+                            <field name="assigned_vendor_id"/>
+
+                            <field name="fee_override"/>
+
+                            <field name="reviewer_id"/>
+
+                            <field name="review_fee"/>
+
+                            <field name="order_date"/>
+                            <field name="due_date"/>
+
+                            <field name="status"/>
+
+                        </group>
+
+                    </group>
+
+                    <notebook>
+
+                        <page string="Notes">
+
+                            <field name="notes"/>
+
+                        </page>
+
+                        <page string="Documents">
+
+                            <field name="document_ids">
+
+                                <list>
+                                    <field name="name"/>
+                                    <field name="document_type"/>
+                                    <field name="filename"/>
+                                    <field name="uploaded_by" readonly="1"/>
+                                    <field name="upload_date" readonly="1"/>
+                                </list>
+
+                                <form>
+                                    <sheet>
+
+                                        <group>
+                                            <field name="name"/>
+                                            <field name="document_type"/>
+                                        </group>
+
+                                        <group>
+                                            <field
+                                                name="attachment"
+                                                filename="filename"/>
+                                            <field name="filename"/>
+                                        </group>
+
+                                        <group>
+                                            <field
+                                                name="uploaded_by"
+                                                readonly="1"/>
+                                            <field
+                                                name="upload_date"
+                                                readonly="1"/>
+                                        </group>
+
+                                    </sheet>
+                                </form>
+
+                            </field>
+
+                        </page>
+
+                    </notebook>
+
+                    <chatter/>
+
+                </sheet>
+
+            </form>
+
+        </field>
+    </record>
+
+    <!-- ACTION -->
+
+    <record id="action_trucalc_orders" model="ir.actions.act_window">
+        <field name="name">Evaluation Orders</field>
+        <field name="res_model">trucalc.order</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <!-- MENUS -->
+
+    <menuitem
+        id="menu_trucalc_root"
+        name="TruCalc"
+        sequence="10"/>
+
+    <menuitem
+        id="menu_trucalc_orders"
+        name="Evaluation Orders"
+        parent="menu_trucalc_root"
+        action="action_trucalc_orders"
+        sequence="10"/>
+
+    <menuitem
+        id="menu_trucalc_vendors"
+        name="Vendors"
+        parent="menu_trucalc_root"
+        action="action_trucalc_vendors"
+        sequence="20"/>
+
+</odoo>

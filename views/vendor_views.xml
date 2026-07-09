@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- LIST VIEW -->
+
+    <record id="view_trucalc_vendor_list" model="ir.ui.view">
+        <field name="name">trucalc.vendor.list</field>
+        <field name="model">trucalc.vendor</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="name"/>
+                <field name="vendor_type"/>
+                <field name="email"/>
+                <field name="phone"/>
+                <field name="active"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- FORM VIEW -->
+
+    <record id="view_trucalc_vendor_form" model="ir.ui.view">
+        <field name="name">trucalc.vendor.form</field>
+        <field name="model">trucalc.vendor</field>
+        <field name="arch" type="xml">
+            <form string="Vendor">
+                <sheet>
+
+                    <div class="oe_title">
+                        <h1>
+                            <field name="name"/>
+                        </h1>
+                    </div>
+
+                    <group>
+
+                        <group>
+                            <field name="vendor_type"/>
+                            <field name="active"/>
+                        </group>
+
+                        <group>
+                            <field name="email"/>
+                            <field name="phone"/>
+                        </group>
+
+                    </group>
+
+                    <notebook>
+
+                        <page string="Fee Schedule">
+
+                            <field name="fee_schedule_ids">
+
+                                <list editable="bottom">
+                                    <field name="service_type"/>
+                                    <field name="fee"/>
+                                </list>
+
+                            </field>
+
+                        </page>
+
+                    </notebook>
+
+                </sheet>
+
+            </form>
+        </field>
+    </record>
+
+    <!-- ACTION -->
+
+    <record id="action_trucalc_vendors" model="ir.actions.act_window">
+        <field name="name">Vendors</field>
+        <field name="res_model">trucalc.vendor</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+</odoo>
