@@ -14,6 +14,15 @@ class TruCalcBid(models.Model):
         ondelete="cascade",
     )
 
+    company_id = fields.Many2one(
+        "res.company",
+        string="Company",
+        related="order_id.company_id",
+        store=True,
+        readonly=True,
+        index=True,
+    )
+
     vendor_id = fields.Many2one(
         "trucalc.vendor",
         string="Vendor",
