@@ -20,6 +20,9 @@ access_trucalc_bid_user,trucalc bid administrator,model_trucalc_bid,trucalc_orde
 access_trucalc_bid_operations,trucalc bid operations,model_trucalc_bid,trucalc_orders.group_trucalc_operations,1,1,1,0
 access_trucalc_bid_vendor_portal,trucalc bid vendor portal,model_trucalc_bid,trucalc_orders.group_vendor_portal,1,1,1,0
 
+access_trucalc_bid_invitation_admin,trucalc bid invitation administrator,model_trucalc_bid_invitation,trucalc_orders.group_trucalc_admin,1,1,1,0
+access_trucalc_bid_invitation_operations,trucalc bid invitation operations,model_trucalc_bid_invitation,trucalc_orders.group_trucalc_operations,1,1,1,0
+
 access_trucalc_document_user,trucalc document administrator,model_trucalc_document,trucalc_orders.group_trucalc_admin,1,1,1,0
 access_trucalc_document_operations,trucalc document operations,model_trucalc_document,trucalc_orders.group_trucalc_operations,1,1,1,0
 access_trucalc_document_reviewer,trucalc document reviewer,model_trucalc_document,trucalc_orders.group_trucalc_reviewer,1,1,1,0

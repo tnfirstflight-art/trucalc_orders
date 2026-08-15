@@ -101,6 +101,16 @@ class EvaluationOrder(models.Model):
         tracking=True,
     )
 
+    vendor_fee = fields.Float(
+        string="Vendor Fee",
+        tracking=True,
+    )
+
+    bidding_round = fields.Integer(
+        string="Bidding Round",
+        default=0,
+    )
+
     order_date = fields.Date(
         string="Order Date",
     )
@@ -152,6 +162,18 @@ class EvaluationOrder(models.Model):
         "trucalc.document",
         "order_id",
         string="Documents",
+    )
+
+    invitation_ids = fields.One2many(
+        "trucalc.bid.invitation",
+        "order_id",
+        string="Bid Invitations",
+    )
+
+    bid_ids = fields.One2many(
+        "trucalc.bid",
+        "order_id",
+        string="Bids",
     )
 
     @api.model_create_multi

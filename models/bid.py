@@ -7,6 +7,13 @@ class TruCalcBid(models.Model):
     _description = "Vendor Bid"
     _order = "create_date desc"
 
+    invitation_id = fields.Many2one(
+        "trucalc.bid.invitation",
+        string="Invitation",
+        index=True,
+        ondelete="restrict",
+    )
+
     order_id = fields.Many2one(
         "trucalc.order",
         string="Order",
@@ -29,6 +36,10 @@ class TruCalcBid(models.Model):
         required=True,
     )
 
+    option_name = fields.Char(
+        string="Option Name",
+    )
+
     bid_amount = fields.Float(
         string="Bid Amount",
         required=True,
@@ -44,9 +55,13 @@ class TruCalcBid(models.Model):
 
     status = fields.Selection(
         [
+            ("draft", "Draft"),
             ("submitted", "Submitted"),
             ("selected", "Selected"),
+            ("not_selected", "Not Selected"),
+            ("disqualified", "Disqualified"),
             ("rejected", "Rejected"),
+            ("awarded", "Awarded"),
         ],
         string="Status",
         default="submitted",
