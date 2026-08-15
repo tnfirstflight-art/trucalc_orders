@@ -22,6 +22,8 @@ access_trucalc_bid_vendor_portal,trucalc bid vendor portal,model_trucalc_bid,tru
 
 access_trucalc_bid_invitation_admin,trucalc bid invitation administrator,model_trucalc_bid_invitation,trucalc_orders.group_trucalc_admin,1,1,1,0
 access_trucalc_bid_invitation_operations,trucalc bid invitation operations,model_trucalc_bid_invitation,trucalc_orders.group_trucalc_operations,1,1,1,0
+access_trucalc_bid_audit_admin,trucalc bid audit administrator,model_trucalc_bid_audit,trucalc_orders.group_trucalc_admin,1,0,0,0
+access_trucalc_bid_audit_operations,trucalc bid audit operations,model_trucalc_bid_audit,trucalc_orders.group_trucalc_operations,1,0,0,0
 
 access_trucalc_document_user,trucalc document administrator,model_trucalc_document,trucalc_orders.group_trucalc_admin,1,1,1,0
 access_trucalc_document_operations,trucalc document operations,model_trucalc_document,trucalc_orders.group_trucalc_operations,1,1,1,0

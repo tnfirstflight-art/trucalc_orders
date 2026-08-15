@@ -16,6 +16,8 @@
                     name="action_select_bid"
                     type="object"
                     string="Select"
+                    groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                    invisible="status != 'submitted'"
                 />
 
             </list>
