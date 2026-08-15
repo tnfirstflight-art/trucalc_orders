@@ -10,6 +10,7 @@ class TruCalcBid(models.Model):
     invitation_id = fields.Many2one(
         "trucalc.bid.invitation",
         string="Invitation",
+        required=True,
         index=True,
         ondelete="restrict",
     )
@@ -17,14 +18,17 @@ class TruCalcBid(models.Model):
     order_id = fields.Many2one(
         "trucalc.order",
         string="Order",
+        related="invitation_id.order_id",
+        store=True,
+        readonly=True,
         required=True,
-        ondelete="cascade",
+        index=True,
     )
 
     company_id = fields.Many2one(
         "res.company",
         string="Company",
-        related="order_id.company_id",
+        related="invitation_id.company_id",
         store=True,
         readonly=True,
         index=True,
@@ -33,11 +37,16 @@ class TruCalcBid(models.Model):
     vendor_id = fields.Many2one(
         "trucalc.vendor",
         string="Vendor",
+        related="invitation_id.vendor_id",
+        store=True,
+        readonly=True,
         required=True,
+        index=True,
     )
 
     option_name = fields.Char(
         string="Option Name",
+        required=True,
     )
 
     bid_amount = fields.Float(
@@ -60,8 +69,6 @@ class TruCalcBid(models.Model):
             ("selected", "Selected"),
             ("not_selected", "Not Selected"),
             ("disqualified", "Disqualified"),
-            ("rejected", "Rejected"),
-            ("awarded", "Awarded"),
         ],
         string="Status",
         default="submitted",
