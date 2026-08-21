@@ -13,6 +13,7 @@ class TruCalcBidAudit(models.Model):
             ("bidding_reopened", "Bidding Reopened"),
             ("invitation_created", "Invitation Created"),
             ("invitation_revoked", "Invitation Revoked"),
+            ("invitation_expired", "Invitation Expired"),
             ("invitation_declined", "Invitation Declined"),
             ("response_submitted", "Response Submitted"),
             ("bid_corrected", "Bid Corrected"),

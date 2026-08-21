@@ -38,4 +38,13 @@ class TruCalcVendor(models.Model):
         "trucalc.vendor.fee",
         "vendor_id",
         string="Fee Schedule",
-)
+    )
+
+    def write(self, vals):
+        deactivated = self.filtered("active") if vals.get("active") is False else self.browse()
+        result = super().write(vals)
+        if deactivated:
+            self.env["trucalc.order.vendor.authorization"]._deactivate(
+                [("vendor_id", "in", deactivated.ids)], "vendor_deactivated"
+            )
+        return result

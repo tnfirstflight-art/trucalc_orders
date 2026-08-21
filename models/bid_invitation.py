@@ -81,8 +81,19 @@ class TruCalcBidInvitation(models.Model):
         return invitation
 
     @api.private
+    def _lock_for_lifecycle(self):
+        self.ensure_one()
+        self.flush_recordset(["state", "response_deadline", "round_number", "order_id"])
+        self.env.cr.execute(
+            "SELECT id FROM trucalc_bid_invitation WHERE id = %s FOR UPDATE",
+            (self.id,),
+        )
+        self.invalidate_recordset(["state", "response_deadline", "round_number", "order_id"])
+
+    @api.private
     def _validate_current_active(self):
         self.ensure_one()
+        self._lock_for_lifecycle()
         now = fields.Datetime.now()
         if (
             self.state != "invited"
@@ -101,12 +112,24 @@ class TruCalcBidInvitation(models.Model):
             "declined_at", "revoked_at", "is_legacy_reconstructed",
         }
         prepared = []
+        order_ids = []
         for incoming in vals_list:
             if protected.intersection(incoming):
                 raise AccessError(_("Invitation lifecycle fields are server-controlled."))
             if not incoming.get("order_id") or not incoming.get("vendor_id"):
                 raise ValidationError(_("An order and vendor are required."))
-            order = self.env["trucalc.order"].browse(incoming["order_id"]).exists()
+            order_ids.append(incoming["order_id"])
+        orders = self.env["trucalc.order"].browse(sorted(set(order_ids))).exists()
+        if len(orders) != len(set(order_ids)):
+            raise ValidationError(_("A valid active vendor and order are required."))
+        orders.flush_recordset(["status", "bidding_round"])
+        self.env.cr.execute(
+            "SELECT id FROM trucalc_order WHERE id = ANY(%s) ORDER BY id FOR UPDATE",
+            (orders.ids,),
+        )
+        orders.invalidate_recordset(["status", "bidding_round"])
+        for incoming in vals_list:
+            order = orders.filtered(lambda candidate: candidate.id == incoming["order_id"])
             vendor = self.env["trucalc.vendor"].browse(incoming["vendor_id"]).exists()
             if not order or not vendor or not vendor.active:
                 raise ValidationError(_("A valid active vendor and order are required."))
@@ -137,6 +160,9 @@ class TruCalcBidInvitation(models.Model):
             prepared.append(vals)
         invitations = super().create(prepared)
         for invitation in invitations:
+            self.env["trucalc.order.vendor.authorization"]._create_for_invitation(
+                invitation
+            )
             self.env["trucalc.bid.audit"]._log_event(
                 "invitation_created", invitation.order_id, invitation=invitation,
                 new_values={"vendor_id": invitation.vendor_id.id,
@@ -157,19 +183,31 @@ class TruCalcBidInvitation(models.Model):
     def action_set_response_deadline(self, deadline):
         self._require_manager()
         for invitation in self:
+            invitation._lock_for_lifecycle()
             if invitation.state != "invited":
                 raise ValidationError(_("Only an open invitation deadline may be changed."))
-        return super(TruCalcBidInvitation, self).write({"response_deadline": deadline})
+            super(TruCalcBidInvitation, invitation).write({"response_deadline": deadline})
+            if deadline and fields.Datetime.now() > fields.Datetime.to_datetime(deadline):
+                invitation._expire_locked(fields.Datetime.now())
+            else:
+                self.env["trucalc.order.vendor.authorization"]._update_invitation_expiry(
+                    invitation
+                )
+        return True
 
     def action_revoke(self):
         self._require_manager()
         now = fields.Datetime.now()
         for invitation in self:
+            invitation._lock_for_lifecycle()
             if invitation.state != "invited":
                 raise ValidationError(_("Only an open invitation may be revoked."))
             if invitation.bid_ids.filtered(lambda bid: bid.status != "draft"):
                 raise ValidationError(_("An invitation with a submitted or final bid cannot be revoked."))
         super(TruCalcBidInvitation, self).write({"state": "revoked", "revoked_at": now})
+        self.env["trucalc.order.vendor.authorization"]._deactivate(
+            [("invitation_id", "in", self.ids)], "revoked", now
+        )
         for invitation in self:
             self.env["trucalc.bid.audit"]._log_event(
                 "invitation_revoked", invitation.order_id, invitation=invitation
@@ -178,6 +216,7 @@ class TruCalcBidInvitation(models.Model):
 
     def action_vendor_decline(self):
         invitation = self._authorized_vendor_invitation()
+        invitation._lock_for_lifecycle()
         if invitation.state != "invited" or invitation.bid_ids.filtered(
             lambda bid: bid.status != "draft"
         ):
@@ -187,6 +226,9 @@ class TruCalcBidInvitation(models.Model):
             drafts._controlled_unlink()
         super(TruCalcBidInvitation, invitation).write(
             {"state": "declined", "declined_at": fields.Datetime.now()}
+        )
+        self.env["trucalc.order.vendor.authorization"]._deactivate(
+            [("invitation_id", "=", invitation.id)], "declined"
         )
         self.env["trucalc.bid.audit"]._log_event(
             "invitation_declined", invitation.order_id, invitation=invitation
@@ -224,4 +266,38 @@ class TruCalcBidInvitation(models.Model):
             "response_submitted", invitation.order_id, invitation=invitation,
             new_values={"bid_ids": bids.ids},
         )
+        return True
+
+    @api.private
+    def _expire_locked(self, now):
+        self.ensure_one()
+        if (
+            self.is_legacy_reconstructed
+            or self.state != "invited"
+            or not self.response_deadline
+            or now <= self.response_deadline
+        ):
+            return False
+        super(TruCalcBidInvitation, self).write({"state": "expired"})
+        self.env["trucalc.order.vendor.authorization"]._deactivate(
+            [("invitation_id", "=", self.id)], "expired", now
+        )
+        self.env["trucalc.bid.audit"]._log_event(
+            "invitation_expired", self.order_id, invitation=self
+        )
+        return True
+
+    @api.model
+    @api.private
+    def _cron_expire_vendor_order_authorizations(self):
+        now = fields.Datetime.now()
+        candidates = self.sudo().search([
+            ("is_legacy_reconstructed", "=", False),
+            ("state", "=", "invited"),
+            ("response_deadline", "!=", False),
+            ("response_deadline", "<", now),
+        ])
+        for invitation in candidates:
+            invitation._lock_for_lifecycle()
+            invitation._expire_locked(fields.Datetime.now())
         return True

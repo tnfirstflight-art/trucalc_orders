@@ -177,6 +177,11 @@ class EvaluationOrder(models.Model):
         string="Bids",
     )
 
+    vendor_authorization_ids = fields.One2many(
+        "trucalc.order.vendor.authorization", "order_id",
+        string="Vendor Order Authorizations", readonly=True, copy=False,
+    )
+
     @api.model_create_multi
     def create(self, vals_list):
         user = self.env.user
@@ -184,6 +189,8 @@ class EvaluationOrder(models.Model):
         if user._trucalc_has_bank_role():
             bank_company = user._trucalc_bank_identity()
         for vals in vals_list:
+            if "vendor_authorization_ids" in vals:
+                raise AccessError(_("Vendor Order authorization is server-maintained."))
             if (
                 vals.get("status", "new") != "new"
                 or vals.get("bidding_round", 0) != 0
@@ -227,6 +234,8 @@ class EvaluationOrder(models.Model):
         return super(EvaluationOrder, trusted_model).create(vals_list)
 
     def write(self, vals):
+        if "vendor_authorization_ids" in vals:
+            raise AccessError(_("Vendor Order authorization is server-maintained."))
         if self.env.user._trucalc_has_bank_role():
             self.env.user._trucalc_bank_identity()
             if {"company_id", "requestor_company_id", "requestor_id"} & vals.keys():
@@ -242,7 +251,12 @@ class EvaluationOrder(models.Model):
             }
             if any((order.status, vals["status"]) in protected_transitions for order in self):
                 raise AccessError(_("This order status transition requires an explicit action."))
-        return super().write(vals)
+        result = super().write(vals)
+        if vals.get("status") in ("completed", "cancelled"):
+            self.env["trucalc.order.vendor.authorization"]._deactivate(
+                [("order_id", "in", self.ids)], vals["status"]
+            )
+        return result
 
     @api.private
     def _controlled_lifecycle_write(self, vals):
@@ -353,6 +367,10 @@ class EvaluationOrder(models.Model):
             "assigned_vendor_id": False,
             "vendor_fee": 0.0,
         })
+        self.env["trucalc.order.vendor.authorization"]._deactivate(
+            [("order_id", "=", self.id), ("source", "=", "assignment")],
+            "reopened",
+        )
         self.env["trucalc.bid.audit"]._log_event(
             "bidding_reopened", self,
             old_values={"status": "assigned", "bidding_round": old_round,

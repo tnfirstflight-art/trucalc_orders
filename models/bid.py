@@ -283,6 +283,15 @@ class TruCalcBid(models.Model):
         ])
         if invitations:
             invitations._controlled_write({"state": "closed"})
+        authorization_model = self.env["trucalc.order.vendor.authorization"]
+        authorization_model._deactivate([
+            ("order_id", "=", order.id),
+            ("source", "=", "invitation"),
+            ("round_number", "=", order.bidding_round),
+        ], "winner_selected")
+        authorization_model._create_for_assignment(
+            order, self.vendor_id, order.bidding_round
+        )
         self.env["trucalc.bid.audit"]._log_event(
             "winner_selected", order, invitation=self.invitation_id, bid=self,
             old_values={"status": "submitted"},
