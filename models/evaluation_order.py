@@ -179,6 +179,10 @@ class EvaluationOrder(models.Model):
 
     @api.model_create_multi
     def create(self, vals_list):
+        user = self.env.user
+        bank_company = False
+        if user._trucalc_has_bank_role():
+            bank_company = user._trucalc_bank_identity()
         for vals in vals_list:
             if (
                 vals.get("status", "new") != "new"
@@ -187,13 +191,46 @@ class EvaluationOrder(models.Model):
                 or vals.get("vendor_fee")
             ):
                 raise AccessError(_("Bid lifecycle fields cannot be set during order creation."))
+            if bank_company:
+                trusted = {
+                    "company_id": bank_company.id,
+                    "requestor_company_id": bank_company.id,
+                    "requestor_id": user.id,
+                }
+                if any(
+                    field in vals and vals[field] != value
+                    for field, value in trusted.items()
+                ):
+                    raise AccessError(_("TruCalc bank order ownership is not authorized."))
+                vals.update(trusted)
             if vals.get("order_number", "New") == "New":
-                vals["order_number"] = self.env["ir.sequence"].next_by_code(
-                    "trucalc.order"
-                ) or "New"
-        return super().create(vals_list)
+                sequence = self.env["ir.sequence"]
+                if bank_company:
+                    sequence = self.env.ref(
+                        "trucalc_orders.seq_trucalc_order"
+                    ).sudo()
+                vals["order_number"] = (
+                    sequence.next_by_id()
+                    if bank_company
+                    else sequence.next_by_code("trucalc.order")
+                )
+                vals["order_number"] = vals["order_number"] or "New"
+
+        if not bank_company:
+            return super().create(vals_list)
+
+        trusted_context = dict(self.env.context)
+        trusted_context["allowed_company_ids"] = []
+        for field in ("company_id", "requestor_company_id", "requestor_id"):
+            trusted_context.pop("default_%s" % field, None)
+        trusted_model = self.with_context(trusted_context)
+        return super(EvaluationOrder, trusted_model).create(vals_list)
 
     def write(self, vals):
+        if self.env.user._trucalc_has_bank_role():
+            self.env.user._trucalc_bank_identity()
+            if {"company_id", "requestor_company_id", "requestor_id"} & vals.keys():
+                raise AccessError(_("TruCalc bank order ownership is immutable."))
         protected = {"bidding_round", "assigned_vendor_id", "vendor_fee"}
         if protected.intersection(vals):
             raise AccessError(_("Order bid lifecycle fields require an explicit action."))

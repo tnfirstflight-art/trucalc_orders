@@ -1,6 +1,6 @@
 {
     'name': 'TruCalc Orders',
-    'version': '1.2',
+    'version': '1.3',
     'author': 'TruCalc',
     'license': 'LGPL-3',
     'category': 'Services',

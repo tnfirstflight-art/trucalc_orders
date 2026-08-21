@@ -34,12 +34,20 @@ class TestBidLifecycle(TransactionCase):
         cls.reviewer_vendor = cls.env["trucalc.vendor"].create(
             {"name": "4A3 Reviewer", "vendor_type": "reviewer"}
         )
+        cls.bank_company = cls.env["res.company"].create({"name": "4A3 Bank"})
         cls.admin = cls._user("4a3-admin", cls.admin_group)
         cls.ops = cls._user("4a3-ops", cls.ops_group)
         cls.reviewer = cls._user("4a3-reviewer", cls.reviewer_group)
         cls.vendor_user_a = cls._user("4a3-vendor-a", cls.vendor_group, cls.vendor_a)
         cls.vendor_user_b = cls._user("4a3-vendor-b", cls.vendor_group, cls.vendor_b)
-        cls.unmapped_vendor = cls._user("4a3-vendor-none", cls.vendor_group)
+        cls.unmapped_vendor = cls._user(
+            "4a3-vendor-none", cls.vendor_group, cls.vendor_a
+        )
+        cls.env.cr.execute(
+            "UPDATE res_users SET trucalc_vendor_id = NULL WHERE id = %s",
+            (cls.unmapped_vendor.id,),
+        )
+        cls.unmapped_vendor.invalidate_recordset(["trucalc_vendor_id"])
         cls.mixed_user = cls._user("4a3-mixed", cls.vendor_group, cls.vendor_a)
         # Normal Odoo validation makes Portal/User groups mutually exclusive.
         # Simulate corrupted/imported membership to verify the server fails closed.
@@ -50,12 +58,16 @@ class TestBidLifecycle(TransactionCase):
         )
         cls.mixed_user.invalidate_recordset()
         cls.bank_users = [
-            cls._user("4a3-bank-%s" % index, group)
+            cls._user(
+                "4a3-bank-%s" % index, group, bank_company=cls.bank_company
+            )
             for index, group in enumerate(cls.bank_groups)
         ]
 
     @classmethod
-    def _user(cls, login, group, vendor=False, extra_group=False):
+    def _user(
+        cls, login, group, vendor=False, extra_group=False, bank_company=False
+    ):
         groups = [group.id]
         if extra_group:
             groups.append(extra_group.id)
@@ -65,6 +77,7 @@ class TestBidLifecycle(TransactionCase):
             "email": "%s@example.test" % login,
             "group_ids": [Command.set(groups)],
             "trucalc_vendor_id": vendor.id if vendor else False,
+            "trucalc_bank_company_id": bank_company.id if bank_company else False,
         })
 
     def _order(self, user=None):
