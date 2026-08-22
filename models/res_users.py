@@ -20,6 +20,13 @@ class ResUsers(models.Model):
     )
 
     @api.model
+    def _get_invalidation_fields(self):
+        return super()._get_invalidation_fields() | {
+            "trucalc_bank_company_id",
+            "trucalc_vendor_id",
+        }
+
+    @api.model
     @api.private
     def _trucalc_persona_groups(self):
         return {

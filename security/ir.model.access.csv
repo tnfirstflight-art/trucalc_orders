@@ -6,7 +6,7 @@ access_trucalc_reviewer,trucalc order reviewer,model_trucalc_order,trucalc_order
 access_trucalc_order_bank_admin,trucalc order bank administrator,model_trucalc_order,trucalc_orders.group_bank_admin,1,1,1,0
 access_trucalc_order_bank_requestor,trucalc order bank requestor,model_trucalc_order,trucalc_orders.group_bank_requestor,1,1,1,0
 access_trucalc_order_bank_view_only,trucalc order bank view-only,model_trucalc_order,trucalc_orders.group_bank_view_only,1,0,0,0
-access_trucalc_order_vendor_portal,trucalc order vendor portal,model_trucalc_order,trucalc_orders.group_vendor_portal,1,0,0,0
+access_trucalc_vendor_order_portal,trucalc vendor order portal,model_trucalc_vendor_order,trucalc_orders.group_vendor_portal,1,0,0,0
 
 access_trucalc_vendor_admin,trucalc vendor administrator,model_trucalc_vendor,trucalc_orders.group_trucalc_admin,1,1,1,0
 access_trucalc_vendor_user,trucalc vendor operations,model_trucalc_vendor,trucalc_orders.group_trucalc_operations,1,1,1,0
@@ -31,4 +31,3 @@ access_trucalc_document_reviewer,trucalc document reviewer,model_trucalc_documen
 access_trucalc_document_bank_admin,trucalc document bank administrator,model_trucalc_document,trucalc_orders.group_bank_admin,1,0,1,0
 access_trucalc_document_bank_requestor,trucalc document bank requestor,model_trucalc_document,trucalc_orders.group_bank_requestor,1,0,1,0
 access_trucalc_document_bank_view_only,trucalc document bank view-only,model_trucalc_document,trucalc_orders.group_bank_view_only,1,0,0,0
-access_trucalc_document_vendor_portal,trucalc document vendor portal,model_trucalc_document,trucalc_orders.group_vendor_portal,1,0,1,0

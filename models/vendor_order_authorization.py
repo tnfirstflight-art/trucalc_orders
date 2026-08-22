@@ -20,6 +20,10 @@ class TruCalcOrderVendorAuthorization(models.Model):
     _description = "Trusted Vendor Order Authorization"
     _order = "authorized_at desc, id desc"
 
+    _active_vendor_order_idx = models.Index(
+        "(vendor_id, order_id) WHERE active IS TRUE"
+    )
+
     order_id = fields.Many2one(
         "trucalc.order", required=True, readonly=True, index=True, ondelete="cascade"
     )

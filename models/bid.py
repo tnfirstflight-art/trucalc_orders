@@ -13,18 +13,54 @@ class TruCalcBid(models.Model):
     invitation_id = fields.Many2one(
         "trucalc.bid.invitation", string="Invitation", required=True,
         index=True, ondelete="restrict",
+        groups=(
+            "trucalc_orders.group_trucalc_admin,"
+            "trucalc_orders.group_trucalc_operations,"
+            "trucalc_orders.group_trucalc_reviewer,"
+            "trucalc_orders.group_bank_admin,"
+            "trucalc_orders.group_bank_requestor,"
+            "trucalc_orders.group_bank_view_only"
+        ),
     )
     order_id = fields.Many2one(
         "trucalc.order", string="Order", related="invitation_id.order_id",
         store=True, readonly=True, required=True, index=True,
+        groups=(
+            "trucalc_orders.group_trucalc_admin,"
+            "trucalc_orders.group_trucalc_operations,"
+            "trucalc_orders.group_trucalc_reviewer,"
+            "trucalc_orders.group_bank_admin,"
+            "trucalc_orders.group_bank_requestor,"
+            "trucalc_orders.group_bank_view_only"
+        ),
+    )
+    vendor_order_number = fields.Char(
+        string="Order Number", related="invitation_id.order_id.order_number",
+        store=True, readonly=True,
     )
     company_id = fields.Many2one(
         "res.company", string="Company", related="invitation_id.company_id",
         store=True, readonly=True, index=True,
+        groups=(
+            "trucalc_orders.group_trucalc_admin,"
+            "trucalc_orders.group_trucalc_operations,"
+            "trucalc_orders.group_trucalc_reviewer,"
+            "trucalc_orders.group_bank_admin,"
+            "trucalc_orders.group_bank_requestor,"
+            "trucalc_orders.group_bank_view_only"
+        ),
     )
     vendor_id = fields.Many2one(
         "trucalc.vendor", string="Vendor", related="invitation_id.vendor_id",
         store=True, readonly=True, required=True, index=True,
+        groups=(
+            "trucalc_orders.group_trucalc_admin,"
+            "trucalc_orders.group_trucalc_operations,"
+            "trucalc_orders.group_trucalc_reviewer,"
+            "trucalc_orders.group_bank_admin,"
+            "trucalc_orders.group_bank_requestor,"
+            "trucalc_orders.group_bank_view_only"
+        ),
     )
     round_number = fields.Integer(
         string="Bidding Round", related="invitation_id.round_number",

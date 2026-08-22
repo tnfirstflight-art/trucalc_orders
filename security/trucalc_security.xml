@@ -108,4 +108,19 @@
                eval="[(4, ref('base.group_user'))]"/>
     </record>
 
+    <record id="rule_vendor_order_projection" model="ir.rule">
+        <field name="name">Vendor Order Projection</field>
+        <field name="model_id" ref="model_trucalc_vendor_order"/>
+        <field name="domain_force">
+            [('vendor_id', '=', user.trucalc_vendor_id.id or 0)]
+        </field>
+        <field name="groups"
+               eval="[(4, ref('group_vendor_portal'))]"/>
+    </record>
+
+    <!-- These legacy ACL records must be deleted during upgrade; omitting their
+         CSV rows alone would leave the already-installed database rows active. -->
+    <delete id="access_trucalc_order_vendor_portal" model="ir.model.access"/>
+    <delete id="access_trucalc_document_vendor_portal" model="ir.model.access"/>
+
 </odoo>
