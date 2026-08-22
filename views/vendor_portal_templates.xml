@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <template id="portal_my_home_trucalc_orders"
+              name="My TruCalc Orders"
+              inherit_id="portal.portal_my_home"
+              priority="30">
+        <xpath expr="//div[hasclass('o_portal_docs')]" position="before">
+            <t t-set="portal_vendor_category_enable" t-value="True"/>
+        </xpath>
+        <div id="portal_vendor_category" position="inside">
+            <t t-if="request.env.user.has_group('trucalc_orders.group_vendor_portal')"
+               t-call="portal.portal_docs_entry">
+                <t t-set="title">My TruCalc Orders</t>
+                <t t-set="text">View your authorized TruCalc orders</t>
+                <t t-set="url" t-value="'/my/trucalc/orders'"/>
+                <t t-set="config_card" t-value="True"/>
+            </t>
+        </div>
+    </template>
+
+    <template id="portal_trucalc_order_breadcrumbs"
+              name="TruCalc Order Breadcrumbs"
+              inherit_id="portal.portal_breadcrumbs"
+              priority="30">
+        <xpath expr="//ol[hasclass('o_portal_submenu')]" position="inside">
+            <li t-if="page_name in ('trucalc_orders', 'trucalc_order')"
+                t-attf-class="breadcrumb-item #{'active' if page_name == 'trucalc_orders' else ''}">
+                <a t-if="page_name == 'trucalc_order'" href="/my/trucalc/orders">
+                    My TruCalc Orders
+                </a>
+                <t t-else="">My TruCalc Orders</t>
+            </li>
+            <li t-if="page_name == 'trucalc_order'" class="breadcrumb-item active">
+                <t t-out="projection.order_number"/>
+            </li>
+        </xpath>
+    </template>
+
+    <template id="portal_my_trucalc_orders" name="My TruCalc Orders">
+        <t t-call="portal.portal_layout">
+            <t t-set="breadcrumbs_searchbar" t-value="True"/>
+            <t t-call="portal.portal_searchbar">
+                <t t-set="title">My TruCalc Orders</t>
+            </t>
+
+            <div t-if="not projections" class="alert alert-info" role="status">
+                You currently have no authorized TruCalc orders.
+            </div>
+
+            <t t-if="projections" t-call="portal.portal_table">
+                <thead>
+                    <tr>
+                        <th>Order</th>
+                        <th>Service</th>
+                        <th>Property</th>
+                        <th>Status</th>
+                        <th>Due</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr t-foreach="projections" t-as="projection">
+                        <td>
+                            <a t-att-href="'/my/trucalc/orders/%s' % projection.order_number">
+                                <t t-out="projection.order_number"/>
+                            </a>
+                        </td>
+                        <td><span t-field="projection.service_type"/></td>
+                        <td>
+                            <div t-out="projection.property_address"/>
+                            <small class="text-muted">
+                                <t t-out="projection.city"/>,
+                                <t t-out="projection.state"/>
+                                <t t-out="projection.zip_code"/>
+                            </small>
+                        </td>
+                        <td><span t-field="projection.vendor_status"/></td>
+                        <td>
+                            <span t-if="projection.due_date" t-field="projection.due_date"/>
+                            <span t-elif="projection.response_deadline"
+                                  t-field="projection.response_deadline"/>
+                            <span t-else="">—</span>
+                        </td>
+                    </tr>
+                </tbody>
+            </t>
+
+            <div t-if="pager" class="d-flex justify-content-center mt-3">
+                <t t-call="portal.pager"/>
+            </div>
+        </t>
+    </template>
+
+    <template id="portal_my_trucalc_order" name="TruCalc Order">
+        <t t-call="portal.portal_layout">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h2 class="mb-0">
+                    TruCalc Order <t t-out="projection.order_number"/>
+                </h2>
+                <a href="/my/trucalc/orders" class="btn btn-outline-secondary">
+                    Back to My TruCalc Orders
+                </a>
+            </div>
+
+            <div class="card">
+                <div class="card-body">
+                    <dl class="row mb-0">
+                        <dt class="col-sm-4">Service</dt>
+                        <dd class="col-sm-8"><span t-field="projection.service_type"/></dd>
+
+                        <dt class="col-sm-4">Property type</dt>
+                        <dd class="col-sm-8"><span t-field="projection.property_type"/></dd>
+
+                        <dt class="col-sm-4">Property address</dt>
+                        <dd class="col-sm-8">
+                            <div t-out="projection.property_address"/>
+                            <div>
+                                <t t-out="projection.city"/>,
+                                <t t-out="projection.state"/>
+                                <t t-out="projection.zip_code"/>
+                            </div>
+                        </dd>
+
+                        <dt class="col-sm-4">Bidding round</dt>
+                        <dd class="col-sm-8" t-out="projection.bidding_round"/>
+
+                        <dt class="col-sm-4">Phase</dt>
+                        <dd class="col-sm-8"><span t-field="projection.vendor_phase"/></dd>
+
+                        <dt class="col-sm-4">Status</dt>
+                        <dd class="col-sm-8"><span t-field="projection.vendor_status"/></dd>
+
+                        <dt t-if="projection.response_deadline" class="col-sm-4">
+                            Response deadline
+                        </dt>
+                        <dd t-if="projection.response_deadline" class="col-sm-8">
+                            <span t-field="projection.response_deadline"/>
+                        </dd>
+
+                        <dt t-if="projection.due_date" class="col-sm-4">Due date</dt>
+                        <dd t-if="projection.due_date" class="col-sm-8">
+                            <span t-field="projection.due_date"/>
+                        </dd>
+
+                        <dt class="col-sm-4">Assigned</dt>
+                        <dd class="col-sm-8">
+                            <t t-out="'Yes' if projection.is_assigned else 'No'"/>
+                        </dd>
+
+                        <dt t-if="projection.is_assigned" class="col-sm-4">Agreed fee</dt>
+                        <dd t-if="projection.is_assigned" class="col-sm-8">
+                            <span t-field="projection.agreed_vendor_fee"/>
+                        </dd>
+                    </dl>
+                </div>
+            </div>
+        </t>
+    </template>
+</odoo>
