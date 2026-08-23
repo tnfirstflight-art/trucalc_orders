@@ -38,6 +38,7 @@ class TestVendorOrderProjection(TransactionCase):
             "company_id": self.env.company.id,
             "service_type": "evaluation", "property_type": "single_family",
         })
+        order.with_user(self.admin).action_accept_request()
         order.with_user(self.admin).action_bid_requested()
         return order
 

@@ -1,5 +1,6 @@
 from odoo import api, fields, models, _
 from odoo.exceptions import AccessError, ValidationError
+from markupsafe import escape
 
 
 class EvaluationOrder(models.Model):
@@ -124,6 +125,7 @@ class EvaluationOrder(models.Model):
     status = fields.Selection(
         [
             ("new", "New"),
+            ("accepted", "Accepted"),
             ("bid_requested", "Bid Requested"),
             ("assigned", "Assigned"),
             ("report_received", "Report Received"),
@@ -131,6 +133,7 @@ class EvaluationOrder(models.Model):
             ("under_review", "Under Review"),
             ("completed", "Completed"),
             ("cancelled", "Cancelled"),
+            ("declined", "Declined"),
         ],
         string="Status",
         default="new",
@@ -139,6 +142,12 @@ class EvaluationOrder(models.Model):
 
     notes = fields.Text(
         string="Notes",
+    )
+
+    decline_reason = fields.Text(
+        string="Reason for Decline",
+        readonly=True,
+        copy=False,
     )
 
     reviewer_id = fields.Many2one(
@@ -236,6 +245,8 @@ class EvaluationOrder(models.Model):
     def write(self, vals):
         if "vendor_authorization_ids" in vals:
             raise AccessError(_("Vendor Order authorization is server-maintained."))
+        if "decline_reason" in vals:
+            raise AccessError(_("The decline reason requires the controlled decline action."))
         if self.env.user._trucalc_has_bank_role():
             self.env.user._trucalc_bank_identity()
             if {"company_id", "requestor_company_id", "requestor_id"} & vals.keys():
@@ -246,10 +257,17 @@ class EvaluationOrder(models.Model):
         if "status" in vals:
             protected_transitions = {
                 ("new", "bid_requested"),
+                ("new", "accepted"),
+                ("new", "declined"),
+                ("accepted", "bid_requested"),
                 ("assigned", "bid_requested"),
                 ("bid_requested", "assigned"),
             }
-            if any((order.status, vals["status"]) in protected_transitions for order in self):
+            if any(
+                order.status in ("new", "declined")
+                or (order.status, vals["status"]) in protected_transitions
+                for order in self
+            ):
                 raise AccessError(_("This order status transition requires an explicit action."))
         result = super().write(vals)
         if vals.get("status") in ("completed", "cancelled"):
@@ -271,6 +289,15 @@ class EvaluationOrder(models.Model):
         ):
             raise AccessError(_("Only TruCalc bid managers may perform this operation."))
 
+    @api.model
+    @api.private
+    def _require_intake_manager(self):
+        if not (
+            self.env.user.has_group("trucalc_orders.group_trucalc_admin")
+            or self.env.user.has_group("trucalc_orders.group_trucalc_operations")
+        ):
+            raise AccessError(_("Only TruCalc intake managers may perform this operation."))
+
     @api.private
     def _lock_for_bid_lifecycle(self):
         self.ensure_one()
@@ -283,6 +310,60 @@ class EvaluationOrder(models.Model):
         self.invalidate_recordset(
             ["status", "bidding_round", "assigned_vendor_id", "vendor_fee"]
         )
+
+    @api.private
+    def _validate_new_intake_disposition(self):
+        self.ensure_one()
+        if (
+            self.status != "new"
+            or self.bidding_round != 0
+            or self.invitation_ids
+            or self.bid_ids
+            or self.assigned_vendor_id
+        ):
+            raise ValidationError(
+                _("Only a New request without bid or assignment history may be disposed.")
+            )
+
+    def action_accept_request(self):
+        self._require_intake_manager()
+        self.ensure_one()
+        self._lock_for_bid_lifecycle()
+        self._validate_new_intake_disposition()
+        self._controlled_lifecycle_write({"status": "accepted"})
+        self.message_post(body=_("Request accepted."))
+        return True
+
+    def action_open_decline_wizard(self):
+        self._require_intake_manager()
+        self.ensure_one()
+        self._validate_new_intake_disposition()
+        return {
+            "type": "ir.actions.act_window",
+            "name": _("Decline Request"),
+            "res_model": "trucalc.order.decline.wizard",
+            "view_mode": "form",
+            "view_id": self.env.ref(
+                "trucalc_orders.view_trucalc_order_decline_wizard_form"
+            ).id,
+            "target": "new",
+            "context": {"default_order_id": self.id},
+        }
+
+    def action_decline_request(self, reason):
+        self._require_intake_manager()
+        self.ensure_one()
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValidationError(_("A meaningful reason for decline is required."))
+        reason = reason.strip()
+        self._lock_for_bid_lifecycle()
+        self._validate_new_intake_disposition()
+        self._controlled_lifecycle_write({
+            "status": "declined",
+            "decline_reason": reason,
+        })
+        self.message_post(body=_("Request declined. Reason: %s") % escape(reason))
+        return True
 
     @api.onchange("assigned_vendor_id", "service_type")
     def _onchange_vendor_fee(self):
@@ -336,12 +417,18 @@ class EvaluationOrder(models.Model):
         self._require_bid_manager()
         self.ensure_one()
         self._lock_for_bid_lifecycle()
-        if self.status != "new" or self.bidding_round != 0 or self.invitation_ids:
-            raise ValidationError(_("Only a new order without bid history may start bidding."))
+        if (
+            self.status != "accepted"
+            or self.bidding_round != 0
+            or self.invitation_ids
+            or self.bid_ids
+            or self.assigned_vendor_id
+        ):
+            raise ValidationError(_("Only an Accepted order without bid history may start bidding."))
         self._controlled_lifecycle_write({"status": "bid_requested", "bidding_round": 1})
         self.env["trucalc.bid.audit"]._log_event(
             "bidding_started", self,
-            old_values={"status": "new", "bidding_round": 0},
+            old_values={"status": "accepted", "bidding_round": 0},
             new_values={"status": "bid_requested", "bidding_round": 1},
         )
         return True
@@ -390,4 +477,6 @@ class EvaluationOrder(models.Model):
         self.status = "completed"
 
     def action_cancelled(self):
+        if any(order.status in ("new", "declined") for order in self):
+            raise ValidationError(_("New and Declined requests cannot be cancelled."))
         self.status = "cancelled"

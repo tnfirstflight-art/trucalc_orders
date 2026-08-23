@@ -204,6 +204,7 @@ class TestVendorPortalProvisioning(TransactionCase):
             "company_id": self.env.company.id,
             "service_type": "evaluation",
         })
+        order.with_user(self.admin).action_accept_request()
         order.with_user(self.admin).action_bid_requested()
         invitation = self.env["trucalc.bid.invitation"].with_user(self.admin).create({
             "order_id": order.id,

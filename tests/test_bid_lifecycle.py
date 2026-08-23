@@ -93,6 +93,7 @@ class TestBidLifecycle(TransactionCase):
         manager = manager or self.admin
         order = order or self._order(manager)
         if order.status == "new":
+            order.with_user(manager).action_accept_request()
             order.with_user(manager).action_bid_requested()
         values = {"order_id": order.id, "vendor_id": (vendor or self.vendor_a).id}
         if deadline:
@@ -109,6 +110,7 @@ class TestBidLifecycle(TransactionCase):
     def test_authority_start_and_invitation(self):
         for manager in (self.admin, self.ops):
             order = self._order(manager)
+            order.with_user(manager).action_accept_request()
             order.with_user(manager).action_bid_requested()
             self.assertEqual((order.status, order.bidding_round), ("bid_requested", 1))
             self.env["trucalc.bid.invitation"].with_user(manager).create(
@@ -136,6 +138,7 @@ class TestBidLifecycle(TransactionCase):
         model = self.env["trucalc.bid.invitation"].with_user(self.admin)
         with self.assertRaises(ValidationError):
             model.create({"order_id": order.id, "vendor_id": self.vendor_a.id})
+        order.action_accept_request()
         order.action_bid_requested()
         with self.assertRaises(ValidationError):
             model.create({"order_id": order.id, "vendor_id": self.reviewer_vendor.id})
@@ -215,6 +218,7 @@ class TestBidLifecycle(TransactionCase):
 
     def test_winner_selection_and_reopen(self):
         order = self._order()
+        order.action_accept_request()
         order.action_bid_requested()
         invitation_a = self._invitation(order=order)
         invitation_b = self._invitation(vendor=self.vendor_b, order=order)
@@ -246,6 +250,7 @@ class TestBidLifecycle(TransactionCase):
                        {"vendor_fee": 1}, {"status": "bid_requested"}):
             with self.assertRaises(AccessError):
                 order.write(values)
+        order.action_accept_request()
         order.action_bid_requested()
         with self.assertRaises(AccessError):
             order.write({"status": "assigned"})
@@ -279,6 +284,7 @@ class TestBidLifecycle(TransactionCase):
 
     def test_audit_is_immutable(self):
         order = self._order()
+        order.action_accept_request()
         order.action_bid_requested()
         audit = self.env["trucalc.bid.audit"].search([
             ("action", "=", "bidding_started"), ("order_id", "=", order.id)
@@ -321,6 +327,7 @@ class TestBidLifecycleConcurrency(TransactionCase):
                 "company_id": env.company.id,
                 "service_type": "evaluation",
             })
+            order.action_accept_request()
             order.action_bid_requested()
             invitation_a = env["trucalc.bid.invitation"].create({
                 "order_id": order.id, "vendor_id": vendor_a.id,

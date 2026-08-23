@@ -13,6 +13,8 @@ access_trucalc_vendor_user,trucalc vendor operations,model_trucalc_vendor,trucal
 access_trucalc_vendor_reviewer,trucalc vendor reviewer,model_trucalc_vendor,trucalc_orders.group_trucalc_reviewer,1,0,0,0
 access_trucalc_vendor_portal,trucalc vendor portal,model_trucalc_vendor,trucalc_orders.group_vendor_portal,1,0,0,0
 access_trucalc_vendor_portal_provision_admin,trucalc vendor portal provision administrator,model_trucalc_vendor_portal_provision,trucalc_orders.group_trucalc_admin,1,1,1,1
+access_trucalc_order_decline_wizard_admin,trucalc order decline wizard administrator,model_trucalc_order_decline_wizard,trucalc_orders.group_trucalc_admin,1,1,1,1
+access_trucalc_order_decline_wizard_operations,trucalc order decline wizard operations,model_trucalc_order_decline_wizard,trucalc_orders.group_trucalc_operations,1,1,1,1
 
 access_vendor_fee_user,trucalc vendor fee administrator,model_trucalc_vendor_fee,trucalc_orders.group_trucalc_admin,1,1,1,1
 access_trucalc_vendor_fee_operations,trucalc vendor fee operations,model_trucalc_vendor_fee,trucalc_orders.group_trucalc_operations,1,1,1,0

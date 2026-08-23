@@ -32,6 +32,22 @@
                 <header>
 
                     <button
+                        name="action_accept_request"
+                        string="Accept"
+                        type="object"
+                        class="btn-primary"
+                        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                        invisible="not id or status != 'new'"/>
+
+                    <button
+                        name="action_open_decline_wizard"
+                        string="Decline"
+                        type="object"
+                        class="btn-secondary"
+                        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                        invisible="not id or status != 'new'"/>
+
+                    <button
                         name="action_reopen_bidding"
                         string="Reopen Bidding"
                         type="object"
@@ -62,7 +78,8 @@
                     <field
                         name="status"
                         widget="statusbar"
-                        statusbar_visible="new,bid_requested,assigned,report_received,reviewer_assigned,under_review,completed"/>
+                        statusbar_visible="new,accepted,bid_requested,assigned,report_received,reviewer_assigned,under_review,completed"
+                        readonly="1"/>
 
                 </header>
 
@@ -106,18 +123,20 @@
                             <field name="requestor_id" readonly="1"/>
                             <field name="company_id"/>
 
-                            <field name="assigned_vendor_id"/>
+                            <field name="assigned_vendor_id" readonly="status in ('new', 'accepted', 'declined')"/>
 
-                            <field name="fee_override"/>
+                            <field name="fee_override" readonly="status in ('new', 'accepted', 'declined')"/>
 
-                            <field name="reviewer_id"/>
+                            <field name="reviewer_id" readonly="status in ('new', 'accepted', 'declined')"/>
 
-                            <field name="review_fee"/>
+                            <field name="review_fee" readonly="status in ('new', 'accepted', 'declined')"/>
 
                             <field name="order_date"/>
                             <field name="due_date"/>
 
-                            <field name="status"/>
+                            <field name="status" readonly="1"/>
+
+                            <field name="decline_reason" invisible="status != 'declined'" readonly="1"/>
 
                         </group>
 

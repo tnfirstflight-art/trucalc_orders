@@ -59,6 +59,7 @@ class TestVendorOrderPortal(HttpCase):
             "service_type": "evaluation",
             "property_type": "single_family",
         })
+        order.with_user(cls.admin).action_accept_request()
         order.with_user(cls.admin).action_bid_requested()
         invitation = cls.env["trucalc.bid.invitation"].with_user(cls.admin).create({
             "order_id": order.id,
