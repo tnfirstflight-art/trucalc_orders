@@ -24,6 +24,17 @@
         <field name="model">trucalc.vendor</field>
         <field name="arch" type="xml">
             <form string="Vendor">
+                <header>
+                    <button
+                        name="%(action_trucalc_vendor_portal_provision)d"
+                        string="Provision Vendor Portal User"
+                        type="action"
+                        class="btn-primary"
+                        groups="trucalc_orders.group_trucalc_admin"
+                        invisible="not active"
+                        context="{'default_vendor_id': id}"
+                    />
+                </header>
                 <sheet>
 
                     <div class="oe_title">

@@ -1,5 +1,10 @@
-from odoo import api, fields, models, _
+import logging
+
+from odoo import Command, api, fields, models, _
 from odoo.exceptions import AccessError, ValidationError
+
+
+_logger = logging.getLogger(__name__)
 
 
 class ResUsers(models.Model):
@@ -116,3 +121,63 @@ class ResUsers(models.Model):
         ):
             raise AccessError(_("TruCalc bank authorization is not configured."))
         return user.trucalc_bank_company_id
+
+    @api.private
+    def _trucalc_provision_vendor_portal(self, vendor, actor):
+        self.ensure_one()
+        vendor.ensure_one()
+        actor.ensure_one()
+
+        if actor != self.env.user or not actor.has_group(
+            "trucalc_orders.group_trucalc_admin"
+        ):
+            raise AccessError(_("Only TruCalc Administrators may provision vendor users."))
+
+        target = self.sudo().exists()
+        selected_vendor = vendor.sudo().exists()
+        if not target or not selected_vendor or not selected_vendor.active:
+            raise ValidationError(_("The portal user and an active vendor are required."))
+
+        groups = target.all_group_ids
+        persona = target._trucalc_persona_membership()
+        portal_group = self.env.ref("base.group_portal")
+        internal_group = self.env.ref("base.group_user")
+        vendor_group = self.env.ref("trucalc_orders.group_vendor_portal")
+        if (
+            not target.active
+            or not target.share
+            or portal_group not in groups
+            or internal_group in groups
+            or persona["internal"]
+            or persona["bank"]
+            or persona["vendor"]
+            or target.trucalc_bank_company_id
+            or target.trucalc_vendor_id
+            or vendor_group in groups
+        ):
+            raise ValidationError(_("The selected user is not eligible for vendor provisioning."))
+
+        target.write({
+            "trucalc_vendor_id": selected_vendor.id,
+            "group_ids": [Command.link(vendor_group.id)],
+        })
+        target.invalidate_recordset(["group_ids", "trucalc_vendor_id"])
+        if (
+            target.trucalc_vendor_id != selected_vendor
+            or not target.has_group("trucalc_orders.group_vendor_portal")
+            or target.has_group("base.group_user")
+        ):
+            raise ValidationError(_("Vendor persona provisioning did not complete safely."))
+
+        _logger.info(
+            "TruCalc vendor portal provisioning succeeded: db=%s actor_id=%s "
+            "actor_login=%s target_user_id=%s target_login=%s vendor_id=%s vendor_name=%s",
+            self.env.cr.dbname,
+            actor.id,
+            actor.login,
+            target.id,
+            target.login,
+            selected_vendor.id,
+            selected_vendor.name,
+        )
+        return True

@@ -1,6 +1,6 @@
 {
     'name': 'TruCalc Orders',
-    'version': '1.6',
+    'version': '1.7',
     'author': 'TruCalc',
     'license': 'LGPL-3',
     'category': 'Services',
@@ -15,6 +15,7 @@
         'security/ir.model.access.csv',
         'data/order_sequence.xml',
         'data/vendor_authorization_cron.xml',
+        'views/vendor_portal_provision_views.xml',
         'views/evaluation_order_views.xml',
         'views/vendor_views.xml',
         'views/document_views.xml',
