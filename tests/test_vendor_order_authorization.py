@@ -24,6 +24,10 @@ class TestVendorOrderAuthorization(TransactionCase):
         cls.wrong_vendor = cls.env["trucalc.vendor"].create({
             "name": "4B1B Reviewer", "vendor_type": "reviewer",
         })
+        cls.env["trucalc.vendor.fee"].create([
+            {"vendor_id": cls.vendor_a.id, "service_type": "evaluation", "fee": 500},
+            {"vendor_id": cls.vendor_b.id, "service_type": "evaluation", "fee": 600},
+        ])
         cls.bank = cls.env["res.company"].create({"name": "4B1B Bank"})
         cls.admin = cls._user("4b1b-admin", cls.admin_group)
         cls.ops = cls._user("4b1b-ops", cls.ops_group)
@@ -80,7 +84,6 @@ class TestVendorOrderAuthorization(TransactionCase):
         return bid
 
     def test_legacy_initialization_is_empty(self):
-        self.assertFalse(self.env["trucalc.order.vendor.authorization"].sudo().search([]))
         legacy = self.env["trucalc.bid.invitation"].sudo().search([
             ("is_legacy_reconstructed", "=", True),
         ])

@@ -20,6 +20,10 @@ class TestVendorOrderProjection(TransactionCase):
         cls.other_vendor = cls.env["trucalc.vendor"].create({
             "name": "4B2A Other Vendor", "vendor_type": "appraiser",
         })
+        cls.env["trucalc.vendor.fee"].create([
+            {"vendor_id": cls.vendor.id, "service_type": "evaluation", "fee": 500},
+            {"vendor_id": cls.other_vendor.id, "service_type": "evaluation", "fee": 600},
+        ])
         cls.vendor_user = cls.env["res.users"].with_context(
             no_reset_password=True
         ).create({
@@ -33,10 +37,13 @@ class TestVendorOrderProjection(TransactionCase):
     def _order(self):
         order = self.env["trucalc.order"].with_user(self.admin).create({
             "borrower": "Forbidden Borrower",
+            "loan_number": "FORBIDDEN-LOAN-NUMBER",
+            "loan_amount": 987654.32,
             "property_address": "1 Safe Street",
             "city": "Memphis", "state": "TN", "zip_code": "38103",
             "company_id": self.env.company.id,
             "service_type": "evaluation", "property_type": "single_family",
+            "due_date": fields.Date.today(),
         })
         order.with_user(self.admin).action_accept_request()
         order.with_user(self.admin).action_bid_requested()
@@ -57,7 +64,7 @@ class TestVendorOrderProjection(TransactionCase):
         forbidden = {
             "vendor_id", "order_id", "company_id", "requestor_id", "reviewer_id",
             "document_ids", "invitation_id", "authorization_id", "message_ids",
-            "activity_ids", "attachment_ids", "borrower", "loan_number",
+            "activity_ids", "attachment_ids", "loan_number",
             "loan_amount", "notes", "review_fee", "fee_override",
         }
         self.assertFalse(public & forbidden)
@@ -73,7 +80,8 @@ class TestVendorOrderProjection(TransactionCase):
         self.assertEqual(own.vendor_phase, "invitation")
         self.assertEqual(own.vendor_status, "open_for_bid")
         self.assertEqual(own.response_deadline, invitation.response_deadline)
-        self.assertFalse(own.due_date)
+        self.assertEqual(own.borrower, "Forbidden Borrower")
+        self.assertEqual(own.due_date, invitation.order_id.due_date)
         self.assertFalse(own.is_assigned)
         self.assertEqual(own.agreed_vendor_fee, 0)
 

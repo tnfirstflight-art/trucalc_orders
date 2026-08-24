@@ -10,6 +10,7 @@ class TruCalcVendorOrder(models.Model):
     _order = "order_number, id"
 
     order_number = fields.Char(readonly=True)
+    borrower = fields.Char(readonly=True)
     service_type = fields.Selection(
         selection=lambda self: self.env["trucalc.order"]._fields[
             "service_type"
@@ -58,6 +59,7 @@ class TruCalcVendorOrder(models.Model):
                     authorization_record.id AS id,
                     authorization_record.vendor_id AS vendor_id,
                     order_record.order_number AS order_number,
+                    order_record.borrower AS borrower,
                     order_record.service_type AS service_type,
                     order_record.property_type AS property_type,
                     order_record.property_address AS property_address,
@@ -75,8 +77,7 @@ class TruCalcVendorOrder(models.Model):
                     END AS vendor_status,
                     CASE WHEN authorization_record.source = 'invitation'
                         THEN authorization_record.expires_at ELSE NULL END AS response_deadline,
-                    CASE WHEN authorization_record.source = 'assignment'
-                        THEN order_record.due_date ELSE NULL END AS due_date,
+                    order_record.due_date AS due_date,
                     (authorization_record.source = 'assignment') AS is_assigned,
                     CASE WHEN authorization_record.source = 'assignment'
                         THEN order_record.vendor_fee ELSE NULL END AS agreed_vendor_fee

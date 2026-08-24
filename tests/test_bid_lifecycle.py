@@ -34,6 +34,10 @@ class TestBidLifecycle(TransactionCase):
         cls.reviewer_vendor = cls.env["trucalc.vendor"].create(
             {"name": "4A3 Reviewer", "vendor_type": "reviewer"}
         )
+        cls.env["trucalc.vendor.fee"].create([
+            {"vendor_id": cls.vendor_a.id, "service_type": "evaluation", "fee": 500},
+            {"vendor_id": cls.vendor_b.id, "service_type": "evaluation", "fee": 600},
+        ])
         cls.bank_company = cls.env["res.company"].create({"name": "4A3 Bank"})
         cls.admin = cls._user("4a3-admin", cls.admin_group)
         cls.ops = cls._user("4a3-ops", cls.ops_group)
@@ -321,6 +325,10 @@ class TestBidLifecycleConcurrency(TransactionCase):
             vendor_b = env["trucalc.vendor"].create({
                 "name": "4A3 Concurrency B", "vendor_type": "appraiser"
             })
+            env["trucalc.vendor.fee"].create([
+                {"vendor_id": vendor_a.id, "service_type": "evaluation", "fee": 500},
+                {"vendor_id": vendor_b.id, "service_type": "evaluation", "fee": 600},
+            ])
             order = env["trucalc.order"].create({
                 "borrower": "4A3 Concurrency",
                 "property_address": "2 Lock Row",

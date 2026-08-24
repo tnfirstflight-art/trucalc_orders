@@ -1,3 +1,5 @@
+from lxml import etree
+
 from odoo import Command, fields
 from odoo.exceptions import AccessError
 from odoo.tests import HttpCase, tagged
@@ -24,6 +26,10 @@ class TestVendorOrderPortal(HttpCase):
         cls.vendor_b = cls.env["trucalc.vendor"].create({
             "name": "4B2B Vendor B", "vendor_type": "appraiser",
         })
+        cls.env["trucalc.vendor.fee"].create([
+            {"vendor_id": cls.vendor_a.id, "service_type": "evaluation", "fee": 500},
+            {"vendor_id": cls.vendor_b.id, "service_type": "evaluation", "fee": 600},
+        ])
         cls.vendor_user_a = cls._create_vendor_user("a", cls.vendor_a)
         cls.vendor_user_b = cls._create_vendor_user("b", cls.vendor_b)
         cls.plain_portal_user = cls.env["res.users"].with_context(
@@ -51,6 +57,8 @@ class TestVendorOrderPortal(HttpCase):
     def _authorized_order(cls, vendor, address):
         order = cls.env["trucalc.order"].with_user(cls.admin).create({
             "borrower": f"Forbidden Borrower {address}",
+            "loan_number": "FORBIDDEN-LOAN-NUMBER-%s" % address,
+            "loan_amount": 987654.32,
             "property_address": address,
             "city": "Memphis",
             "state": "TN",
@@ -58,6 +66,7 @@ class TestVendorOrderPortal(HttpCase):
             "company_id": cls.env.company.id,
             "service_type": "evaluation",
             "property_type": "single_family",
+            "due_date": fields.Date.today(),
         })
         order.with_user(cls.admin).action_accept_request()
         order.with_user(cls.admin).action_bid_requested()
@@ -104,6 +113,7 @@ class TestVendorOrderPortal(HttpCase):
         listing_a = self.url_open("/my/trucalc/orders").text
         self.assertIn(order_a.order_number, listing_a)
         self.assertIn("411 Vendor A Street", listing_a)
+        self.assertIn("Forbidden Borrower 411 Vendor A Street", listing_a)
         self.assertNotIn(order_b.order_number, listing_a)
         self.assertNotIn("422 Vendor B Street", listing_a)
         detail_a = self.url_open(
@@ -111,6 +121,7 @@ class TestVendorOrderPortal(HttpCase):
         ).text
         self.assertIn(order_a.order_number, detail_a)
         self.assertIn("411 Vendor A Street", detail_a)
+        self.assertIn("Forbidden Borrower 411 Vendor A Street", detail_a)
         self.assertEqual(
             self.url_open(f"/my/trucalc/orders/{order_b.order_number}").status_code,
             404,
@@ -202,8 +213,18 @@ class TestVendorOrderPortal(HttpCase):
             f"/my/trucalc/orders/{order.order_number}"
         ).text
         self.assertIn("466 Safe Output Street", rendered)
+        labels = {
+            label.strip()
+            for label in etree.HTML(rendered).xpath("//dt/text()")
+            if label.strip()
+        }
+        self.assertFalse({"Bidding round", "Phase", "Assigned"} & labels)
+        self.assertTrue({
+            "Service", "Borrower", "Property type", "Property address",
+            "Status", "Response deadline", "Due date",
+        } <= labels)
+        self.assertIn(str(order.due_date.year), rendered)
         for forbidden in (
-            "Forbidden Borrower",
             "order_id",
             "vendor_id",
             "company_id",
@@ -213,5 +234,7 @@ class TestVendorOrderPortal(HttpCase):
             "message_ids",
             "activity_ids",
             self.vendor_b.name,
+            "FORBIDDEN-LOAN-NUMBER",
+            "987654.32",
         ):
             self.assertNotIn(forbidden, rendered)

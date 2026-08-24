@@ -10,6 +10,9 @@ class TruCalcBidAudit(models.Model):
     action = fields.Selection(
         [
             ("bidding_started", "Bidding Started"),
+            ("solicitation_created", "Solicitation Created"),
+            ("vendors_added", "Vendors Added"),
+            ("deadline_extended", "Deadline Extended"),
             ("bidding_reopened", "Bidding Reopened"),
             ("invitation_created", "Invitation Created"),
             ("invitation_revoked", "Invitation Revoked"),

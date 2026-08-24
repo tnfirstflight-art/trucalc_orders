@@ -15,7 +15,7 @@
                 <field name="company_id"/>
                 <field name="status"/>
                 <field name="assigned_vendor_id"/>
-                <field name="due_date"/>
+                <field name="due_date" options="{'numeric': True}"/>
             </list>
         </field>
     </record>
@@ -46,6 +46,30 @@
                         class="btn-secondary"
                         groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
                         invisible="not id or status != 'new'"/>
+
+                    <button
+                        name="action_open_request_bids_wizard"
+                        string="Request Bids"
+                        type="object"
+                        class="btn-primary"
+                        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                        invisible="not id or status != 'accepted'"/>
+
+                    <button
+                        name="action_open_manage_bid_requests_wizard"
+                        string="Manage Bid Requests"
+                        type="object"
+                        class="btn-secondary"
+                        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                        invisible="not id or status != 'bid_requested'"/>
+
+                    <button
+                        name="action_open_extend_bid_deadline_wizard"
+                        string="Extend Bid Deadline"
+                        type="object"
+                        class="btn-secondary"
+                        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                        invisible="not id or status != 'bid_requested'"/>
 
                     <button
                         name="action_reopen_bidding"
@@ -132,7 +156,7 @@
                             <field name="review_fee" readonly="status in ('new', 'accepted', 'declined')"/>
 
                             <field name="order_date"/>
-                            <field name="due_date"/>
+                            <field name="due_date" options="{'numeric': True}"/>
 
                             <field name="status" readonly="1"/>
 

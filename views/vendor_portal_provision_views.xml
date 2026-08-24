@@ -8,15 +8,20 @@
             <form string="Provision Vendor Portal User">
                 <group>
                     <field name="vendor_id" options="{'no_create': True, 'no_open': True}"/>
+                    <field name="vendor_email"/>
+                </group>
+                <separator string="Use Existing Portal User"/>
+                <group>
                     <field name="user_id"
                            domain="[('active', '=', True), ('share', '=', True), ('all_group_ids', 'in', [%(base.group_portal)d]), ('all_group_ids', 'not in', [%(base.group_user)d, %(trucalc_orders.group_trucalc_admin)d, %(trucalc_orders.group_trucalc_operations)d, %(trucalc_orders.group_trucalc_reviewer)d, %(trucalc_orders.group_bank_admin)d, %(trucalc_orders.group_bank_requestor)d, %(trucalc_orders.group_bank_view_only)d, %(trucalc_orders.group_vendor_portal)d]), ('trucalc_bank_company_id', '=', False), ('trucalc_vendor_id', '=', False)]"
                            options="{'no_create': True, 'no_open': True}"/>
                 </group>
                 <div class="alert alert-info" role="status">
-                    This establishes the TruCalc Vendor Portal persona only. It does not authorize access to any Order.
+                    Select an eligible existing Portal User, or create and invite one using the Vendor Email. Provisioning does not authorize access to any Order.
                 </div>
                 <footer>
-                    <button name="action_provision" string="Provision" type="object" class="btn-primary"/>
+                    <button name="action_provision" string="Use Existing Portal User" type="object" class="btn-primary"/>
+                    <button name="action_create_and_invite" string="Create and Invite Portal User" type="object" class="btn-secondary"/>
                     <button string="Cancel" special="cancel" class="btn-secondary"/>
                 </footer>
             </form>

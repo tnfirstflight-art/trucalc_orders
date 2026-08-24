@@ -141,6 +141,11 @@ class TruCalcBidInvitation(models.Model):
                 raise ValidationError(_("The order is not in an active bidding round."))
             if not expected_type or vendor.vendor_type != expected_type:
                 raise ValidationError(_("The vendor is not compatible with this service."))
+            if not self.env["trucalc.vendor.fee"].search_count([
+                ("vendor_id", "=", vendor.id),
+                ("service_type", "=", order.service_type),
+            ]):
+                raise ValidationError(_("The vendor has no matching fee schedule."))
             if self.search_count([
                 ("order_id", "=", order.id),
                 ("vendor_id", "=", vendor.id),

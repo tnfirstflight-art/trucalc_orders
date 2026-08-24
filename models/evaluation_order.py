@@ -1,6 +1,14 @@
-from odoo import api, fields, models, _
+from odoo import api, fields, models, tools, _
 from odoo.exceptions import AccessError, ValidationError
 from markupsafe import escape
+
+
+SERVICE_VENDOR_TYPES = {
+    "evaluation": "appraiser",
+    "appraisal": "appraiser",
+    "review": "reviewer",
+    "environmental": "environmental",
+}
 
 
 class EvaluationOrder(models.Model):
@@ -413,6 +421,7 @@ class EvaluationOrder(models.Model):
         else:
             self.review_fee = 0.0
 
+    @api.private
     def action_bid_requested(self):
         self._require_bid_manager()
         self.ensure_one()
@@ -432,6 +441,210 @@ class EvaluationOrder(models.Model):
             new_values={"status": "bid_requested", "bidding_round": 1},
         )
         return True
+
+    @api.private
+    def _eligible_solicitation_vendors(self):
+        self.ensure_one()
+        expected_type = SERVICE_VENDOR_TYPES.get(self.service_type)
+        if not expected_type:
+            return self.env["trucalc.vendor"].browse()
+        fees = self.env["trucalc.vendor.fee"].search([
+            ("service_type", "=", self.service_type),
+            ("vendor_id.active", "=", True),
+            ("vendor_id.vendor_type", "=", expected_type),
+        ])
+        return fees.mapped("vendor_id")
+
+    @api.private
+    def _validate_solicitation_vendors(self, vendors):
+        self.ensure_one()
+        vendors = vendors.exists()
+        if not vendors:
+            raise ValidationError(_("At least one eligible vendor is required."))
+        expected_type = SERVICE_VENDOR_TYPES.get(self.service_type)
+        if not expected_type:
+            raise ValidationError(_("The order service type cannot be solicited."))
+        fee_vendor_ids = set(self.env["trucalc.vendor.fee"].search([
+            ("vendor_id", "in", vendors.ids),
+            ("service_type", "=", self.service_type),
+        ]).mapped("vendor_id").ids)
+        invalid = vendors.filtered(
+            lambda vendor: not vendor.active
+            or vendor.vendor_type != expected_type
+            or vendor.id not in fee_vendor_ids
+        )
+        if invalid:
+            raise ValidationError(_(
+                "Every selected vendor must be active, compatible with the service, "
+                "and have a matching fee schedule."
+            ))
+        return vendors
+
+    @api.private
+    def _validate_future_deadline(self, deadline):
+        parsed = fields.Datetime.to_datetime(deadline)
+        if not parsed or parsed <= fields.Datetime.now():
+            raise ValidationError(_("The Bid Response Deadline must be in the future."))
+        return parsed
+
+    @api.private
+    def _format_response_deadline(self, deadline):
+        return tools.format_datetime(self.env, deadline, dt_format="short")
+
+    @api.private
+    def action_request_vendor_bids(self, vendors, response_deadline):
+        self._require_bid_manager()
+        self.ensure_one()
+        self._lock_for_bid_lifecycle()
+        vendors = self._validate_solicitation_vendors(vendors)
+        deadline = self._validate_future_deadline(response_deadline)
+        self.action_bid_requested()
+        invitations = self.env["trucalc.bid.invitation"].create([
+            {
+                "order_id": self.id,
+                "vendor_id": vendor.id,
+                "response_deadline": deadline,
+            }
+            for vendor in vendors
+        ])
+        if len(invitations) != len(vendors):
+            raise ValidationError(_("The complete vendor solicitation was not created."))
+        vendor_names = ", ".join(vendors.mapped("name"))
+        self.message_post(body=_(
+            "Bid requests sent to %(vendors)s. Response deadline: %(deadline)s."
+        ) % {
+            "vendors": escape(vendor_names),
+            "deadline": self._format_response_deadline(deadline),
+        })
+        self.env["trucalc.bid.audit"]._log_event(
+            "solicitation_created", self,
+            new_values={
+                "vendor_ids": vendors.ids,
+                "response_deadline": fields.Datetime.to_string(deadline),
+            },
+        )
+        return True
+
+    @api.private
+    def _current_round_invitations(self):
+        self.ensure_one()
+        return self.env["trucalc.bid.invitation"].search([
+            ("order_id", "=", self.id),
+            ("round_number", "=", self.bidding_round),
+            ("is_legacy_reconstructed", "=", False),
+        ])
+
+    @api.private
+    def _current_round_deadline(self):
+        invitations = self._current_round_invitations()
+        deadlines = set(invitations.mapped("response_deadline"))
+        if not invitations or False in deadlines or len(deadlines) != 1:
+            raise ValidationError(_("The current bidding round has no single response deadline."))
+        return next(iter(deadlines))
+
+    @api.private
+    def action_add_vendor_bid_requests(self, vendors):
+        self._require_bid_manager()
+        self.ensure_one()
+        self._lock_for_bid_lifecycle()
+        if self.status != "bid_requested" or self.bidding_round <= 0:
+            raise ValidationError(_("Only a Bid Requested order may add vendors."))
+        deadline = self._current_round_deadline()
+        self._validate_future_deadline(deadline)
+        vendors = self._validate_solicitation_vendors(vendors)
+        already_invited = self._current_round_invitations().mapped("vendor_id")
+        if vendors & already_invited:
+            raise ValidationError(_("A selected vendor is already invited for this round."))
+        invitations = self.env["trucalc.bid.invitation"].create([
+            {"order_id": self.id, "vendor_id": vendor.id,
+             "response_deadline": deadline}
+            for vendor in vendors
+        ])
+        if len(invitations) != len(vendors):
+            raise ValidationError(_("The complete additional solicitation was not created."))
+        vendor_names = ", ".join(vendors.mapped("name"))
+        self.message_post(body=_(
+            "Additional bid requests sent to %(vendors)s. Response deadline: %(deadline)s."
+        ) % {
+            "vendors": escape(vendor_names),
+            "deadline": self._format_response_deadline(deadline),
+        })
+        self.env["trucalc.bid.audit"]._log_event(
+            "vendors_added", self,
+            new_values={"vendor_ids": vendors.ids,
+                        "response_deadline": fields.Datetime.to_string(deadline)},
+        )
+        return True
+
+    @api.private
+    def action_extend_bid_deadline(self, new_deadline):
+        self._require_bid_manager()
+        self.ensure_one()
+        self._lock_for_bid_lifecycle()
+        if self.status != "bid_requested" or self.bidding_round <= 0:
+            raise ValidationError(_("Only a Bid Requested order may extend its deadline."))
+        old_deadline = self._current_round_deadline()
+        deadline = self._validate_future_deadline(new_deadline)
+        if deadline <= old_deadline:
+            raise ValidationError(_("The new deadline must be later than the current deadline."))
+        invitations = self._current_round_invitations()
+        if any(invitation.state != "invited" for invitation in invitations):
+            raise ValidationError(_("Only an active current bidding round may be extended."))
+        for invitation in invitations:
+            invitation.action_set_response_deadline(deadline)
+        self.message_post(body=_(
+            "Bid response deadline extended from %(old)s to %(new)s."
+        ) % {
+            "old": self._format_response_deadline(old_deadline),
+            "new": self._format_response_deadline(deadline),
+        })
+        self.env["trucalc.bid.audit"]._log_event(
+            "deadline_extended", self,
+            old_values={"response_deadline": fields.Datetime.to_string(old_deadline)},
+            new_values={"response_deadline": fields.Datetime.to_string(deadline)},
+        )
+        return True
+
+    def action_open_request_bids_wizard(self):
+        self._require_bid_manager()
+        self.ensure_one()
+        if not self.id or self.status != "accepted":
+            raise ValidationError(_("Only a persisted Accepted order may request bids."))
+        return self._solicitation_wizard_action("request")
+
+    def action_open_manage_bid_requests_wizard(self):
+        self._require_bid_manager()
+        self.ensure_one()
+        if self.status != "bid_requested":
+            raise ValidationError(_("Only a Bid Requested order may manage bid requests."))
+        return self._solicitation_wizard_action("manage")
+
+    @api.private
+    def _solicitation_wizard_action(self, mode):
+        return {
+            "type": "ir.actions.act_window",
+            "name": _("Request Bids") if mode == "request" else _("Manage Bid Requests"),
+            "res_model": "trucalc.bid.request.wizard",
+            "view_mode": "form",
+            "view_id": self.env.ref("trucalc_orders.view_trucalc_bid_request_wizard_form").id,
+            "target": "new",
+            "context": {"default_order_id": self.id, "default_mode": mode},
+        }
+
+    def action_open_extend_bid_deadline_wizard(self):
+        self._require_bid_manager()
+        self.ensure_one()
+        if self.status != "bid_requested":
+            raise ValidationError(_("Only a Bid Requested order may extend its deadline."))
+        return {
+            "type": "ir.actions.act_window",
+            "name": _("Extend Bid Deadline"),
+            "res_model": "trucalc.bid.deadline.wizard",
+            "view_mode": "form",
+            "view_id": self.env.ref("trucalc_orders.view_trucalc_bid_deadline_wizard_form").id,
+            "target": "new",
+            "context": {"default_order_id": self.id},
+        }
 
     def action_assigned(self):
         raise AccessError(_("An order may only be assigned by selecting a submitted bid."))

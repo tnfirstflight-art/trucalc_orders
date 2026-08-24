@@ -52,6 +52,7 @@
                     <tr>
                         <th>Order</th>
                         <th>Service</th>
+                        <th>Borrower</th>
                         <th>Property</th>
                         <th>Status</th>
                         <th>Due</th>
@@ -65,6 +66,7 @@
                             </a>
                         </td>
                         <td><span t-field="projection.service_type"/></td>
+                        <td><span t-field="projection.borrower"/></td>
                         <td>
                             <div t-out="projection.property_address"/>
                             <small class="text-muted">
@@ -107,6 +109,9 @@
                         <dt class="col-sm-4">Service</dt>
                         <dd class="col-sm-8"><span t-field="projection.service_type"/></dd>
 
+                        <dt class="col-sm-4">Borrower</dt>
+                        <dd class="col-sm-8"><span t-field="projection.borrower"/></dd>
+
                         <dt class="col-sm-4">Property type</dt>
                         <dd class="col-sm-8"><span t-field="projection.property_type"/></dd>
 
@@ -119,12 +124,6 @@
                                 <t t-out="projection.zip_code"/>
                             </div>
                         </dd>
-
-                        <dt class="col-sm-4">Bidding round</dt>
-                        <dd class="col-sm-8" t-out="projection.bidding_round"/>
-
-                        <dt class="col-sm-4">Phase</dt>
-                        <dd class="col-sm-8"><span t-field="projection.vendor_phase"/></dd>
 
                         <dt class="col-sm-4">Status</dt>
                         <dd class="col-sm-8"><span t-field="projection.vendor_status"/></dd>
@@ -139,11 +138,6 @@
                         <dt t-if="projection.due_date" class="col-sm-4">Due date</dt>
                         <dd t-if="projection.due_date" class="col-sm-8">
                             <span t-field="projection.due_date"/>
-                        </dd>
-
-                        <dt class="col-sm-4">Assigned</dt>
-                        <dd class="col-sm-8">
-                            <t t-out="'Yes' if projection.is_assigned else 'No'"/>
                         </dd>
 
                         <dt t-if="projection.is_assigned" class="col-sm-4">Agreed fee</dt>

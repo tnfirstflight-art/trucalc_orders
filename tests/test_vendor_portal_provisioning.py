@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from odoo import Command, fields
 from odoo.exceptions import AccessError, ValidationError
 from odoo.tests import TransactionCase, tagged
@@ -25,6 +27,9 @@ class TestVendorPortalProvisioning(TransactionCase):
         })
         cls.other_vendor = cls.env["trucalc.vendor"].create({
             "name": "4B2B1 Other Vendor", "vendor_type": "environmental",
+        })
+        cls.env["trucalc.vendor.fee"].create({
+            "vendor_id": cls.vendor.id, "service_type": "evaluation", "fee": 500,
         })
         cls.bank = cls.env["res.company"].create({"name": "4B2B1 Bank"})
         cls.admin = cls._user("admin", cls.groups["group_trucalc_admin"])
@@ -56,13 +61,13 @@ class TestVendorPortalProvisioning(TransactionCase):
             user.partner_id.signup_type = "signup"
         return user
 
-    def _wizard(self, user, vendor=None):
+    def _wizard(self, user=False, vendor=None):
+        values = {"vendor_id": (vendor or self.vendor).id}
+        if user:
+            values["user_id"] = user.id
         return self.env["trucalc.vendor.portal.provision"].with_user(
             self.admin
-        ).create({
-            "user_id": user.id,
-            "vendor_id": (vendor or self.vendor).id,
-        })
+        ).create(values)
 
     def _assert_unchanged(self, user, groups, vendor=False, bank=False):
         user.invalidate_recordset()
@@ -82,6 +87,131 @@ class TestVendorPortalProvisioning(TransactionCase):
             self.assertFalse(user.has_group("base.group_user"))
             self.assertTrue(user.share)
             self.assertFalse(user.trucalc_bank_company_id)
+
+    def test_create_and_invite_from_unique_vendor_email(self):
+        self.vendor.email = "New.Vendor@Example.Test"
+        before = {
+            name: self.env[name].sudo().search_count([])
+            for name in (
+                "trucalc.order.vendor.authorization",
+                "trucalc.bid.invitation",
+                "trucalc.bid",
+            )
+        }
+        PortalLine = type(self.env["portal.wizard.user"])
+        with patch.object(PortalLine, "_send_email", autospec=True, return_value=True) as send:
+            self._wizard().action_create_and_invite()
+
+        user = self.env["res.users"].sudo().search([
+            ("login", "=", "new.vendor@example.test"),
+        ])
+        self.assertEqual(len(user), 1)
+        self.assertEqual(user.partner_id.name, self.vendor.name)
+        self.assertEqual(user.partner_id.email, "new.vendor@example.test")
+        self.assertEqual(user.trucalc_vendor_id, self.vendor)
+        self.assertTrue(user.active)
+        self.assertTrue(user.share)
+        self.assertTrue(user.has_group("base.group_portal"))
+        self.assertTrue(user.has_group("trucalc_orders.group_vendor_portal"))
+        self.assertFalse(user.has_group("base.group_user"))
+        self.assertEqual(user.partner_id.signup_type, "signup")
+        send.assert_called_once()
+        self.assertEqual(
+            {
+                name: self.env[name].sudo().search_count([])
+                for name in before
+            },
+            before,
+        )
+
+    def test_create_and_invite_reuses_existing_contact_without_user(self):
+        self.vendor.email = "contact-only@example.test"
+        partner = self.env["res.partner"].create({
+            "name": "Existing Vendor Contact",
+            "email": self.vendor.email,
+        })
+        PortalLine = type(self.env["portal.wizard.user"])
+        with patch.object(PortalLine, "_send_email", autospec=True, return_value=True):
+            self._wizard().action_create_and_invite()
+        users = partner.with_context(active_test=False).user_ids
+        self.assertEqual(len(users), 1)
+        self.assertEqual(users.trucalc_vendor_id, self.vendor)
+
+    def test_create_path_reuses_eligible_plain_portal_user(self):
+        user = self._portal_user("email-reuse")
+        self.vendor.email = user.email
+        self._wizard().action_create_and_invite()
+        self.assertEqual(user.trucalc_vendor_id, self.vendor)
+        self.assertTrue(user.has_group("trucalc_orders.group_vendor_portal"))
+        self.assertEqual(
+            self.env["res.users"].sudo().search_count([("login", "=", user.login)]),
+            1,
+        )
+
+    def test_create_path_requires_one_valid_vendor_email(self):
+        for email in (False, "not-an-email", "one@example.test, two@example.test"):
+            self.vendor.email = email
+            with self.assertRaises(ValidationError):
+                self._wizard().action_create_and_invite()
+
+    def test_create_path_rejects_ambiguous_contacts_and_users(self):
+        email = "ambiguous@example.test"
+        self.vendor.email = email
+        self.env["res.partner"].create([
+            {"name": "Ambiguous One", "email": email},
+            {"name": "Ambiguous Two", "email": email.upper()},
+        ])
+        with self.assertRaises(ValidationError):
+            self._wizard().action_create_and_invite()
+
+        user_email = "ambiguous-users@example.test"
+        self.vendor.email = user_email
+        first = self._portal_user("ambiguous-user-one")
+        second = self._portal_user("ambiguous-user-two")
+        first.partner_id.email = user_email
+        second.partner_id.email = user_email.upper()
+        with self.assertRaises(ValidationError):
+            self._wizard().action_create_and_invite()
+
+    def test_create_path_rejects_incompatible_identity_collisions(self):
+        for user in (
+            self._user("create-internal", self.internal_group),
+            self._user("create-trucalc-internal", self.groups["group_trucalc_operations"]),
+            self.bank_user,
+            self.vendor_user,
+        ):
+            self.vendor.email = user.login
+            original_groups = user.group_ids
+            original_vendor = user.trucalc_vendor_id
+            original_bank = user.trucalc_bank_company_id
+            with self.assertRaises(ValidationError):
+                self._wizard().action_create_and_invite()
+            self._assert_unchanged(
+                user,
+                original_groups,
+                vendor=original_vendor,
+                bank=original_bank,
+            )
+
+    def test_create_path_is_atomic_when_trucalc_mapping_fails(self):
+        self.vendor.email = "atomic@example.test"
+        partner_count = self.env["res.partner"].sudo().search_count([])
+        user_count = self.env["res.users"].sudo().with_context(active_test=False).search_count([])
+        Users = type(self.env["res.users"])
+        with self.assertRaises(ValidationError):
+            with self.env.cr.savepoint():
+                with patch.object(
+                    Users,
+                    "_trucalc_provision_vendor_portal",
+                    autospec=True,
+                    side_effect=ValidationError("forced mapping failure"),
+                ):
+                    self._wizard().action_create_and_invite()
+        self.assertEqual(self.env["res.partner"].sudo().search_count([]), partner_count)
+        self.assertEqual(
+            self.env["res.users"].sudo().with_context(active_test=False).search_count([]),
+            user_count,
+        )
 
     def test_all_active_vendor_types_are_eligible(self):
         for vendor_type in ("appraiser", "reviewer", "environmental"):
@@ -107,6 +237,12 @@ class TestVendorPortalProvisioning(TransactionCase):
             with self.assertRaises(AccessError):
                 wizard.with_user(actor).action_provision()
             self._assert_unchanged(target, self.portal_group)
+
+        self.vendor.email = "unauthorized-create@example.test"
+        wizard = self._wizard()
+        for actor in unauthorized:
+            with self.assertRaises(AccessError):
+                wizard.with_user(actor).action_create_and_invite()
 
     def test_only_trucalc_administrator_has_wizard_model_access(self):
         for actor in (
