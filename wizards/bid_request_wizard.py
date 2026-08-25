@@ -25,10 +25,22 @@ class TruCalcBidRequestWizard(models.TransientModel):
         if not order or mode not in ("request", "manage"):
             return values
         order._require_bid_manager()
-        invited = (
-            order._current_round_invitations().mapped("vendor_id")
-            if mode == "manage" else self.env["trucalc.vendor"].browse()
+        invitations = (
+            order._current_round_invitations()
+            if mode == "manage" else self.env["trucalc.bid.invitation"].browse()
         )
+        invitation_by_vendor = {
+            invitation.vendor_id.id: invitation for invitation in invitations
+        }
+        unknown_snapshot_ids = set()
+        if invitations:
+            self.env.cr.execute(
+                "SELECT id FROM trucalc_bid_invitation "
+                "WHERE id = ANY(%s) AND standard_fee IS NULL",
+                (invitations.ids,),
+            )
+            unknown_snapshot_ids = {row[0] for row in self.env.cr.fetchall()}
+        invited = invitations.mapped("vendor_id")
         eligible = order._eligible_solicitation_vendors()
         vendors = invited | eligible
         fee_by_vendor = {
@@ -38,14 +50,22 @@ class TruCalcBidRequestWizard(models.TransientModel):
                 ("service_type", "=", order.service_type),
             ])
         }
-        values["line_ids"] = [
-            Command.create({
+        lines = []
+        for vendor in vendors.sorted("name"):
+            invitation = invitation_by_vendor.get(vendor.id)
+            standard_fee = (
+                invitation.standard_fee if invitation else fee_by_vendor[vendor.id]
+            )
+            fee_known = not invitation or invitation.id not in unknown_snapshot_ids
+            lines.append(Command.create({
                 "vendor_id": vendor.id,
-                "standard_fee": fee_by_vendor.get(vendor.id, 0.0),
-                "already_invited": vendor in invited,
-            })
-            for vendor in vendors.sorted("name")
-        ]
+                "standard_fee": standard_fee if fee_known else False,
+                "standard_fee_display": (
+                    f"{standard_fee:.2f}" if fee_known else _("Not recorded")
+                ),
+                "already_invited": bool(invitation),
+            }))
+        values["line_ids"] = lines
         if mode == "manage":
             values["response_deadline"] = order._current_round_deadline()
         return values
@@ -77,8 +97,8 @@ class TruCalcBidRequestWizardLine(models.TransientModel):
     )
     selected = fields.Boolean()
     vendor_id = fields.Many2one("trucalc.vendor", required=True, readonly=True)
-    vendor_type = fields.Selection(related="vendor_id.vendor_type", readonly=True)
     standard_fee = fields.Float(readonly=True)
+    standard_fee_display = fields.Char(string="Standard Fee", readonly=True)
     already_invited = fields.Boolean(readonly=True)
 
 

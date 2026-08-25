@@ -46,6 +46,10 @@ class TruCalcVendorOrder(models.Model):
     due_date = fields.Date(readonly=True)
     is_assigned = fields.Boolean(readonly=True)
     agreed_vendor_fee = fields.Float(readonly=True)
+    solicitation_standard_fee = fields.Float(
+        string="Standard Fee", readonly=True,
+        help="Standard fee snapshotted for this Vendor's solicitation.",
+    )
 
     # Integer-only and system-restricted: required for the rule, but deliberately
     # provides no relational path from the public projection to Vendor records.
@@ -80,10 +84,15 @@ class TruCalcVendorOrder(models.Model):
                     order_record.due_date AS due_date,
                     (authorization_record.source = 'assignment') AS is_assigned,
                     CASE WHEN authorization_record.source = 'assignment'
-                        THEN order_record.vendor_fee ELSE NULL END AS agreed_vendor_fee
+                        THEN order_record.vendor_fee ELSE NULL END AS agreed_vendor_fee,
+                    CASE WHEN authorization_record.source = 'invitation'
+                        THEN invitation_record.standard_fee ELSE NULL
+                    END AS solicitation_standard_fee
                 FROM trucalc_order_vendor_authorization authorization_record
                 JOIN trucalc_order order_record ON order_record.id = authorization_record.order_id
                 JOIN trucalc_vendor vendor ON vendor.id = authorization_record.vendor_id
+                LEFT JOIN trucalc_bid_invitation invitation_record
+                    ON invitation_record.id = authorization_record.invitation_id
                 WHERE authorization_record.active IS TRUE
                   AND vendor.active IS TRUE
                   AND authorization_record.source IN ('invitation', 'assignment')

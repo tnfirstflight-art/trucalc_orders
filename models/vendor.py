@@ -18,7 +18,9 @@ class TruCalcVendor(models.Model):
         ],
         string="Vendor Type",
         required=True,
-        default="appraiser"
+        default="appraiser",
+        help="Deprecated compatibility field. Service capability is determined by "
+             "Services / Standard Fees.",
     )
 
     email = fields.Char(

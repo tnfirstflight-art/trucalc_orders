@@ -1,6 +1,7 @@
 from odoo import api, fields, models, _
 from odoo.exceptions import AccessError, ValidationError
 
+from .vendor_fee import SERVICE_SELECTION
 
 MANAGER_GROUPS = (
     "trucalc_orders.group_trucalc_admin",
@@ -19,6 +20,13 @@ class TruCalcBidInvitation(models.Model):
     )
     vendor_id = fields.Many2one(
         "trucalc.vendor", string="Vendor", required=True, index=True, ondelete="restrict"
+    )
+    service_type = fields.Selection(
+        SERVICE_SELECTION, string="Solicited Service", readonly=True, copy=False,
+    )
+    standard_fee = fields.Float(
+        string="Standard Fee at Solicitation", readonly=True, copy=False,
+        help="Vendor standard fee snapshotted when this invitation was created.",
     )
     company_id = fields.Many2one(
         "res.company", string="Company", related="order_id.company_id",
@@ -109,7 +117,8 @@ class TruCalcBidInvitation(models.Model):
         self._require_manager()
         protected = {
             "company_id", "round_number", "state", "invited_by", "invited_at",
-            "declined_at", "revoked_at", "is_legacy_reconstructed",
+            "declined_at", "revoked_at", "is_legacy_reconstructed", "service_type",
+            "standard_fee",
         }
         prepared = []
         order_ids = []
@@ -133,18 +142,13 @@ class TruCalcBidInvitation(models.Model):
             vendor = self.env["trucalc.vendor"].browse(incoming["vendor_id"]).exists()
             if not order or not vendor or not vendor.active:
                 raise ValidationError(_("A valid active vendor and order are required."))
-            expected_type = {
-                "evaluation": "appraiser", "appraisal": "appraiser",
-                "review": "reviewer", "environmental": "environmental",
-            }.get(order.service_type)
             if order.status != "bid_requested" or order.bidding_round <= 0:
                 raise ValidationError(_("The order is not in an active bidding round."))
-            if not expected_type or vendor.vendor_type != expected_type:
-                raise ValidationError(_("The vendor is not compatible with this service."))
-            if not self.env["trucalc.vendor.fee"].search_count([
+            fee = self.env["trucalc.vendor.fee"].search([
                 ("vendor_id", "=", vendor.id),
                 ("service_type", "=", order.service_type),
-            ]):
+            ])
+            if len(fee) != 1:
                 raise ValidationError(_("The vendor has no matching fee schedule."))
             if self.search_count([
                 ("order_id", "=", order.id),
@@ -161,6 +165,8 @@ class TruCalcBidInvitation(models.Model):
                 "invited_by": self.env.user.id,
                 "invited_at": fields.Datetime.now(),
                 "is_legacy_reconstructed": False,
+                "service_type": order.service_type,
+                "standard_fee": fee.fee,
             })
             prepared.append(vals)
         invitations = super().create(prepared)

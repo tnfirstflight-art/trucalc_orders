@@ -135,6 +135,15 @@
                             <span t-field="projection.response_deadline"/>
                         </dd>
 
+                        <dt t-if="projection.vendor_phase == 'invitation'" class="col-sm-4">
+                            Standard fee
+                        </dt>
+                        <dd t-if="projection.vendor_phase == 'invitation'" class="col-sm-8">
+                            <span t-if="projection.solicitation_standard_fee is not False"
+                                  t-field="projection.solicitation_standard_fee"/>
+                            <span t-else="">Not recorded for this legacy invitation</span>
+                        </dd>
+
                         <dt t-if="projection.due_date" class="col-sm-4">Due date</dt>
                         <dd t-if="projection.due_date" class="col-sm-8">
                             <span t-field="projection.due_date"/>

@@ -1,18 +1,22 @@
-from odoo import models, fields, api
-from odoo.exceptions import ValidationError
+from odoo import fields, models
+
+
+SERVICE_SELECTION = [
+    ("evaluation", "Evaluation"),
+    ("appraisal", "Appraisal"),
+    ("review", "Review"),
+    ("environmental", "Environmental"),
+]
 
 
 class VendorFee(models.Model):
     _name = "trucalc.vendor.fee"
     _description = "Vendor Fee Schedule"
 
-    _sql_constraints = [
-        (
-            "vendor_service_unique",
-            "unique(vendor_id, service_type)",
-            "A vendor may only have one fee schedule per service type.",
-        )
-    ]
+    _vendor_service_unique = models.Constraint(
+        "UNIQUE(vendor_id, service_type)",
+        "A vendor may only have one standard fee per service.",
+    )
 
     vendor_id = fields.Many2one(
         "trucalc.vendor",
@@ -22,12 +26,7 @@ class VendorFee(models.Model):
     )
 
     service_type = fields.Selection(
-        [
-            ("evaluation", "Evaluation"),
-            ("appraisal", "Appraisal"),
-            ("review", "Review"),
-            ("environmental", "Environmental"),
-        ],
+        SERVICE_SELECTION,
         string="Service Type",
         required=True,
     )
@@ -36,21 +35,3 @@ class VendorFee(models.Model):
         string="Fee",
         required=True,
     )
-
-    @api.constrains("vendor_id", "service_type")
-    def _check_unique_service_type(self):
-        for record in self:
-
-            existing = self.search(
-                [
-                    ("vendor_id", "=", record.vendor_id.id),
-                    ("service_type", "=", record.service_type),
-                    ("id", "!=", record.id),
-                ],
-                limit=1,
-            )
-
-            if existing:
-                raise ValidationError(
-                    "This vendor already has a fee defined for that service type."
-                )

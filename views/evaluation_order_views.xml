@@ -151,7 +151,9 @@
 
                             <field name="fee_override" readonly="status in ('new', 'accepted', 'declined')"/>
 
-                            <field name="reviewer_id" readonly="status in ('new', 'accepted', 'declined')"/>
+                            <field name="reviewer_id"
+                                   domain="[('active', '=', True), ('fee_schedule_ids.service_type', '=', 'review')]"
+                                   readonly="status in ('new', 'accepted', 'declined')"/>
 
                             <field name="review_fee" readonly="status in ('new', 'accepted', 'declined')"/>
 

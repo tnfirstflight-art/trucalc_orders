@@ -107,6 +107,8 @@ class TestVendorSolicitation(TransactionCase):
             invitation = order.invitation_ids
             self.assertEqual(invitation.vendor_id, self.vendor_a)
             self.assertEqual(invitation.response_deadline, deadline)
+            self.assertEqual(invitation.service_type, "evaluation")
+            self.assertEqual(invitation.standard_fee, 500)
             authorization = order.vendor_authorization_ids
             self.assertEqual(authorization.invitation_id, invitation)
             self.assertTrue(authorization.active)
@@ -138,9 +140,7 @@ class TestVendorSolicitation(TransactionCase):
                 self._accepted_order().with_user(user).action_request_vendor_bids(
                     self.vendor_a, self._deadline()
                 )
-        invalid_vendors = (
-            self.inactive_vendor, self.wrong_type_vendor, self.no_fee_vendor
-        )
+        invalid_vendors = (self.inactive_vendor, self.no_fee_vendor)
         for vendor in invalid_vendors:
             order = self._accepted_order()
             with self.assertRaises(ValidationError):
@@ -169,6 +169,11 @@ class TestVendorSolicitation(TransactionCase):
         invitations = order.invitation_ids.sorted("vendor_id")
         self.assertEqual(len(invitations), 2)
         self.assertEqual(set(invitations.mapped("response_deadline")), {deadline})
+        self.assertEqual(
+            {invitation.vendor_id: invitation.standard_fee for invitation in invitations},
+            {self.vendor_a: 500, self.vendor_b: 600},
+        )
+        self.assertEqual(set(invitations.mapped("service_type")), {"evaluation"})
         self.assertEqual(invitation_a, order.invitation_ids.filtered(
             lambda invitation: invitation.vendor_id == self.vendor_a
         ))
@@ -211,12 +216,21 @@ class TestVendorSolicitation(TransactionCase):
         order.action_request_vendor_bids(self.vendor_a | self.vendor_b, old)
         invitation_ids = order.invitation_ids.ids
         authorization_ids = order.vendor_authorization_ids.ids
+        snapshots = {
+            invitation.id: (invitation.service_type, invitation.standard_fee)
+            for invitation in order.invitation_ids
+        }
         new = self._deadline(4)
         order.with_user(self.ops).action_extend_bid_deadline(new)
         self.assertEqual(set(order.invitation_ids.mapped("response_deadline")), {new})
         self.assertEqual(set(order.vendor_authorization_ids.mapped("expires_at")), {new})
         self.assertEqual(order.invitation_ids.ids, invitation_ids)
         self.assertEqual(order.vendor_authorization_ids.ids, authorization_ids)
+        self.assertEqual(
+            snapshots,
+            {invitation.id: (invitation.service_type, invitation.standard_fee)
+             for invitation in order.invitation_ids},
+        )
         self.assertEqual((order.status, order.bidding_round), ("bid_requested", 1))
         self.assertFalse(order.bid_ids)
         self.assertFalse(order.assigned_vendor_id)
@@ -255,10 +269,15 @@ class TestVendorSolicitation(TransactionCase):
         displayed = wizard.line_ids.mapped("vendor_id")
         self.assertTrue(self.vendor_a in displayed and self.vendor_b in displayed)
         self.assertNotIn(self.no_fee_vendor, displayed)
-        self.assertNotIn(self.wrong_type_vendor, displayed)
+        self.assertIn(self.wrong_type_vendor, displayed)
         self.assertNotIn(self.inactive_vendor, displayed)
         fees = {line.vendor_id: line.standard_fee for line in wizard.line_ids}
         self.assertEqual((fees[self.vendor_a], fees[self.vendor_b]), (500, 600))
+        self.assertEqual(fees[self.wrong_type_vendor], 700)
+        displays = {
+            line.vendor_id: line.standard_fee_display for line in wizard.line_ids
+        }
+        self.assertEqual(displays[self.vendor_a], "500.00")
         line_a = wizard.line_ids.filtered(lambda line: line.vendor_id == self.vendor_a)
         line_b = wizard.line_ids.filtered(lambda line: line.vendor_id == self.vendor_b)
         line_a.selected = True
@@ -357,6 +376,8 @@ class TestVendorSolicitation(TransactionCase):
         invited = manage.line_ids.filtered("already_invited")
         self.assertEqual(invited.mapped("vendor_id"), self.vendor_a)
         self.assertFalse(invited.selected)
+        self.assertEqual(invited.standard_fee, 500)
+        self.assertEqual(invited.standard_fee_display, "500.00")
         available_b = manage.line_ids.filtered(lambda line: line.vendor_id == self.vendor_b)
         available_b.selected = True
         manage.action_confirm()
@@ -376,6 +397,97 @@ class TestVendorSolicitation(TransactionCase):
         self.assertNotIn(fields.Datetime.to_string(deadline), chatter)
         self.assertNotRegex(chatter, r"\b\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\b")
 
+    def test_manage_displays_current_round_snapshot_and_current_available_fee(self):
+        order = self._accepted_order()
+        deadline = self._deadline()
+        order.action_request_vendor_bids(self.vendor_a, deadline)
+        invitation = order.invitation_ids
+        authorization_ids = order.vendor_authorization_ids.ids
+        audit_ids = self.env["trucalc.bid.audit"].search([
+            ("order_id", "=", order.id),
+        ]).ids
+        message_ids = order.message_ids.ids
+
+        self.vendor_a.fee_schedule_ids.filtered(
+            lambda fee: fee.service_type == "evaluation"
+        ).fee = 550
+        self.vendor_b.fee_schedule_ids.filtered(
+            lambda fee: fee.service_type == "evaluation"
+        ).fee = 650
+        action = order.action_open_manage_bid_requests_wizard()
+        wizard = self.env[action["res_model"]].with_user(self.admin).with_context(
+            action["context"]
+        ).create({})
+        invited = wizard.line_ids.filtered(lambda line: line.vendor_id == self.vendor_a)
+        available = wizard.line_ids.filtered(lambda line: line.vendor_id == self.vendor_b)
+        self.assertTrue(invited.already_invited)
+        self.assertFalse(invited.selected)
+        self.assertEqual((invited.standard_fee, invited.standard_fee_display), (500, "500.00"))
+        self.assertFalse(available.already_invited)
+        self.assertEqual((available.standard_fee, available.standard_fee_display), (650, "650.00"))
+        self.assertEqual(invitation.standard_fee, 500)
+        self.assertEqual(order.invitation_ids, invitation)
+        self.assertEqual(order.vendor_authorization_ids.ids, authorization_ids)
+        self.assertEqual(self.env["trucalc.bid.audit"].search([
+            ("order_id", "=", order.id),
+        ]).ids, audit_ids)
+        self.assertEqual(order.message_ids.ids, message_ids)
+        self.assertFalse(order.bid_ids)
+        self.assertFalse(order.assigned_vendor_id)
+        self.assertEqual(order.vendor_fee, 0)
+        self.assertEqual((order.status, order.bidding_round), ("bid_requested", 1))
+
+    def test_manage_does_not_fabricate_unknown_historical_fee(self):
+        order = self._accepted_order()
+        order.action_request_vendor_bids(self.vendor_a, self._deadline())
+        invitation = order.invitation_ids
+        self.env.cr.execute(
+            "UPDATE trucalc_bid_invitation SET standard_fee = NULL WHERE id = %s",
+            (invitation.id,),
+        )
+        invitation.invalidate_recordset(["standard_fee"])
+        self.vendor_a.fee_schedule_ids.filtered(
+            lambda fee: fee.service_type == "evaluation"
+        ).fee = 999
+        action = order.action_open_manage_bid_requests_wizard()
+        wizard = self.env[action["res_model"]].with_user(self.admin).with_context(
+            action["context"]
+        ).create({})
+        line = wizard.line_ids.filtered(lambda item: item.vendor_id == self.vendor_a)
+        self.assertTrue(line.already_invited)
+        self.assertFalse(line.standard_fee)
+        self.assertEqual(line.standard_fee_display, "Not recorded")
+        self.assertFalse(invitation.standard_fee)
+
+    def test_manage_uses_current_round_invitation_only(self):
+        order = self._accepted_order()
+        order.action_request_vendor_bids(self.vendor_a | self.vendor_b, self._deadline())
+        prior_a = order.invitation_ids.filtered(lambda item: item.vendor_id == self.vendor_a)
+        self.vendor_a.fee_schedule_ids.filtered(
+            lambda fee: fee.service_type == "evaluation"
+        ).fee = 575
+        self.vendor_b.fee_schedule_ids.filtered(
+            lambda fee: fee.service_type == "evaluation"
+        ).fee = 675
+        order._controlled_lifecycle_write({"bidding_round": 2})
+        current_a = self.env["trucalc.bid.invitation"].with_user(self.admin).create({
+            "order_id": order.id,
+            "vendor_id": self.vendor_a.id,
+            "response_deadline": self._deadline(3),
+        })
+        action = order.action_open_manage_bid_requests_wizard()
+        wizard = self.env[action["res_model"]].with_user(self.admin).with_context(
+            action["context"]
+        ).create({})
+        line_a = wizard.line_ids.filtered(lambda line: line.vendor_id == self.vendor_a)
+        line_b = wizard.line_ids.filtered(lambda line: line.vendor_id == self.vendor_b)
+        self.assertTrue(line_a.already_invited)
+        self.assertEqual(line_a.standard_fee, 575)
+        self.assertEqual(current_a.standard_fee, 575)
+        self.assertEqual(prior_a.standard_fee, 500)
+        self.assertFalse(line_b.already_invited)
+        self.assertEqual(line_b.standard_fee, 675)
+
     def test_projection_disclosure_and_isolation(self):
         order = self._accepted_order()
         deadline = self._deadline()
@@ -389,6 +501,7 @@ class TestVendorSolicitation(TransactionCase):
         self.assertEqual(projection.borrower, order.borrower)
         self.assertEqual(projection.due_date, order.due_date)
         self.assertEqual(projection.response_deadline, deadline)
+        self.assertEqual(projection.solicitation_standard_fee, 500)
         public_fields = projection.fields_get()
         for prohibited in (
             "loan_amount", "loan_number", "notes", "review_fee", "decline_reason",
@@ -403,3 +516,37 @@ class TestVendorSolicitation(TransactionCase):
             self.env["trucalc.order"].with_user(self.vendor_user_a).check_access("read")
         with self.assertRaises(AccessError):
             self.env["trucalc.document"].with_user(self.vendor_user_a).check_access("read")
+
+    def test_snapshot_is_immutable_and_later_invitation_uses_current_fee(self):
+        order = self._accepted_order()
+        order.action_request_vendor_bids(self.vendor_a, self._deadline())
+        invitation = order.invitation_ids
+        self.assertEqual(invitation.standard_fee, 500)
+        with self.assertRaises(AccessError):
+            invitation.write({"standard_fee": 999})
+        with self.assertRaises(AccessError):
+            invitation.write({"service_type": "appraisal"})
+        fee = self.vendor_a.fee_schedule_ids.filtered(
+            lambda record: record.service_type == "evaluation"
+        )
+        fee.fee = 550
+        self.assertEqual(invitation.standard_fee, 500)
+
+        later = self._accepted_order()
+        later.action_request_vendor_bids(self.vendor_a, self._deadline())
+        self.assertEqual(later.invitation_ids.standard_fee, 550)
+        self.assertFalse(later.bid_ids)
+        self.assertFalse(later.assigned_vendor_id)
+        self.assertEqual(later.vendor_fee, 0)
+
+    def test_invitation_create_rejects_crafted_snapshot_values(self):
+        order = self._accepted_order()
+        order.action_bid_requested()
+        with self.assertRaises(AccessError):
+            self.env["trucalc.bid.invitation"].create({
+                "order_id": order.id,
+                "vendor_id": self.vendor_a.id,
+                "response_deadline": self._deadline(),
+                "service_type": "appraisal",
+                "standard_fee": 1,
+            })

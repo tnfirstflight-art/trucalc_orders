@@ -84,6 +84,7 @@ class TestVendorOrderProjection(TransactionCase):
         self.assertEqual(own.due_date, invitation.order_id.due_date)
         self.assertFalse(own.is_assigned)
         self.assertEqual(own.agreed_vendor_fee, 0)
+        self.assertEqual(own.solicitation_standard_fee, 500)
 
         other = self._invitation(vendor=self.other_vendor)
         self.assertNotIn(other.order_id.order_number, own.mapped("order_number"))

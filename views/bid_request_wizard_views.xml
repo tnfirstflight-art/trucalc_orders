@@ -20,8 +20,7 @@
                                readonly="already_invited"/>
                         <field name="vendor_id" force_save="1"
                                options="{'no_open': True}"/>
-                        <field name="vendor_type"/>
-                        <field name="standard_fee" force_save="1"/>
+                        <field name="standard_fee_display" force_save="1"/>
                         <field name="already_invited" force_save="1"/>
                     </list>
                 </field>

@@ -221,8 +221,9 @@ class TestVendorOrderPortal(HttpCase):
         self.assertFalse({"Bidding round", "Phase", "Assigned"} & labels)
         self.assertTrue({
             "Service", "Borrower", "Property type", "Property address",
-            "Status", "Response deadline", "Due date",
+            "Status", "Response deadline", "Standard fee", "Due date",
         } <= labels)
+        self.assertIn("500", rendered)
         self.assertIn(str(order.due_date.year), rendered)
         for forbidden in (
             "order_id",

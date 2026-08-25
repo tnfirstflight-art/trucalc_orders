@@ -2,13 +2,8 @@ from odoo import api, fields, models, tools, _
 from odoo.exceptions import AccessError, ValidationError
 from markupsafe import escape
 
+from .vendor_fee import SERVICE_SELECTION
 
-SERVICE_VENDOR_TYPES = {
-    "evaluation": "appraiser",
-    "appraisal": "appraiser",
-    "review": "reviewer",
-    "environmental": "environmental",
-}
 
 
 class EvaluationOrder(models.Model):
@@ -77,12 +72,7 @@ class EvaluationOrder(models.Model):
     )
 
     service_type = fields.Selection(
-        [
-            ("evaluation", "Evaluation"),
-            ("appraisal", "Appraisal"),
-            ("review", "Review"),
-            ("environmental", "Environmental"),
-        ],
+        SERVICE_SELECTION,
         string="Service Type",
         tracking=True,
     )
@@ -162,7 +152,7 @@ class EvaluationOrder(models.Model):
         "trucalc.vendor",
         string="Reviewer",
         tracking=True,
-        domain="[('vendor_type', '=', 'reviewer')]",
+        domain="[('active', '=', True), ('fee_schedule_ids.service_type', '=', 'review')]",
     )
 
     review_fee = fields.Float(
@@ -445,13 +435,11 @@ class EvaluationOrder(models.Model):
     @api.private
     def _eligible_solicitation_vendors(self):
         self.ensure_one()
-        expected_type = SERVICE_VENDOR_TYPES.get(self.service_type)
-        if not expected_type:
+        if self.service_type not in dict(SERVICE_SELECTION):
             return self.env["trucalc.vendor"].browse()
         fees = self.env["trucalc.vendor.fee"].search([
             ("service_type", "=", self.service_type),
             ("vendor_id.active", "=", True),
-            ("vendor_id.vendor_type", "=", expected_type),
         ])
         return fees.mapped("vendor_id")
 
@@ -461,8 +449,7 @@ class EvaluationOrder(models.Model):
         vendors = vendors.exists()
         if not vendors:
             raise ValidationError(_("At least one eligible vendor is required."))
-        expected_type = SERVICE_VENDOR_TYPES.get(self.service_type)
-        if not expected_type:
+        if self.service_type not in dict(SERVICE_SELECTION):
             raise ValidationError(_("The order service type cannot be solicited."))
         fee_vendor_ids = set(self.env["trucalc.vendor.fee"].search([
             ("vendor_id", "in", vendors.ids),
@@ -470,13 +457,11 @@ class EvaluationOrder(models.Model):
         ]).mapped("vendor_id").ids)
         invalid = vendors.filtered(
             lambda vendor: not vendor.active
-            or vendor.vendor_type != expected_type
             or vendor.id not in fee_vendor_ids
         )
         if invalid:
             raise ValidationError(_(
-                "Every selected vendor must be active, compatible with the service, "
-                "and have a matching fee schedule."
+                "Every selected vendor must be active and have a matching standard fee."
             ))
         return vendors
 
@@ -680,7 +665,24 @@ class EvaluationOrder(models.Model):
         )
         return True
 
+    @api.constrains("reviewer_id")
+    def _check_reviewer_capability(self):
+        for order in self.filtered("reviewer_id"):
+            if not order.reviewer_id.active or not self.env[
+                "trucalc.vendor.fee"
+            ].search_count([
+                ("vendor_id", "=", order.reviewer_id.id),
+                ("service_type", "=", "review"),
+            ]):
+                raise ValidationError(_(
+                    "The selected Reviewer must be active and have a Review standard fee."
+                ))
+
     def action_assign_reviewer(self):
+        eligible_state = self.filtered(lambda order: order.status == "report_received")
+        eligible_state._check_reviewer_capability()
+        if any(not order.reviewer_id for order in eligible_state):
+            raise ValidationError(_("Select an eligible Reviewer before assignment."))
         self.status = "reviewer_assigned"
 
     def action_start_review(self):

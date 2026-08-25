@@ -27,6 +27,7 @@ class TestVendorOrderAuthorization(TransactionCase):
         cls.env["trucalc.vendor.fee"].create([
             {"vendor_id": cls.vendor_a.id, "service_type": "evaluation", "fee": 500},
             {"vendor_id": cls.vendor_b.id, "service_type": "evaluation", "fee": 600},
+            {"vendor_id": cls.wrong_vendor.id, "service_type": "review", "fee": 200},
         ])
         cls.bank = cls.env["res.company"].create({"name": "4B1B Bank"})
         cls.admin = cls._user("4b1b-admin", cls.admin_group)
@@ -234,6 +235,7 @@ class TestVendorOrderAuthorization(TransactionCase):
         invitation = self._invitation(order=order)
         bid = self._submit(invitation)
         bid.with_user(self.admin).action_select_bid()
+        order.reviewer_id = self.wrong_vendor
         assignment = self.env["trucalc.order.vendor.authorization"].sudo().search([
             ("order_id", "=", order.id), ("source", "=", "assignment"),
         ])
