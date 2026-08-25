@@ -239,3 +239,25 @@ class TestVendorOrderPortal(HttpCase):
             "987654.32",
         ):
             self.assertNotIn(forbidden, rendered)
+
+    def test_list_separates_order_and_response_status_and_formats_currency(self):
+        order, invitation, projection = self._authorized_order(
+            self.vendor_a, "477 Response Status Street"
+        )
+        self._login(self.vendor_user_a)
+        listing = self.url_open("/my/trucalc/orders").text
+        document = etree.HTML(listing)
+        headers = [" ".join(node.itertext()).strip() for node in document.xpath("//th")]
+        self.assertIn("Status", headers)
+        self.assertIn("Your Response", headers)
+        row = document.xpath(
+            "//a[contains(@href, '%s')]/ancestor::tr[1]" % order.order_number
+        )[0]
+        row_text = " ".join(row.itertext())
+        self.assertIn("Bid Requested", row_text)
+        self.assertIn("Open for Response", row_text)
+
+        detail = self.url_open(f"/my/trucalc/orders/{order.order_number}").text
+        currency = order.company_id.currency_id
+        self.assertIn(currency.symbol, detail)
+        self.assertIn("500.00", detail)

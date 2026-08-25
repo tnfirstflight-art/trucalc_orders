@@ -1,6 +1,6 @@
 {
     'name': 'TruCalc Orders',
-    'version': '1.10',
+    'version': '1.11',
     'author': 'TruCalc',
     'license': 'LGPL-3',
     'category': 'Services',
@@ -24,6 +24,11 @@
         'views/bid_views.xml',
         'views/vendor_portal_templates.xml',
     ],
+    'assets': {
+        'web.assets_backend': [
+            'trucalc_orders/static/src/scss/vendor_responses.scss',
+        ],
+    },
     'installable': True,
     'application': True,
 }

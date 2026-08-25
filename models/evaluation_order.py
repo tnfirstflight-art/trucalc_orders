@@ -50,6 +50,9 @@ class EvaluationOrder(models.Model):
         default=lambda self: self.env.company,
         tracking=True,
     )
+    currency_id = fields.Many2one(
+        "res.currency", related="company_id.currency_id", readonly=True,
+    )
 
     requestor_company_id = fields.Many2one(
         "res.company",
@@ -116,7 +119,14 @@ class EvaluationOrder(models.Model):
     )
 
     due_date = fields.Date(
-        string="Due Date",
+        string="Client Due Date",
+        tracking=True,
+    )
+
+    vendor_delivery_date = fields.Date(
+        string="Vendor Delivery Date",
+        readonly=True,
+        copy=False,
         tracking=True,
     )
 
@@ -249,7 +259,10 @@ class EvaluationOrder(models.Model):
             self.env.user._trucalc_bank_identity()
             if {"company_id", "requestor_company_id", "requestor_id"} & vals.keys():
                 raise AccessError(_("TruCalc bank order ownership is immutable."))
-        protected = {"bidding_round", "assigned_vendor_id", "vendor_fee"}
+        protected = {
+            "bidding_round", "assigned_vendor_id", "vendor_fee",
+            "vendor_delivery_date",
+        }
         if protected.intersection(vals):
             raise AccessError(_("Order bid lifecycle fields require an explicit action."))
         if "status" in vals:
@@ -481,6 +494,8 @@ class EvaluationOrder(models.Model):
         self._require_bid_manager()
         self.ensure_one()
         self._lock_for_bid_lifecycle()
+        if not self.due_date:
+            raise ValidationError(_("Set a Client Due Date before requesting Vendor bids."))
         vendors = self._validate_solicitation_vendors(vendors)
         deadline = self._validate_future_deadline(response_deadline)
         self.action_bid_requested()
@@ -532,6 +547,8 @@ class EvaluationOrder(models.Model):
         self._require_bid_manager()
         self.ensure_one()
         self._lock_for_bid_lifecycle()
+        if not self.due_date:
+            raise ValidationError(_("Set a Client Due Date before adding Vendor bid requests."))
         if self.status != "bid_requested" or self.bidding_round <= 0:
             raise ValidationError(_("Only a Bid Requested order may add vendors."))
         deadline = self._current_round_deadline()
@@ -646,11 +663,13 @@ class EvaluationOrder(models.Model):
         old_round = self.bidding_round
         old_vendor = self.assigned_vendor_id.id
         old_fee = self.vendor_fee
+        old_delivery_date = self.vendor_delivery_date
         self._controlled_lifecycle_write({
             "status": "bid_requested",
             "bidding_round": old_round + 1,
             "assigned_vendor_id": False,
             "vendor_fee": 0.0,
+            "vendor_delivery_date": False,
         })
         self.env["trucalc.order.vendor.authorization"]._deactivate(
             [("order_id", "=", self.id), ("source", "=", "assignment")],
@@ -659,9 +678,11 @@ class EvaluationOrder(models.Model):
         self.env["trucalc.bid.audit"]._log_event(
             "bidding_reopened", self,
             old_values={"status": "assigned", "bidding_round": old_round,
-                        "assigned_vendor_id": old_vendor, "vendor_fee": old_fee},
+                        "assigned_vendor_id": old_vendor, "vendor_fee": old_fee,
+                        "vendor_delivery_date": fields.Date.to_string(old_delivery_date)},
             new_values={"status": "bid_requested", "bidding_round": old_round + 1,
-                        "assigned_vendor_id": False, "vendor_fee": 0.0},
+                        "assigned_vendor_id": False, "vendor_fee": 0.0,
+                        "vendor_delivery_date": False},
         )
         return True
 

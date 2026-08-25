@@ -339,6 +339,7 @@ class TestVendorPortalProvisioning(TransactionCase):
             "property_address": "1 Provisioning Way",
             "company_id": self.env.company.id,
             "service_type": "evaluation",
+            "due_date": fields.Date.add(fields.Date.today(), days=14),
         })
         order.with_user(self.admin).action_accept_request()
         order.with_user(self.admin).action_bid_requested()

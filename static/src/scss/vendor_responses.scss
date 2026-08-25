@@ -1,0 +1,13 @@
+.o_trucalc_vendor_responses {
+    .o_list_table thead th > .d-flex > .text-truncate {
+        overflow: visible;
+        white-space: normal;
+        text-overflow: clip;
+        line-height: 1.2;
+    }
+
+    .o_list_table thead th.o_list_button {
+        width: 1%;
+        white-space: nowrap;
+    }
+}

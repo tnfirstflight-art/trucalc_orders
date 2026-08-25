@@ -146,8 +146,16 @@
 
                             <field name="requestor_id" readonly="1"/>
                             <field name="company_id"/>
+                            <field name="order_date"/>
 
                             <field name="assigned_vendor_id" readonly="status in ('new', 'accepted', 'declined')"/>
+                            <field name="currency_id" invisible="1"/>
+                            <field name="vendor_fee" readonly="1" widget="monetary"
+                                   options="{'currency_field': 'currency_id'}"/>
+
+                            <field name="due_date" options="{'numeric': True}"/>
+                            <field name="vendor_delivery_date" readonly="1"
+                                   options="{'numeric': True}"/>
 
                             <field name="fee_override" readonly="status in ('new', 'accepted', 'declined')"/>
 
@@ -156,9 +164,6 @@
                                    readonly="status in ('new', 'accepted', 'declined')"/>
 
                             <field name="review_fee" readonly="status in ('new', 'accepted', 'declined')"/>
-
-                            <field name="order_date"/>
-                            <field name="due_date" options="{'numeric': True}"/>
 
                             <field name="status" readonly="1"/>
 
@@ -217,6 +222,45 @@
 
                             </field>
 
+                        </page>
+
+                        <page string="Vendor Responses"
+                              groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations">
+                            <field name="bid_ids" readonly="1"
+                                   class="o_trucalc_vendor_responses">
+                                <list class="o_trucalc_vendor_responses">
+                                    <button name="action_select_bid" type="object"
+                                            string="Select"
+                                            groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                                            invisible="not is_currently_selectable"/>
+                                    <button string="Selected"
+                                            class="btn-success opacity-100"
+                                            invisible="status != 'selected'"/>
+                                    <button string="Not Selected"
+                                            class="btn-secondary opacity-100"
+                                            invisible="status != 'not_selected'"/>
+                                    <button string="Disqualified"
+                                            class="btn-danger opacity-100"
+                                            invisible="status != 'disqualified'"/>
+                                    <field name="status" column_invisible="True"/>
+                                    <field name="is_currently_selectable" column_invisible="True"/>
+                                    <field name="round_number"/>
+                                    <field name="vendor_id"/>
+                                    <field name="response_type"/>
+                                    <field name="currency_id" column_invisible="True"/>
+                                    <field name="solicited_standard_fee" widget="monetary"
+                                           options="{'currency_field': 'currency_id'}"/>
+                                    <field name="bid_amount" string="Proposed Fee" widget="monetary"
+                                           options="{'currency_field': 'currency_id'}"/>
+                                    <field name="requested_delivery_date"
+                                           options="{'numeric': True}"/>
+                                    <field name="proposed_delivery_date"
+                                           options="{'numeric': True}"/>
+                                    <field name="notes" string="Vendor Comments"/>
+                                    <field name="submitted_at"/>
+                                    <field name="last_revised_at"/>
+                                </list>
+                            </field>
                         </page>
 
                     </notebook>

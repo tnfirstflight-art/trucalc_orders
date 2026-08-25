@@ -111,18 +111,11 @@ class TestVendorOrderProjection(TransactionCase):
             self.vendor_user
         ).check_access_rights("read", raise_exception=False))
 
-    def test_bid_hides_raw_order_relation(self):
-        invitation = self._invitation()
-        bid = invitation.with_user(self.vendor_user).action_vendor_create_option({
-            "option_name": "Standard", "bid_amount": 500, "turn_time_days": 5,
-        })
-        vendor_bid = bid.with_user(self.vendor_user)
-        visible_fields = vendor_bid.fields_get()
-        for forbidden_field in ("order_id", "invitation_id", "company_id", "vendor_id"):
-            self.assertNotIn(forbidden_field, visible_fields)
-        self.assertIn("vendor_order_number", visible_fields)
-        self.assertIn("round_number", visible_fields)
-        self.assertEqual(vendor_bid.vendor_order_number, invitation.order_id.order_number)
-        for forbidden_field in ("order_id", "invitation_id", "company_id", "vendor_id"):
-            with self.assertRaises(AccessError):
-                vendor_bid.read([forbidden_field])
+    def test_vendor_has_no_raw_bid_acl(self):
+        bid_model = self.env["trucalc.bid"].with_user(self.vendor_user)
+        for operation in ("read", "write", "create", "unlink"):
+            self.assertFalse(
+                bid_model.check_access_rights(operation, raise_exception=False)
+            )
+        with self.assertRaises(AccessError):
+            bid_model.search([]).read(["bid_amount", "notes"])

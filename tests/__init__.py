@@ -8,3 +8,4 @@ from . import test_record_rule_cache
 from . import test_vendor_order_portal
 from . import test_vendor_portal_provisioning
 from . import test_vendor_service_capability
+from . import test_vendor_bid_response

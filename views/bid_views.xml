@@ -6,19 +6,34 @@
         <field name="model">trucalc.bid</field>
         <field name="arch" type="xml">
 
-            <list>
-                <field name="vendor_id"/>
-                <field name="bid_amount"/>
-                <field name="turn_time_days"/>
-                <field name="status"/>
-
+            <list class="o_trucalc_vendor_responses">
                 <button
                     name="action_select_bid"
                     type="object"
                     string="Select"
                     groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
-                    invisible="status != 'submitted'"
+                    invisible="not is_currently_selectable"
                 />
+                <button string="Selected" class="btn-success opacity-100"
+                        invisible="status != 'selected'"/>
+                <button string="Not Selected" class="btn-secondary opacity-100"
+                        invisible="status != 'not_selected'"/>
+                <button string="Disqualified" class="btn-danger opacity-100"
+                        invisible="status != 'disqualified'"/>
+                <field name="status" column_invisible="True"/>
+                <field name="is_currently_selectable" column_invisible="True"/>
+                <field name="vendor_id"/>
+                <field name="response_type"/>
+                <field name="currency_id" column_invisible="True"/>
+                <field name="solicited_standard_fee" widget="monetary"
+                       options="{'currency_field': 'currency_id'}"/>
+                <field name="bid_amount" string="Proposed Fee" widget="monetary"
+                       options="{'currency_field': 'currency_id'}"/>
+                <field name="requested_delivery_date" options="{'numeric': True}"/>
+                <field name="proposed_delivery_date" options="{'numeric': True}"/>
+                <field name="notes" string="Vendor Comments"/>
+                <field name="submitted_at"/>
+                <field name="last_revised_at"/>
 
             </list>
 

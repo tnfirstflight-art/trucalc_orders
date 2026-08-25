@@ -122,5 +122,6 @@
          CSV rows alone would leave the already-installed database rows active. -->
     <delete id="access_trucalc_order_vendor_portal" model="ir.model.access"/>
     <delete id="access_trucalc_document_vendor_portal" model="ir.model.access"/>
+    <delete id="access_trucalc_bid_vendor_portal" model="ir.model.access"/>
 
 </odoo>

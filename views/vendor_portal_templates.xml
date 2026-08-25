@@ -55,6 +55,7 @@
                         <th>Borrower</th>
                         <th>Property</th>
                         <th>Status</th>
+                        <th>Your Response</th>
                         <th>Due</th>
                     </tr>
                 </thead>
@@ -75,7 +76,8 @@
                                 <t t-out="projection.zip_code"/>
                             </small>
                         </td>
-                        <td><span t-field="projection.vendor_status"/></td>
+                        <td><span t-field="projection.order_status"/></td>
+                        <td><t t-out="projection.vendor_response_label or '—'"/></td>
                         <td>
                             <span t-if="projection.due_date" t-field="projection.due_date"/>
                             <span t-elif="projection.response_deadline"
@@ -126,7 +128,7 @@
                         </dd>
 
                         <dt class="col-sm-4">Status</dt>
-                        <dd class="col-sm-8"><span t-field="projection.vendor_status"/></dd>
+                        <dd class="col-sm-8"><span t-field="projection.order_status"/></dd>
 
                         <dt t-if="projection.response_deadline" class="col-sm-4">
                             Response deadline
@@ -140,7 +142,8 @@
                         </dt>
                         <dd t-if="projection.vendor_phase == 'invitation'" class="col-sm-8">
                             <span t-if="projection.solicitation_standard_fee is not False"
-                                  t-field="projection.solicitation_standard_fee"/>
+                                  t-field="projection.solicitation_standard_fee"
+                                  t-options="{'widget': 'monetary', 'display_currency': projection.currency_id}"/>
                             <span t-else="">Not recorded for this legacy invitation</span>
                         </dd>
 
@@ -149,11 +152,124 @@
                             <span t-field="projection.due_date"/>
                         </dd>
 
+                        <dt t-if="projection.vendor_phase in ('invitation', 'declined_history')"
+                            class="col-sm-4">Requested delivery date</dt>
+                        <dd t-if="projection.vendor_phase in ('invitation', 'declined_history')"
+                            class="col-sm-8">
+                            <span t-if="projection.requested_delivery_date"
+                                  t-field="projection.requested_delivery_date"/>
+                            <span t-else="">Not recorded for this historical invitation</span>
+                        </dd>
+
                         <dt t-if="projection.is_assigned" class="col-sm-4">Agreed fee</dt>
                         <dd t-if="projection.is_assigned" class="col-sm-8">
-                            <span t-field="projection.agreed_vendor_fee"/>
+                            <span t-field="projection.agreed_vendor_fee"
+                                  t-options="{'widget': 'monetary', 'display_currency': projection.currency_id}"/>
                         </dd>
                     </dl>
+                </div>
+            </div>
+
+            <div t-if="response_error" class="alert alert-danger mt-3" role="alert">
+                <t t-out="response_error"/>
+            </div>
+
+            <div t-if="projection.vendor_phase in ('invitation', 'declined_history') or projection.response_type"
+                 class="card mt-3">
+                <div class="card-header"><strong>Vendor Response</strong></div>
+                <div class="card-body">
+                    <t t-if="projection.vendor_status == 'declined'">
+                        <p class="mb-1"><strong>Response Status:</strong> Declined</p>
+                        <p t-if="projection.vendor_decline_reason" class="mb-0">
+                            <strong>Reason:</strong>
+                            <t t-out="projection.vendor_decline_reason"/>
+                        </p>
+                    </t>
+                    <t t-elif="projection.response_type">
+                        <dl class="row">
+                            <dt class="col-sm-4">Response</dt>
+                            <dd class="col-sm-8"><span t-field="projection.response_type"/></dd>
+                            <dt class="col-sm-4">Proposed fee</dt>
+                            <dd class="col-sm-8">
+                                <span t-field="projection.proposed_fee"
+                                      t-options="{'widget': 'monetary', 'display_currency': projection.currency_id}"/>
+                            </dd>
+                            <dt class="col-sm-4">Proposed delivery date</dt>
+                            <dd class="col-sm-8"><span t-field="projection.proposed_delivery_date"/></dd>
+                            <dt t-if="projection.vendor_comments" class="col-sm-4">Comments</dt>
+                            <dd t-if="projection.vendor_comments" class="col-sm-8">
+                                <t t-out="projection.vendor_comments"/>
+                            </dd>
+                            <dt class="col-sm-4">Status</dt>
+                            <dd class="col-sm-8"><span t-field="projection.response_status"/></dd>
+                        </dl>
+                    </t>
+
+                    <div t-if="projection.can_respond">
+                        <h5 t-if="projection.response_type">Revise Response</h5>
+
+                        <form t-att-action="'/my/trucalc/orders/%s/response' % projection.order_number"
+                              method="post" class="border rounded p-3 mb-3">
+                            <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
+                            <input type="hidden" name="response_type"
+                                   value="standard_terms_accepted"/>
+                            <h6>Accept Standard Terms</h6>
+                            <p>Accept the displayed Standard Fee and Requested Delivery Date.</p>
+                            <button type="submit" class="btn btn-primary">Accept Standard Terms</button>
+                        </form>
+
+                        <form t-att-action="'/my/trucalc/orders/%s/response' % projection.order_number"
+                              method="post" class="border rounded p-3 mb-3">
+                            <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
+                            <input type="hidden" name="response_type" value="delivery_date_counter"/>
+                            <h6>Accept Fee / Change Delivery Date</h6>
+                            <div class="mb-2">
+                                <label class="form-label">Proposed Delivery Date</label>
+                                <input type="date" name="proposed_delivery_date"
+                                       class="form-control" required="required"/>
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label">Vendor Comments</label>
+                                <textarea name="comments" class="form-control" rows="2"/>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Submit Date Change</button>
+                        </form>
+
+                        <form t-att-action="'/my/trucalc/orders/%s/response' % projection.order_number"
+                              method="post" class="border rounded p-3 mb-3">
+                            <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
+                            <input type="hidden" name="response_type" value="fee_and_delivery_counter"/>
+                            <h6>Counter Fee and Delivery Date</h6>
+                            <div class="mb-2">
+                                <label class="form-label">Proposed Fee</label>
+                                <input type="number" name="proposed_fee" min="0" step="0.01"
+                                       class="form-control" required="required"/>
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label">Proposed Delivery Date</label>
+                                <input type="date" name="proposed_delivery_date"
+                                       class="form-control" required="required"/>
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label">Vendor Comments</label>
+                                <textarea name="comments" class="form-control" rows="2"/>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Submit Counteroffer</button>
+                        </form>
+
+                        <form t-if="not projection.response_type"
+                              t-att-action="'/my/trucalc/orders/%s/decline' % projection.order_number"
+                              method="post" class="border border-danger rounded p-3">
+                            <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
+                            <h6>Decline Bid Request</h6>
+                            <div class="mb-2">
+                                <label class="form-label">Decline Reason</label>
+                                <textarea name="decline_reason" class="form-control" rows="2"
+                                          required="required"/>
+                            </div>
+                            <button type="submit" class="btn btn-outline-danger">Decline Bid Request</button>
+                        </form>
+                    </div>
                 </div>
             </div>
         </t>

@@ -91,6 +91,7 @@ class TestBidLifecycle(TransactionCase):
             "property_address": "1 Test Way",
             "company_id": self.env.company.id,
             "service_type": "evaluation",
+            "due_date": fields.Date.add(fields.Date.today(), days=14),
         })
 
     def _invitation(self, vendor=None, order=None, manager=None, deadline=False):
@@ -282,7 +283,7 @@ class TestBidLifecycle(TransactionCase):
         self.assertEqual(revoked.state, "revoked")
         declined = self._invitation(vendor=self.vendor_b)
         removed = self._draft(declined, user=self.vendor_user_b)
-        declined.with_user(self.vendor_user_b).action_vendor_decline()
+        declined.with_user(self.vendor_user_b).action_vendor_decline("Not available")
         self.assertFalse(removed.exists())
         self.assertEqual(declined.state, "declined")
 
@@ -334,6 +335,7 @@ class TestBidLifecycleConcurrency(TransactionCase):
                 "property_address": "2 Lock Row",
                 "company_id": env.company.id,
                 "service_type": "evaluation",
+                "due_date": fields.Date.add(fields.Date.today(), days=14),
             })
             order.action_accept_request()
             order.action_bid_requested()

@@ -57,6 +57,7 @@ class TestVendorOrderAuthorization(TransactionCase):
             "property_address": "1 Trusted Way",
             "company_id": self.env.company.id,
             "service_type": "evaluation",
+            "due_date": fields.Date.add(fields.Date.today(), days=14),
         })
         order.with_user(self.admin).action_accept_request()
         order.with_user(self.admin).action_bid_requested()
@@ -180,7 +181,7 @@ class TestVendorOrderAuthorization(TransactionCase):
     def test_decline_and_revoke_deactivate_but_retain(self):
         declined = self._invitation()
         declined_auth = self._authorization(declined)
-        declined.with_user(self.vendor_user).action_vendor_decline()
+        declined.with_user(self.vendor_user).action_vendor_decline("Not available")
         self.assertTrue(declined_auth.exists())
         self.assertFalse(declined_auth.active)
         self.assertEqual(declined_auth.deauthorization_reason, "declined")

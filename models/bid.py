@@ -1,8 +1,15 @@
-from odoo import api, fields, models, _
+from odoo import api, fields, models, tools, _
 from odoo.exceptions import AccessError, ValidationError
+from odoo.tools.float_utils import float_compare
+from markupsafe import Markup
 
 
 COMMERCIAL_FIELDS = {"option_name", "bid_amount", "turn_time_days", "notes"}
+RESPONSE_SELECTION = [
+    ("standard_terms_accepted", "Accepted Standard Terms"),
+    ("delivery_date_counter", "Accepted Fee / Changed Delivery Date"),
+    ("fee_and_delivery_counter", "Countered Fee and Delivery Date"),
+]
 
 
 class TruCalcBid(models.Model):
@@ -70,6 +77,30 @@ class TruCalcBid(models.Model):
     bid_amount = fields.Float(string="Bid Amount", required=True)
     turn_time_days = fields.Integer(string="Turn Time (Days)")
     notes = fields.Text(string="Notes")
+    response_type = fields.Selection(
+        RESPONSE_SELECTION, string="Response Type", readonly=True, copy=False,
+        index=True,
+    )
+    proposed_delivery_date = fields.Date(
+        string="Proposed Delivery Date", readonly=True, copy=False,
+    )
+    submitted_at = fields.Datetime(readonly=True, copy=False)
+    last_revised_at = fields.Datetime(readonly=True, copy=False)
+    revision_count = fields.Integer(readonly=True, copy=False, default=0)
+    solicited_standard_fee = fields.Float(
+        related="invitation_id.standard_fee", string="Solicited Standard Fee",
+        readonly=True,
+    )
+    requested_delivery_date = fields.Date(
+        related="invitation_id.requested_delivery_date",
+        string="Requested Delivery Date", readonly=True,
+    )
+    currency_id = fields.Many2one(
+        "res.currency", related="company_id.currency_id", readonly=True,
+    )
+    is_currently_selectable = fields.Boolean(
+        compute="_compute_is_currently_selectable", string="Currently Selectable",
+    )
     status = fields.Selection(
         [("draft", "Draft"), ("submitted", "Submitted"),
          ("selected", "Selected"), ("not_selected", "Not Selected"),
@@ -81,6 +112,157 @@ class TruCalcBid(models.Model):
         "(order_id, round_number) WHERE status = 'selected'",
         "Only one bid may be selected for an order and bidding round.",
     )
+    _one_canonical_response_per_invitation = models.UniqueIndex(
+        "(invitation_id) WHERE response_type IS NOT NULL",
+        "An invitation may have only one canonical Vendor response.",
+    )
+
+    @api.depends(
+        "status", "round_number", "vendor_id.active", "invitation_id.state",
+        "order_id.status", "order_id.bidding_round",
+    )
+    def _compute_is_currently_selectable(self):
+        for bid in self:
+            bid.is_currently_selectable = bool(
+                bid.status == "submitted"
+                and bid.order_id.status == "bid_requested"
+                and bid.round_number == bid.order_id.bidding_round
+                and bid.invitation_id.state == "invited"
+                and bid.vendor_id.active
+            )
+
+    @api.model
+    @api.private
+    def _normalized_response_values(self, invitation, response_type,
+                                    proposed_fee=None, proposed_delivery_date=None,
+                                    comments=None):
+        labels = dict(RESPONSE_SELECTION)
+        if response_type not in labels:
+            raise ValidationError(_("Select a valid Vendor response."))
+        requested = invitation.requested_delivery_date
+        standard = invitation.standard_fee
+        date = fields.Date.to_date(proposed_delivery_date) if proposed_delivery_date else False
+        precision = invitation.company_id.currency_id.decimal_places
+        if response_type == "standard_terms_accepted":
+            fee, date, comments = standard, requested, False
+        elif response_type == "delivery_date_counter":
+            fee = standard
+            if not date or date == requested:
+                raise ValidationError(_("The proposed delivery date must differ from the requested date."))
+        else:
+            if proposed_fee in (None, "") or not date:
+                raise ValidationError(_("A proposed fee and delivery date are required."))
+            try:
+                fee = float(proposed_fee)
+            except (TypeError, ValueError):
+                raise ValidationError(_("Enter a valid proposed fee."))
+            if fee < 0:
+                raise ValidationError(_("The proposed fee cannot be negative."))
+            if float_compare(fee, standard, precision_digits=precision) == 0:
+                raise ValidationError(_("The proposed fee must differ from the Standard Fee."))
+            if date == requested:
+                raise ValidationError(_("The proposed delivery date must differ from the requested date."))
+        return {
+            "response_type": response_type,
+            "option_name": labels[response_type],
+            "bid_amount": fee,
+            "proposed_delivery_date": date,
+            "notes": comments.strip() if isinstance(comments, str) and comments.strip() else False,
+            "turn_time_days": 0,
+        }
+
+    @api.model
+    @api.private
+    def _response_audit_values(self, bid):
+        return {
+            "response_type": bid.response_type,
+            "standard_fee": bid.invitation_id.standard_fee,
+            "requested_delivery_date": fields.Date.to_string(
+                bid.invitation_id.requested_delivery_date
+            ),
+            "proposed_fee": bid.bid_amount,
+            "proposed_delivery_date": fields.Date.to_string(
+                bid.proposed_delivery_date
+            ),
+            "vendor_comments": bid.notes or False,
+            "status": bid.status,
+        }
+
+    @api.model
+    @api.private
+    def _controlled_submit_response(self, invitation, response_type, **values):
+        invitation.ensure_one()
+        order = invitation.order_id
+        order._lock_for_bid_lifecycle()
+        invitation._validate_current_active()
+        existing = self.sudo().search([
+            ("invitation_id", "=", invitation.id),
+            ("response_type", "!=", False),
+        ], limit=1)
+        normalized = self._normalized_response_values(invitation, response_type, **values)
+        now = fields.Datetime.now()
+        def response_message(prefix, response):
+            currency = invitation.company_id.currency_id
+            return _(
+                "%(prefix)s %(vendor)s. Response: %(response)s. "
+                "Fee: %(fee)s. Delivery Date: %(date)s."
+            ) % {
+                "prefix": prefix,
+                "vendor": invitation.vendor_id.name,
+                "response": dict(RESPONSE_SELECTION)[response.response_type],
+                "fee": tools.format_amount(self.env, response.bid_amount, currency),
+                "date": tools.format_date(self.env, response.proposed_delivery_date),
+            }
+        if existing:
+            existing.flush_recordset(["status", "response_type"])
+            self.env.cr.execute(
+                "SELECT id FROM trucalc_bid WHERE id = %s FOR UPDATE", (existing.id,)
+            )
+            existing.invalidate_recordset()
+            invitation._validate_current_active()
+            if existing.status != "submitted":
+                raise ValidationError(_("This response is finalized and cannot be revised."))
+            old = self._response_audit_values(existing)
+            existing._controlled_write({
+                **normalized,
+                "last_revised_at": now,
+                "revision_count": existing.revision_count + 1,
+            })
+            new = self._response_audit_values(existing)
+            self.env["trucalc.bid.audit"]._log_event(
+                "response_revised", order, invitation=invitation, bid=existing,
+                old_values=old, new_values=new,
+            )
+            order.sudo().message_post(body=response_message(
+                _("Vendor response revised by"), existing
+            ))
+            return existing
+        if invitation.bid_ids:
+            raise ValidationError(_("This invitation contains legacy Bid options and cannot accept a canonical response."))
+        bid = self._controlled_create_canonical(invitation, {
+            **normalized, "status": "submitted", "submitted_at": now,
+        })
+        self.env["trucalc.bid.audit"]._log_event(
+            "response_submitted", order, invitation=invitation, bid=bid,
+            new_values=self._response_audit_values(bid),
+        )
+        order.sudo().message_post(body=response_message(
+            _("Vendor response received from"), bid
+        ))
+        return bid
+
+    @api.model
+    @api.private
+    def _controlled_create_canonical(self, invitation, values):
+        vals = dict(
+            values,
+            invitation_id=invitation.id,
+            order_id=invitation.order_id.id,
+            vendor_id=invitation.vendor_id.id,
+            company_id=invitation.company_id.id,
+            round_number=invitation.round_number,
+        )
+        return super(TruCalcBid, self.sudo()).create(vals)
 
     @api.model
     @api.private
@@ -161,33 +343,10 @@ class TruCalcBid(models.Model):
 
     @api.model_create_multi
     def create(self, vals_list):
-        vendor = self._vendor_identity()
-        created = self.browse()
-        for values in vals_list:
-            if set(values) - (COMMERCIAL_FIELDS | {"invitation_id"}):
-                raise AccessError(_("Bid ownership and lifecycle fields are server-controlled."))
-            invitation_id = values.get("invitation_id")
-            if not invitation_id:
-                raise ValidationError(_("An invitation is required."))
-            invitation = self.env["trucalc.bid.invitation"].sudo().browse(
-                invitation_id
-            ).exists()
-            if not invitation or invitation.vendor_id.id != vendor.id:
-                raise AccessError(_("Vendor lifecycle access is not authorized."))
-            invitation._validate_current_active()
-            if invitation.bid_ids.filtered(lambda bid: bid.status != "draft"):
-                raise ValidationError(_("No new options may be added after submission."))
-            created |= self._controlled_create_draft(invitation, values)
-        return created
+        raise AccessError(_("Bid creation requires an explicit controlled lifecycle action."))
 
     def write(self, values):
-        if set(values) - COMMERCIAL_FIELDS:
-            raise AccessError(_("Bid ownership and lifecycle fields are server-controlled."))
-        for original in self:
-            bid = original._authorized_vendor_bid()
-            bid._validate_draft_mutation()
-            self._validate_commercial_values(values, current=bid)
-        return super(TruCalcBid, self.sudo()).write(values)
+        raise AccessError(_("Bid changes require an explicit controlled lifecycle action."))
 
     def unlink(self):
         raise AccessError(_("Bid options require an explicit lifecycle removal action."))
@@ -280,7 +439,8 @@ class TruCalcBid(models.Model):
             "SELECT id FROM trucalc_order WHERE id = %s FOR UPDATE", (order.id,)
         )
         order.invalidate_recordset(["status", "bidding_round", "assigned_vendor_id", "vendor_fee"])
-        self.invalidate_recordset(["status", "round_number", "vendor_id", "bid_amount"])
+        self.invalidate_recordset(["status", "round_number", "vendor_id", "bid_amount",
+                                   "response_type", "proposed_delivery_date"])
         self.invitation_id.invalidate_recordset(["state", "round_number"])
         self._validate_structure()
         if order.status != "bid_requested" or self.status != "submitted":
@@ -307,9 +467,18 @@ class TruCalcBid(models.Model):
         if others:
             others._controlled_write({"status": "not_selected"})
         self._controlled_write({"status": "selected"})
-        order._controlled_lifecycle_write({
+        old_order_values = {
+            "order_status": order.status,
+            "assigned_vendor_id": order.assigned_vendor_id.id or False,
+            "vendor_fee": order.vendor_fee,
+            "vendor_delivery_date": fields.Date.to_string(
+                order.vendor_delivery_date
+            ),
+        }
+        order.with_context(tracking_disable=True)._controlled_lifecycle_write({
             "assigned_vendor_id": self.vendor_id.id,
             "vendor_fee": self.bid_amount,
+            "vendor_delivery_date": self.proposed_delivery_date if self.response_type else False,
             "status": "assigned",
         })
         invitations = self.env["trucalc.bid.invitation"].search([
@@ -330,8 +499,31 @@ class TruCalcBid(models.Model):
         )
         self.env["trucalc.bid.audit"]._log_event(
             "winner_selected", order, invitation=self.invitation_id, bid=self,
-            old_values={"status": "submitted"},
-            new_values={"status": "selected", "assigned_vendor_id": self.vendor_id.id,
-                        "vendor_fee": self.bid_amount},
+            old_values={"bid_status": "submitted", **old_order_values},
+            new_values={"bid_status": "selected", "order_status": "assigned",
+                        "assigned_vendor_id": self.vendor_id.id,
+                        "vendor_fee": self.bid_amount,
+                        "vendor_delivery_date": fields.Date.to_string(
+                            self.proposed_delivery_date
+                        ) if self.response_type else False},
         )
+        order_status_label = dict(order._fields["status"].selection)["assigned"]
+        order.sudo().message_post(body=Markup(_(
+            "<p><strong>Winning Vendor response selected.</strong></p>"
+            "<ul>"
+            "<li>Vendor: %(vendor)s</li>"
+            "<li>Agreed Fee: %(fee)s</li>"
+            "<li>Vendor Delivery Date: %(delivery_date)s</li>"
+            "<li>Order Status: %(order_status)s</li>"
+            "</ul>"
+        )) % {
+            "vendor": self.vendor_id.name,
+            "fee": tools.format_amount(
+                self.env, self.bid_amount, order.company_id.currency_id
+            ),
+            "delivery_date": tools.format_date(
+                self.env, self.proposed_delivery_date
+            ),
+            "order_status": order_status_label,
+        })
         return True

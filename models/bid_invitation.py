@@ -1,5 +1,6 @@
 from odoo import api, fields, models, _
 from odoo.exceptions import AccessError, ValidationError
+from markupsafe import Markup
 
 from .vendor_fee import SERVICE_SELECTION
 
@@ -28,6 +29,10 @@ class TruCalcBidInvitation(models.Model):
         string="Standard Fee at Solicitation", readonly=True, copy=False,
         help="Vendor standard fee snapshotted when this invitation was created.",
     )
+    requested_delivery_date = fields.Date(
+        string="Requested Delivery Date", readonly=True, copy=False,
+        help="Client due date snapshotted when this invitation was created.",
+    )
     company_id = fields.Many2one(
         "res.company", string="Company", related="order_id.company_id",
         store=True, readonly=True, index=True,
@@ -42,6 +47,7 @@ class TruCalcBidInvitation(models.Model):
     invited_by = fields.Many2one("res.users", string="Invited By", readonly=True)
     invited_at = fields.Datetime(string="Invited At", readonly=True)
     declined_at = fields.Datetime(string="Declined At", readonly=True)
+    decline_reason = fields.Text(string="Decline Reason", readonly=True, copy=False)
     revoked_at = fields.Datetime(string="Revoked At", readonly=True)
     is_legacy_reconstructed = fields.Boolean(
         string="Legacy Reconstructed", default=False, readonly=True
@@ -118,7 +124,7 @@ class TruCalcBidInvitation(models.Model):
         protected = {
             "company_id", "round_number", "state", "invited_by", "invited_at",
             "declined_at", "revoked_at", "is_legacy_reconstructed", "service_type",
-            "standard_fee",
+            "standard_fee", "requested_delivery_date", "decline_reason",
         }
         prepared = []
         order_ids = []
@@ -144,6 +150,8 @@ class TruCalcBidInvitation(models.Model):
                 raise ValidationError(_("A valid active vendor and order are required."))
             if order.status != "bid_requested" or order.bidding_round <= 0:
                 raise ValidationError(_("The order is not in an active bidding round."))
+            if not order.due_date:
+                raise ValidationError(_("Set a Client Due Date before requesting Vendor bids."))
             fee = self.env["trucalc.vendor.fee"].search([
                 ("vendor_id", "=", vendor.id),
                 ("service_type", "=", order.service_type),
@@ -167,6 +175,7 @@ class TruCalcBidInvitation(models.Model):
                 "is_legacy_reconstructed": False,
                 "service_type": order.service_type,
                 "standard_fee": fee.fee,
+                "requested_delivery_date": order.due_date,
             })
             prepared.append(vals)
         invitations = super().create(prepared)
@@ -177,7 +186,12 @@ class TruCalcBidInvitation(models.Model):
             self.env["trucalc.bid.audit"]._log_event(
                 "invitation_created", invitation.order_id, invitation=invitation,
                 new_values={"vendor_id": invitation.vendor_id.id,
-                            "round_number": invitation.round_number},
+                            "round_number": invitation.round_number,
+                            "service_type": invitation.service_type,
+                            "standard_fee": invitation.standard_fee,
+                            "requested_delivery_date": fields.Date.to_string(
+                                invitation.requested_delivery_date
+                            )},
             )
         return invitations
 
@@ -225,9 +239,12 @@ class TruCalcBidInvitation(models.Model):
             )
         return True
 
-    def action_vendor_decline(self):
+    def action_vendor_decline(self, reason=None):
         invitation = self._authorized_vendor_invitation()
-        invitation._lock_for_lifecycle()
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValidationError(_("A decline reason is required."))
+        reason = reason.strip()
+        invitation._validate_current_active()
         if invitation.state != "invited" or invitation.bid_ids.filtered(
             lambda bid: bid.status != "draft"
         ):
@@ -236,15 +253,40 @@ class TruCalcBidInvitation(models.Model):
         if drafts:
             drafts._controlled_unlink()
         super(TruCalcBidInvitation, invitation).write(
-            {"state": "declined", "declined_at": fields.Datetime.now()}
+            {"state": "declined", "declined_at": fields.Datetime.now(),
+             "decline_reason": reason}
         )
-        self.env["trucalc.order.vendor.authorization"]._deactivate(
+        invitation.flush_recordset(["state", "declined_at", "decline_reason"])
+        deactivated = self.env["trucalc.order.vendor.authorization"]._deactivate(
             [("invitation_id", "=", invitation.id)], "declined"
         )
+        deactivated.flush_recordset([
+            "active", "deauthorized_at", "deauthorization_reason"
+        ])
         self.env["trucalc.bid.audit"]._log_event(
-            "invitation_declined", invitation.order_id, invitation=invitation
+            "invitation_declined", invitation.order_id, invitation=invitation,
+            reason=reason, new_values={"state": "declined", "reason": reason},
+        )
+        invitation.order_id.sudo().message_post(
+            body=Markup(_(
+                "Vendor %(vendor)s declined the bid request. Reason: %(reason)s"
+            )) % {
+                "vendor": invitation.vendor_id.name,
+                "reason": reason,
+            }
         )
         return True
+
+    def action_vendor_submit_response(self, response_type, proposed_fee=None,
+                                      proposed_delivery_date=None, comments=None):
+        invitation = self._authorized_vendor_invitation()
+        invitation._validate_current_active()
+        if not invitation.requested_delivery_date:
+            raise ValidationError(_("This historical invitation has no recorded requested delivery date."))
+        return self.env["trucalc.bid"]._controlled_submit_response(
+            invitation, response_type, proposed_fee=proposed_fee,
+            proposed_delivery_date=proposed_delivery_date, comments=comments,
+        )
 
     def action_vendor_create_option(self, values):
         invitation = self._authorized_vendor_invitation()
