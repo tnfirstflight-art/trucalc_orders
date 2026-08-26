@@ -1,3 +1,5 @@
+import math
+
 from odoo import api, fields, models, tools, _
 from odoo.exceptions import AccessError, ValidationError
 from odoo.tools.float_utils import float_compare
@@ -429,35 +431,101 @@ class TruCalcBid(models.Model):
         )
         return True
 
-    def action_select_bid(self):
-        self._require_manager()
+    @api.private
+    def _validate_engagement_eligibility(self):
         self.ensure_one()
-        self.flush_recordset(["status", "order_id", "round_number", "invitation_id"])
         order = self.order_id
-        order.flush_recordset(["status", "bidding_round"])
-        self.env.cr.execute(
-            "SELECT id FROM trucalc_order WHERE id = %s FOR UPDATE", (order.id,)
-        )
-        order.invalidate_recordset(["status", "bidding_round", "assigned_vendor_id", "vendor_fee"])
-        self.invalidate_recordset(["status", "round_number", "vendor_id", "bid_amount",
-                                   "response_type", "proposed_delivery_date"])
-        self.invitation_id.invalidate_recordset(["state", "round_number"])
+        invitation = self.invitation_id
         self._validate_structure()
+        if order.company_id not in self.env.user.company_ids:
+            raise AccessError(_("Vendor engagement is not authorized for this company."))
         if order.status != "bid_requested" or self.status != "submitted":
-            raise ValidationError(_("The bid is not eligible for selection."))
+            raise ValidationError(_("The Vendor response is not eligible for engagement."))
         if (
-            self.invitation_id.state != "invited"
+            invitation.state != "invited"
+            or invitation.is_legacy_reconstructed
             or self.round_number != order.bidding_round
             or not self.vendor_id.active
         ):
-            raise ValidationError(_("The invitation is not eligible for selection."))
+            raise ValidationError(_("The invitation is not eligible for engagement."))
+        if (
+            invitation.response_deadline
+            and fields.Datetime.now() > invitation.response_deadline
+        ):
+            raise ValidationError(_("The Vendor response deadline has passed."))
+        if not self.response_type or not self.proposed_delivery_date:
+            raise ValidationError(_(
+                "Engagement requires a canonical response with a delivery commitment."
+            ))
+        if self.bid_amount is False or not math.isfinite(self.bid_amount) or self.bid_amount < 0:
+            raise ValidationError(_("The accepted Vendor fee is invalid."))
+        if order.assigned_vendor_id or order.vendor_engaged_at:
+            raise ValidationError(_("The order already contains engagement data."))
+        authorization_count = self.env[
+            "trucalc.order.vendor.authorization"
+        ].sudo().search_count([
+            ("order_id", "=", order.id),
+            ("vendor_id", "=", self.vendor_id.id),
+            ("company_id", "=", order.company_id.id),
+            ("source", "=", "invitation"),
+            ("invitation_id", "=", invitation.id),
+            ("round_number", "=", order.bidding_round),
+            ("active", "=", True),
+        ])
+        if authorization_count != 1:
+            raise ValidationError(_("Active Vendor solicitation authorization is required."))
         current = self.search([
             ("order_id", "=", order.id),
             ("round_number", "=", order.bidding_round),
             ("status", "=", "selected"),
         ], limit=1)
         if current:
-            raise ValidationError(_("A winning bid has already been selected for this round."))
+            raise ValidationError(_("A winning response has already been selected for this round."))
+        return True
+
+    def action_open_engagement_wizard(self):
+        self._require_manager()
+        self.ensure_one()
+        self._validate_engagement_eligibility()
+        return {
+            "type": "ir.actions.act_window",
+            "name": _("Engage Vendor"),
+            "res_model": "trucalc.vendor.engagement.wizard",
+            "view_mode": "form",
+            "view_id": self.env.ref(
+                "trucalc_orders.view_trucalc_vendor_engagement_wizard_form"
+            ).id,
+            "target": "new",
+            "context": {"default_bid_id": self.id},
+        }
+
+    def action_select_bid(self):
+        """Compatibility entry point: selection now always opens confirmation."""
+        return self.action_open_engagement_wizard()
+
+    @api.private
+    def _action_confirm_engagement(self):
+        self._require_manager()
+        self.ensure_one()
+        self.flush_recordset(["status", "order_id", "round_number", "invitation_id"])
+        order = self.order_id
+        order.flush_recordset([
+            "status", "bidding_round", "assigned_vendor_id", "vendor_fee",
+            "vendor_delivery_date", "vendor_engaged_at",
+        ])
+        self.env.cr.execute(
+            "SELECT id FROM trucalc_order WHERE id = %s FOR UPDATE", (order.id,)
+        )
+        order.invalidate_recordset([
+            "status", "bidding_round", "assigned_vendor_id", "vendor_fee",
+            "vendor_delivery_date", "vendor_engaged_at",
+        ])
+        self.invalidate_recordset(["status", "round_number", "vendor_id", "bid_amount",
+                                   "response_type", "proposed_delivery_date"])
+        self.invitation_id.invalidate_recordset([
+            "state", "round_number", "response_deadline", "is_legacy_reconstructed",
+        ])
+        self._validate_engagement_eligibility()
         others = self.search([
             ("order_id", "=", order.id),
             ("round_number", "=", order.bidding_round),
@@ -467,6 +535,7 @@ class TruCalcBid(models.Model):
         if others:
             others._controlled_write({"status": "not_selected"})
         self._controlled_write({"status": "selected"})
+        engaged_at = fields.Datetime.now()
         old_order_values = {
             "order_status": order.status,
             "assigned_vendor_id": order.assigned_vendor_id.id or False,
@@ -474,12 +543,14 @@ class TruCalcBid(models.Model):
             "vendor_delivery_date": fields.Date.to_string(
                 order.vendor_delivery_date
             ),
+            "vendor_engaged_at": fields.Datetime.to_string(order.vendor_engaged_at),
         }
         order.with_context(tracking_disable=True)._controlled_lifecycle_write({
             "assigned_vendor_id": self.vendor_id.id,
             "vendor_fee": self.bid_amount,
-            "vendor_delivery_date": self.proposed_delivery_date if self.response_type else False,
-            "status": "assigned",
+            "vendor_delivery_date": self.proposed_delivery_date,
+            "vendor_engaged_at": engaged_at,
+            "status": "engaged",
         })
         invitations = self.env["trucalc.bid.invitation"].search([
             ("order_id", "=", order.id),
@@ -498,22 +569,25 @@ class TruCalcBid(models.Model):
             order, self.vendor_id, order.bidding_round
         )
         self.env["trucalc.bid.audit"]._log_event(
-            "winner_selected", order, invitation=self.invitation_id, bid=self,
+            "vendor_engaged", order, invitation=self.invitation_id, bid=self,
             old_values={"bid_status": "submitted", **old_order_values},
-            new_values={"bid_status": "selected", "order_status": "assigned",
+            new_values={"bid_status": "selected", "order_status": "engaged",
                         "assigned_vendor_id": self.vendor_id.id,
                         "vendor_fee": self.bid_amount,
                         "vendor_delivery_date": fields.Date.to_string(
                             self.proposed_delivery_date
-                        ) if self.response_type else False},
+                        ),
+                        "vendor_engaged_at": fields.Datetime.to_string(engaged_at)},
         )
-        order_status_label = dict(order._fields["status"].selection)["assigned"]
+        order_status_label = dict(order._fields["status"].selection)["engaged"]
         order.sudo().message_post(body=Markup(_(
-            "<p><strong>Winning Vendor response selected.</strong></p>"
+            "<p><strong>Vendor engaged.</strong></p>"
             "<ul>"
             "<li>Vendor: %(vendor)s</li>"
             "<li>Agreed Fee: %(fee)s</li>"
             "<li>Vendor Delivery Date: %(delivery_date)s</li>"
+            "<li>Vendor Engaged Date: %(engaged_at)s</li>"
+            "<li>Engaged By: %(actor)s</li>"
             "<li>Order Status: %(order_status)s</li>"
             "</ul>"
         )) % {
@@ -524,6 +598,8 @@ class TruCalcBid(models.Model):
             "delivery_date": tools.format_date(
                 self.env, self.proposed_delivery_date
             ),
+            "engaged_at": tools.format_datetime(self.env, engaged_at),
+            "actor": self.env.user.name,
             "order_status": order_status_label,
         })
         return True

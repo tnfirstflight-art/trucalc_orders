@@ -67,12 +67,8 @@ class TestVendorBidResponse(TransactionCase):
         order.due_date = fields.Date.add(original, days=3)
         self.assertEqual(order.invitation_ids.requested_delivery_date, original)
 
-        blank = self._order(due=False)
         with self.assertRaises(ValidationError):
-            blank.action_request_vendor_bids(
-                self.vendor_a, fields.Datetime.now() + timedelta(days=1)
-            )
-        self.assertFalse(blank.invitation_ids)
+            self._order(due=False)
 
     def test_all_response_types_and_revision_audit(self):
         order, invitation, projection = self._invitation(self.vendor_a)
@@ -190,13 +186,29 @@ class TestVendorBidResponse(TransactionCase):
             with self.assertRaises(AccessError):
                 bid.with_user(denied).action_select_bid()
         prior_message_ids = set(order.message_ids.ids)
-        bid.with_user(self.ops).action_select_bid()
+        before = (
+            order.status, order.assigned_vendor_id, order.vendor_fee,
+            order.vendor_delivery_date, order.vendor_engaged_at,
+            bid.status, other_bid.status, tuple(invitation.mapped("state")),
+        )
+        action = bid.with_user(self.ops).action_select_bid()
+        self.assertEqual(action["res_model"], "trucalc.vendor.engagement.wizard")
+        self.assertEqual(
+            before,
+            (order.status, order.assigned_vendor_id, order.vendor_fee,
+             order.vendor_delivery_date, order.vendor_engaged_at,
+             bid.status, other_bid.status, tuple(invitation.mapped("state"))),
+        )
+        wizard = self.env[action["res_model"]].with_user(self.ops).create({
+            "bid_id": bid.id,
+        })
+        wizard.action_engage_vendor()
         self.env.flush_all()
         selected_projection = self.env["trucalc.vendor.order"].with_user(
             self.vendor_user_b
         ).search([("order_number", "=", order.order_number)])
         selected_projection.invalidate_recordset()
-        self.assertEqual(selected_projection.order_status, "assigned")
+        self.assertEqual(selected_projection.order_status, "engaged")
         self.assertEqual(selected_projection.vendor_response_label, "Selected")
         self.assertEqual(selected_projection.proposed_fee, 100)
         self.assertEqual(bid.status, "selected")
@@ -206,6 +218,7 @@ class TestVendorBidResponse(TransactionCase):
         self.assertEqual(order.assigned_vendor_id, self.vendor_b)
         self.assertEqual(order.vendor_fee, 100)
         self.assertEqual(order.vendor_delivery_date, proposed)
+        self.assertTrue(order.vendor_engaged_at)
         self.assertEqual(order.due_date, due)
         new_messages = order.message_ids.filtered(
             lambda message: message.id not in prior_message_ids
@@ -217,23 +230,28 @@ class TestVendorBidResponse(TransactionCase):
             self.env, 100, order.company_id.currency_id
         )
         expected_date = tools.format_date(self.env, proposed)
-        self.assertIn("Winning Vendor response selected", text)
+        self.assertIn("Vendor engaged", text)
         self.assertIn(self.vendor_b.name, text)
         self.assertIn(expected_fee, text)
         self.assertIn(expected_date, text)
-        self.assertIn("Assigned", text)
+        self.assertIn("Engaged", text)
         self.assertNotIn("None", text)
         self.assertNotIn("<script", body)
         audit = self.env["trucalc.bid.audit"].search([
-            ("bid_id", "=", bid.id), ("action", "=", "winner_selected")
+            ("bid_id", "=", bid.id), ("action", "=", "vendor_engaged")
         ], limit=1)
         self.assertEqual(audit.old_values["order_status"], "bid_requested")
-        self.assertEqual(audit.new_values["order_status"], "assigned")
+        self.assertEqual(audit.new_values["order_status"], "engaged")
         self.assertEqual(audit.new_values["assigned_vendor_id"], self.vendor_b.id)
         self.assertEqual(audit.new_values["vendor_fee"], 100)
         self.assertEqual(audit.new_values["vendor_delivery_date"], str(proposed))
+        self.assertEqual(
+            audit.new_values["vendor_engaged_at"],
+            fields.Datetime.to_string(order.vendor_engaged_at),
+        )
         order.with_user(self.admin).action_reopen_bidding()
         self.assertFalse(order.vendor_delivery_date)
+        self.assertFalse(order.vendor_engaged_at)
         self.assertEqual(order.due_date, due)
         with self.assertRaises(AccessError):
             projection.action_vendor_response("standard_terms_accepted")

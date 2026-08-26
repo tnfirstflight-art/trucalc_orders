@@ -1,6 +1,6 @@
 from odoo import api, fields, models, tools, _
 from odoo.exceptions import AccessError, ValidationError
-from markupsafe import escape
+from markupsafe import Markup, escape
 
 from .vendor_fee import SERVICE_SELECTION
 
@@ -116,6 +116,14 @@ class EvaluationOrder(models.Model):
 
     order_date = fields.Date(
         string="Order Date",
+        readonly=True,
+        copy=False,
+    )
+
+    order_date_display = fields.Char(
+        string="Order Date Display",
+        compute="_compute_order_date_display",
+        readonly=True,
     )
 
     due_date = fields.Date(
@@ -130,12 +138,21 @@ class EvaluationOrder(models.Model):
         tracking=True,
     )
 
+    vendor_engaged_at = fields.Datetime(
+        string="Vendor Engaged Date",
+        readonly=True,
+        copy=False,
+        tracking=True,
+        help="Date and time an authorized TruCalc user confirmed Vendor engagement.",
+    )
+
     status = fields.Selection(
         [
             ("new", "New"),
             ("accepted", "Accepted"),
             ("bid_requested", "Bid Requested"),
             ("assigned", "Assigned"),
+            ("engaged", "Engaged"),
             ("report_received", "Report Received"),
             ("reviewer_assigned", "Reviewer Assigned"),
             ("under_review", "Under Review"),
@@ -199,20 +216,38 @@ class EvaluationOrder(models.Model):
         string="Vendor Order Authorizations", readonly=True, copy=False,
     )
 
+    @api.depends("order_date")
+    def _compute_order_date_display(self):
+        for order in self:
+            order_date = fields.Date.to_date(order.order_date)
+            if not order_date and not order._origin:
+                order_date = fields.Date.context_today(order)
+            order.order_date_display = (
+                order_date.strftime("%m/%d/%Y") if order_date else False
+            )
+
     @api.model_create_multi
     def create(self, vals_list):
         user = self.env.user
         bank_company = False
         if user._trucalc_has_bank_role():
             bank_company = user._trucalc_bank_identity()
+        authoritative_order_date = fields.Date.context_today(self)
         for vals in vals_list:
             if "vendor_authorization_ids" in vals:
                 raise AccessError(_("Vendor Order authorization is server-maintained."))
+            if "order_date" in vals:
+                raise AccessError(_("Order Date is system-controlled."))
+            if not vals.get("due_date"):
+                raise ValidationError(_("Client Due Date is required."))
+            vals["order_date"] = authoritative_order_date
             if (
                 vals.get("status", "new") != "new"
                 or vals.get("bidding_round", 0) != 0
                 or vals.get("assigned_vendor_id")
                 or vals.get("vendor_fee")
+                or vals.get("vendor_delivery_date")
+                or vals.get("vendor_engaged_at")
             ):
                 raise AccessError(_("Bid lifecycle fields cannot be set during order creation."))
             if bank_company:
@@ -241,27 +276,45 @@ class EvaluationOrder(models.Model):
                 vals["order_number"] = vals["order_number"] or "New"
 
         if not bank_company:
-            return super().create(vals_list)
-
-        trusted_context = dict(self.env.context)
-        trusted_context["allowed_company_ids"] = []
-        for field in ("company_id", "requestor_company_id", "requestor_id"):
-            trusted_context.pop("default_%s" % field, None)
-        trusted_model = self.with_context(trusted_context)
-        return super(EvaluationOrder, trusted_model).create(vals_list)
+            orders = super().create(vals_list)
+        else:
+            trusted_context = dict(self.env.context)
+            trusted_context["allowed_company_ids"] = []
+            for field in ("company_id", "requestor_company_id", "requestor_id"):
+                trusted_context.pop("default_%s" % field, None)
+            trusted_model = self.with_context(trusted_context)
+            orders = super(EvaluationOrder, trusted_model).create(vals_list)
+        for order in orders:
+            order.sudo().message_post(body=Markup(_(
+                "<p><strong>Order Created</strong></p>"
+                "<ul>"
+                "<li>Order Date: %(order_date)s</li>"
+                "<li>Created At: %(created_at)s</li>"
+                "</ul>"
+            )) % {
+                "order_date": order.order_date.strftime("%m/%d/%Y"),
+                "created_at": tools.format_datetime(
+                    order.env, order.create_date, tz=user.tz, dt_format="medium"
+                ),
+            })
+        return orders
 
     def write(self, vals):
         if "vendor_authorization_ids" in vals:
             raise AccessError(_("Vendor Order authorization is server-maintained."))
         if "decline_reason" in vals:
             raise AccessError(_("The decline reason requires the controlled decline action."))
+        if "order_date" in vals:
+            raise AccessError(_("Order Date is system-controlled."))
+        if "due_date" in vals and not vals["due_date"]:
+            raise ValidationError(_("Client Due Date is required."))
         if self.env.user._trucalc_has_bank_role():
             self.env.user._trucalc_bank_identity()
             if {"company_id", "requestor_company_id", "requestor_id"} & vals.keys():
                 raise AccessError(_("TruCalc bank order ownership is immutable."))
         protected = {
             "bidding_round", "assigned_vendor_id", "vendor_fee",
-            "vendor_delivery_date",
+            "vendor_delivery_date", "vendor_engaged_at",
         }
         if protected.intersection(vals):
             raise AccessError(_("Order bid lifecycle fields require an explicit action."))
@@ -273,6 +326,8 @@ class EvaluationOrder(models.Model):
                 ("accepted", "bid_requested"),
                 ("assigned", "bid_requested"),
                 ("bid_requested", "assigned"),
+                ("bid_requested", "engaged"),
+                ("engaged", "bid_requested"),
             }
             if any(
                 order.status in ("new", "declined")
@@ -313,13 +368,15 @@ class EvaluationOrder(models.Model):
     def _lock_for_bid_lifecycle(self):
         self.ensure_one()
         self.flush_recordset(
-            ["status", "bidding_round", "assigned_vendor_id", "vendor_fee"]
+            ["status", "bidding_round", "assigned_vendor_id", "vendor_fee",
+             "vendor_delivery_date", "vendor_engaged_at"]
         )
         self.env.cr.execute(
             "SELECT id FROM trucalc_order WHERE id = %s FOR UPDATE", (self.id,)
         )
         self.invalidate_recordset(
-            ["status", "bidding_round", "assigned_vendor_id", "vendor_fee"]
+            ["status", "bidding_round", "assigned_vendor_id", "vendor_fee",
+             "vendor_delivery_date", "vendor_engaged_at"]
         )
 
     @api.private
@@ -658,18 +715,21 @@ class EvaluationOrder(models.Model):
         self._require_bid_manager()
         self.ensure_one()
         self._lock_for_bid_lifecycle()
-        if self.status != "assigned":
-            raise ValidationError(_("Only an assigned order may reopen bidding."))
+        if self.status not in ("assigned", "engaged"):
+            raise ValidationError(_("Only an assigned or engaged order may reopen bidding."))
+        old_status = self.status
         old_round = self.bidding_round
         old_vendor = self.assigned_vendor_id.id
         old_fee = self.vendor_fee
         old_delivery_date = self.vendor_delivery_date
+        old_engaged_at = self.vendor_engaged_at
         self._controlled_lifecycle_write({
             "status": "bid_requested",
             "bidding_round": old_round + 1,
             "assigned_vendor_id": False,
             "vendor_fee": 0.0,
             "vendor_delivery_date": False,
+            "vendor_engaged_at": False,
         })
         self.env["trucalc.order.vendor.authorization"]._deactivate(
             [("order_id", "=", self.id), ("source", "=", "assignment")],
@@ -677,12 +737,14 @@ class EvaluationOrder(models.Model):
         )
         self.env["trucalc.bid.audit"]._log_event(
             "bidding_reopened", self,
-            old_values={"status": "assigned", "bidding_round": old_round,
+            old_values={"status": old_status, "bidding_round": old_round,
                         "assigned_vendor_id": old_vendor, "vendor_fee": old_fee,
-                        "vendor_delivery_date": fields.Date.to_string(old_delivery_date)},
+                        "vendor_delivery_date": fields.Date.to_string(old_delivery_date),
+                        "vendor_engaged_at": fields.Datetime.to_string(old_engaged_at)},
             new_values={"status": "bid_requested", "bidding_round": old_round + 1,
                         "assigned_vendor_id": False, "vendor_fee": 0.0,
-                        "vendor_delivery_date": False},
+                        "vendor_delivery_date": False,
+                        "vendor_engaged_at": False},
         )
         return True
 

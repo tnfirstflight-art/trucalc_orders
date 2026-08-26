@@ -125,7 +125,7 @@ class TruCalcOrderVendorAuthorization(models.Model):
         order.ensure_one()
         vendor.ensure_one()
         if (
-            order.status != "assigned"
+            order.status not in ("assigned", "engaged")
             or order.assigned_vendor_id != vendor
             or order.bidding_round != round_number
             or not vendor.active

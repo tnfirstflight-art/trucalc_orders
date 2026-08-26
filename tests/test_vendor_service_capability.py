@@ -1,5 +1,6 @@
 from psycopg2.errors import UniqueViolation
 
+from odoo import fields
 from odoo.exceptions import ValidationError
 from odoo.tests import TransactionCase, tagged
 
@@ -21,6 +22,7 @@ class TestVendorServiceCapability(TransactionCase):
             "borrower": "Capability Borrower",
             "property_address": "1 Capability Way",
             "service_type": service,
+            "due_date": fields.Date.add(fields.Date.today(), days=14),
         })
 
     def test_fee_rows_are_multi_service_capability(self):

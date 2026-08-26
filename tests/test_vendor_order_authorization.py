@@ -79,11 +79,10 @@ class TestVendorOrderAuthorization(TransactionCase):
 
     def _submit(self, invitation, user=None, amount=500):
         user = user or self.vendor_user
-        bid = invitation.with_user(user).action_vendor_create_option({
-            "option_name": "Standard", "bid_amount": amount, "turn_time_days": 5,
-        })
-        invitation.with_user(user).action_vendor_submit()
-        return bid
+        self.assertEqual(invitation.standard_fee, amount)
+        return invitation.with_user(user).action_vendor_submit_response(
+            "standard_terms_accepted"
+        )
 
     def test_legacy_initialization_is_empty(self):
         legacy = self.env["trucalc.bid.invitation"].sudo().search([
@@ -205,7 +204,7 @@ class TestVendorOrderAuthorization(TransactionCase):
         self.assertEqual(self.env["trucalc.order.vendor.authorization"].sudo().search_count([
             ("order_id", "=", order.id),
         ]), initial)
-        bid_a.with_user(self.admin).action_select_bid()
+        bid_a.with_user(self.admin)._action_confirm_engagement()
         self.env.invalidate_all()
         authorizations = (
             self.env["trucalc.order.vendor.authorization"]
@@ -235,7 +234,7 @@ class TestVendorOrderAuthorization(TransactionCase):
         order = self._order()
         invitation = self._invitation(order=order)
         bid = self._submit(invitation)
-        bid.with_user(self.admin).action_select_bid()
+        bid.with_user(self.admin)._action_confirm_engagement()
         order.reviewer_id = self.wrong_vendor
         assignment = self.env["trucalc.order.vendor.authorization"].sudo().search([
             ("order_id", "=", order.id), ("source", "=", "assignment"),

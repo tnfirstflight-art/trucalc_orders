@@ -1,6 +1,8 @@
-from odoo import Command
+from lxml import html
+
+from odoo import Command, fields, tools
 from odoo.exceptions import AccessError, ValidationError
-from odoo.tests import TransactionCase, tagged
+from odoo.tests import Form, TransactionCase, tagged
 
 
 @tagged("post_install", "-at_install", "trucalc_order_intake")
@@ -70,7 +72,84 @@ class TestOrderIntake(TransactionCase):
             "property_address": "1 Intake Way",
             "company_id": self.env.company.id,
             "service_type": "evaluation",
+            "due_date": fields.Date.add(fields.Date.today(), days=14),
         })
+
+    def test_order_date_due_date_creation_chatter_and_detail_presentation(self):
+        self.admin.tz = "America/Los_Angeles"
+        legacy = self.env["trucalc.order"].sudo().search([
+            ("order_number", "=", "TC-00005"),
+        ], limit=1)
+        legacy_order_date = legacy.order_date
+        order_form = Form(
+            self.env["trucalc.order"].with_user(self.admin),
+            view="trucalc_orders.view_trucalc_order_form",
+        )
+        today_display = fields.Date.context_today(
+            self.env["trucalc.order"].with_user(self.admin)
+        ).strftime("%m/%d/%Y")
+        self.assertEqual(order_form.order_date_display, today_display)
+        with self.assertRaises(AssertionError):
+            order_form.order_date_display = "01/01/2000"
+        order_form.borrower = "Form Intake Test"
+        order_form.property_address = "2 Intake Way"
+        order_form.service_type = "evaluation"
+        order_form.due_date = fields.Date.add(fields.Date.today(), days=14)
+        form_order = order_form.save()
+        self.assertEqual(
+            form_order.order_date,
+            fields.Date.context_today(form_order.with_user(self.admin)),
+        )
+        self.assertEqual(form_order.order_date_display, today_display)
+        order = self._order()
+        self.assertEqual(
+            order.order_date,
+            fields.Date.context_today(order.with_user(self.admin)),
+        )
+        self.assertEqual(order.order_date_display, order.order_date.strftime("%m/%d/%Y"))
+        messages = order.message_ids.filtered(
+            lambda message: "Order Created" in (message.body or "")
+        )
+        self.assertEqual(len(messages), 1)
+        text = html.fromstring(f"<div>{messages.body}</div>").text_content()
+        self.assertIn("Order Created", text)
+        self.assertIn(order.order_date.strftime("%m/%d/%Y"), text)
+        self.assertIn(
+            tools.format_datetime(
+                order.with_user(self.admin).env, order.create_date,
+                tz=self.admin.tz, dt_format="medium",
+            ),
+            text,
+        )
+        with self.assertRaises(AccessError):
+            self.env["trucalc.order"].with_user(self.admin).create({
+                "borrower": "Forged Date", "property_address": "1 Date Way",
+                "due_date": fields.Date.add(fields.Date.today(), days=1),
+                "order_date": fields.Date.add(fields.Date.today(), days=-1),
+            })
+        with self.assertRaises(AccessError):
+            order.write({"order_date": fields.Date.add(order.order_date, days=1)})
+        with self.assertRaises(ValidationError):
+            order.write({"due_date": False})
+        with self.assertRaises(ValidationError):
+            self.env["trucalc.order"].with_user(self.admin).create({
+                "borrower": "Missing Due", "property_address": "1 Due Way",
+            })
+        if legacy:
+            self.assertEqual(legacy.order_date, legacy_order_date)
+
+        arch = html.fromstring(
+            self.env.ref("trucalc_orders.view_trucalc_order_form").arch
+        )
+        property_group = arch.xpath("//group[@string='Property Information']")[0]
+        self.assertFalse(property_group.xpath("./group"))
+        self.assertEqual(
+            [field.get("name") for field in property_group.xpath("./field")],
+            ["property_address", "city", "state", "zip_code", "property_type"],
+        )
+        self.assertTrue(arch.xpath("//field[@name='order_date_display']"))
+        due_date = arch.xpath("//field[@name='due_date']")[0]
+        self.assertEqual(due_date.get("required"), "1")
 
     def _assert_no_vendor_lifecycle(self, order):
         self.assertEqual(order.bidding_round, 0)

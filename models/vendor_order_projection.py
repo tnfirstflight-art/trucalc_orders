@@ -29,7 +29,7 @@ class TruCalcVendorOrder(models.Model):
     zip_code = fields.Char(string="ZIP", readonly=True)
     bidding_round = fields.Integer(readonly=True)
     vendor_phase = fields.Selection(
-        [("invitation", "Open for Bid"), ("assignment", "Assigned"),
+        [("invitation", "Open for Bid"), ("assignment", "Engaged"),
          ("declined_history", "Declined")],
         readonly=True,
     )
@@ -37,6 +37,7 @@ class TruCalcVendorOrder(models.Model):
         [
             ("open_for_bid", "Open for Bid"),
             ("assigned", "Assigned"),
+            ("engaged", "Engaged"),
             ("report_received", "Report Received"),
             ("reviewer_assigned", "Reviewer Assigned"),
             ("under_review", "Under Review"),
@@ -97,7 +98,7 @@ class TruCalcVendorOrder(models.Model):
                          ELSE a.source END AS vendor_phase,
                     CASE WHEN a.active IS NOT TRUE THEN 'declined'
                          WHEN a.source = 'invitation' THEN 'open_for_bid'
-                         WHEN o.status IN ('assigned', 'report_received',
+                         WHEN o.status IN ('assigned', 'engaged', 'report_received',
                               'reviewer_assigned', 'under_review') THEN o.status
                          ELSE NULL END AS vendor_status,
                     o.status AS order_status,
@@ -168,7 +169,7 @@ class TruCalcVendorOrder(models.Model):
                   AND v.active IS TRUE
                   AND a.source IN ('invitation', 'assignment')
                   AND (a.source = 'invitation'
-                       OR o.status IN ('assigned', 'report_received',
+                       OR o.status IN ('assigned', 'engaged', 'report_received',
                            'reviewer_assigned', 'under_review'))
                 ORDER BY a.vendor_id, a.order_id,
                     CASE WHEN a.active IS TRUE AND a.source = 'assignment' THEN 0

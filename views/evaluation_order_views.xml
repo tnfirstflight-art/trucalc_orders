@@ -76,7 +76,7 @@
                         string="Reopen Bidding"
                         type="object"
                         class="btn-secondary"
-                        invisible="status != 'assigned'"/>
+                        invisible="status not in ('assigned', 'engaged')"/>
 
                     <button
                         name="action_assign_reviewer"
@@ -102,7 +102,7 @@
                     <field
                         name="status"
                         widget="statusbar"
-                        statusbar_visible="new,accepted,bid_requested,assigned,report_received,reviewer_assigned,under_review,completed"
+                        statusbar_visible="new,accepted,bid_requested,engaged,report_received,reviewer_assigned,under_review,completed"
                         readonly="1"/>
 
                 </header>
@@ -127,15 +127,11 @@
                         </group>
 
                         <group string="Property Information">
-
-                            <group col="2">
-                                <field name="property_address"/>
-                                <field name="city"/>
-                                <field name="state"/>
-                                <field name="zip_code"/>
-                                <field name="property_type"/>
-                            </group>
-
+                            <field name="property_address"/>
+                            <field name="city"/>
+                            <field name="state"/>
+                            <field name="zip_code"/>
+                            <field name="property_type"/>
                         </group>
 
                     </group>
@@ -146,16 +142,18 @@
 
                             <field name="requestor_id" readonly="1"/>
                             <field name="company_id"/>
-                            <field name="order_date"/>
+                            <field name="order_date_display" string="Order Date"/>
 
                             <field name="assigned_vendor_id" readonly="status in ('new', 'accepted', 'declined')"/>
                             <field name="currency_id" invisible="1"/>
                             <field name="vendor_fee" readonly="1" widget="monetary"
                                    options="{'currency_field': 'currency_id'}"/>
 
-                            <field name="due_date" options="{'numeric': True}"/>
+                            <field name="due_date" required="1"
+                                   options="{'numeric': True}"/>
                             <field name="vendor_delivery_date" readonly="1"
                                    options="{'numeric': True}"/>
+                            <field name="vendor_engaged_at" readonly="1"/>
 
                             <field name="fee_override" readonly="status in ('new', 'accepted', 'declined')"/>
 

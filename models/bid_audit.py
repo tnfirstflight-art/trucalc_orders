@@ -23,6 +23,7 @@ class TruCalcBidAudit(models.Model):
             ("bid_corrected", "Bid Corrected"),
             ("bid_disqualified", "Bid Disqualified"),
             ("winner_selected", "Winner Selected"),
+            ("vendor_engaged", "Vendor Engaged"),
         ],
         required=True,
         readonly=True,

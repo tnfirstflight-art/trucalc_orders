@@ -68,6 +68,7 @@ class TestTenantHardening(TransactionCase):
             "property_address": "1 Tenant Way",
             "company_id": company.id,
             "service_type": "evaluation",
+            "due_date": fields.Date.add(fields.Date.today(), days=14),
         })
 
     def _assert_invalid_user(self, role_names, bank=False, vendor=False):
@@ -151,6 +152,7 @@ class TestTenantHardening(TransactionCase):
                 "borrower": borrower,
                 "property_address": "2 Tenant Way",
                 "service_type": "evaluation",
+                "due_date": fields.Date.add(fields.Date.today(), days=14),
                 **overrides,
             }
 
@@ -201,6 +203,7 @@ class TestTenantHardening(TransactionCase):
             "borrower": "Context Forgery",
             "property_address": "3 Tenant Way",
             "service_type": "evaluation",
+            "due_date": fields.Date.add(fields.Date.today(), days=14),
         })
         self.assertEqual(order.company_id, self.bank_a)
         self.assertEqual(order.requestor_company_id, self.bank_a)
@@ -224,6 +227,7 @@ class TestTenantHardening(TransactionCase):
         with self.assertRaises(AccessError):
             self.env["trucalc.order"].with_user(self.bank_viewer).create({
                 "borrower": "Denied", "property_address": "4 Tenant Way",
+                "due_date": fields.Date.add(fields.Date.today(), days=14),
             })
         with self.assertRaises(AccessError):
             self.env["trucalc.document"].with_user(self.bank_viewer).create({

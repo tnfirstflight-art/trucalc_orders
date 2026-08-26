@@ -227,14 +227,16 @@ class TestBidLifecycle(TransactionCase):
         order.action_bid_requested()
         invitation_a = self._invitation(order=order)
         invitation_b = self._invitation(vendor=self.vendor_b, order=order)
-        bid_a = self._draft(invitation_a)
-        bid_b = self._draft(invitation_b, user=self.vendor_user_b, bid_amount=625)
-        invitation_a.with_user(self.vendor_user_a).action_vendor_submit()
-        invitation_b.with_user(self.vendor_user_b).action_vendor_submit()
-        bid_a.with_user(self.admin).action_select_bid()
+        bid_a = invitation_a.with_user(self.vendor_user_a).action_vendor_submit_response(
+            "standard_terms_accepted"
+        )
+        bid_b = invitation_b.with_user(self.vendor_user_b).action_vendor_submit_response(
+            "standard_terms_accepted"
+        )
+        bid_a.with_user(self.admin)._action_confirm_engagement()
         self.assertEqual(bid_a.status, "selected")
         self.assertEqual(bid_b.status, "not_selected")
-        self.assertEqual(order.status, "assigned")
+        self.assertEqual(order.status, "engaged")
         self.assertEqual(order.assigned_vendor_id, self.vendor_a)
         self.assertEqual(order.vendor_fee, 500)
         self.assertEqual({invitation_a.state, invitation_b.state}, {"closed"})
@@ -342,8 +344,11 @@ class TestBidLifecycleConcurrency(TransactionCase):
             invitation_a = env["trucalc.bid.invitation"].create({
                 "order_id": order.id, "vendor_id": vendor_a.id,
             })
-            bid_a = invitation_a.action_support_create_option({
-                "option_name": "A", "bid_amount": 410, "turn_time_days": 4,
+            bid_a = env["trucalc.bid"]._controlled_create_canonical(invitation_a, {
+                "option_name": "A", "bid_amount": 410, "turn_time_days": 0,
+                "response_type": "fee_and_delivery_counter",
+                "proposed_delivery_date": fields.Date.add(order.due_date, days=1),
+                "status": "submitted", "submitted_at": fields.Datetime.now(),
             })
             bids = [bid_a]
             invitation_ids = [invitation_a.id]
@@ -351,15 +356,14 @@ class TestBidLifecycleConcurrency(TransactionCase):
                 invitation_b = env["trucalc.bid.invitation"].create({
                     "order_id": order.id, "vendor_id": vendor_b.id,
                 })
-                bid_b = invitation_b.action_support_create_option({
-                    "option_name": "B", "bid_amount": 420, "turn_time_days": 3,
+                bid_b = env["trucalc.bid"]._controlled_create_canonical(invitation_b, {
+                    "option_name": "B", "bid_amount": 420, "turn_time_days": 0,
+                    "response_type": "fee_and_delivery_counter",
+                    "proposed_delivery_date": fields.Date.add(order.due_date, days=2),
+                    "status": "submitted", "submitted_at": fields.Datetime.now(),
                 })
                 bids.append(bid_b)
                 invitation_ids.append(invitation_b.id)
-            cr.execute(
-                "UPDATE trucalc_bid SET status = 'submitted' WHERE id = ANY(%s)",
-                ([bid.id for bid in bids],),
-            )
             cr.commit()
             return {
                 "order": order.id,
@@ -403,10 +407,10 @@ class TestBidLifecycleConcurrency(TransactionCase):
             result = Queue()
             with self._cursor() as cr_a:
                 env_a = api.Environment(cr_a, admin_uid, {})
-                env_a["trucalc.bid"].browse(fixture["bids"][0]).action_select_bid()
+                env_a["trucalc.bid"].browse(fixture["bids"][0])._action_confirm_engagement()
                 worker = Thread(
                     target=self._competing_action,
-                    args=(result, admin_uid, "trucalc.bid", fixture["bids"][1], "action_select_bid"),
+                    args=(result, admin_uid, "trucalc.bid", fixture["bids"][1], "_action_confirm_engagement"),
                 )
                 worker.start()
                 result.get(timeout=2)  # worker cursor is open and action is starting
@@ -427,7 +431,7 @@ class TestBidLifecycleConcurrency(TransactionCase):
                     (fixture["order"],),
                 )
                 vendor_id, fee, status = cr.fetchone()
-                self.assertEqual((vendor_id, fee, status), (fixture["vendors"][0], 410.0, "assigned"))
+                self.assertEqual((vendor_id, fee, status), (fixture["vendors"][0], 410.0, "engaged"))
         finally:
             if fixture:
                 self._cleanup_fixture(fixture)
@@ -439,7 +443,7 @@ class TestBidLifecycleConcurrency(TransactionCase):
             fixture = self._create_fixture(two_bids=False)
             with self._cursor() as cr:
                 env = api.Environment(cr, admin_uid, {})
-                env["trucalc.bid"].browse(fixture["bids"][0]).action_select_bid()
+                env["trucalc.bid"].browse(fixture["bids"][0])._action_confirm_engagement()
                 cr.commit()
             result = Queue()
             with self._cursor() as cr_a:
