@@ -565,10 +565,10 @@ class TruCalcBid(models.Model):
             ("source", "=", "invitation"),
             ("round_number", "=", order.bidding_round),
         ], "winner_selected")
-        authorization_model._create_for_assignment(
+        assignment_authorization = authorization_model._create_for_assignment(
             order, self.vendor_id, order.bidding_round
         )
-        self.env["trucalc.bid.audit"]._log_event(
+        engagement_audit = self.env["trucalc.bid.audit"]._log_event(
             "vendor_engaged", order, invitation=self.invitation_id, bid=self,
             old_values={"bid_status": "submitted", **old_order_values},
             new_values={"bid_status": "selected", "order_status": "engaged",
@@ -578,6 +578,9 @@ class TruCalcBid(models.Model):
                             self.proposed_delivery_date
                         ),
                         "vendor_engaged_at": fields.Datetime.to_string(engaged_at)},
+        )
+        self.env["trucalc.vendor.engagement"]._create_for_engagement(
+            order, self, assignment_authorization, engagement_audit
         )
         order_status_label = dict(order._fields["status"].selection)["engaged"]
         order.sudo().message_post(body=Markup(_(

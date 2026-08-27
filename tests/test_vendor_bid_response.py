@@ -209,7 +209,9 @@ class TestVendorBidResponse(TransactionCase):
         ).search([("order_number", "=", order.order_number)])
         selected_projection.invalidate_recordset()
         self.assertEqual(selected_projection.order_status, "engaged")
-        self.assertEqual(selected_projection.vendor_response_label, "Selected")
+        self.assertEqual(
+            selected_projection.vendor_response_label, "Awaiting Acceptance"
+        )
         self.assertEqual(selected_projection.proposed_fee, 100)
         self.assertEqual(bid.status, "selected")
         self.assertFalse(bid.is_currently_selectable)
@@ -314,33 +316,48 @@ class TestVendorBidResponse(TransactionCase):
             "//page[@string='Vendor Responses']/field[@name='bid_ids']/list"
         )[0]
         self.assertIn("o_trucalc_vendor_responses", response_list.get("class"))
+        self.assertEqual(
+            response_list.get("decoration-muted"),
+            "round_number < parent.bidding_round",
+        )
         children = [child for child in response_list if isinstance(child.tag, str)]
-        decision_buttons = children[:4]
+        decision_buttons = children[:7]
         self.assertTrue(all(child.tag == "button" for child in decision_buttons))
         self.assertEqual(
             [button.get("string") for button in decision_buttons],
-            ["Select", "Selected", "Not Selected", "Disqualified"],
+            [
+                "Select", "Selected", "Selected", "Not Selected",
+                "Not Selected", "Disqualified", "Disqualified",
+            ],
         )
         self.assertEqual(
             [button.get("invisible") for button in decision_buttons],
             [
                 "not is_currently_selectable",
-                "status != 'selected'",
-                "status != 'not_selected'",
-                "status != 'disqualified'",
+                "status != 'selected' or round_number < parent.bidding_round",
+                "status != 'selected' or round_number >= parent.bidding_round",
+                "status != 'not_selected' or round_number < parent.bidding_round",
+                "status != 'not_selected' or round_number >= parent.bidding_round",
+                "status != 'disqualified' or round_number < parent.bidding_round",
+                "status != 'disqualified' or round_number >= parent.bidding_round",
             ],
         )
         self.assertFalse(decision_buttons[0].get("disabled"))
-        for button, semantic_class in zip(
-            decision_buttons[1:], ("btn-success", "btn-secondary", "btn-danger")
-        ):
+        semantic_classes = (
+            "btn-success", "btn-secondary", "btn-secondary", "btn-secondary",
+            "btn-danger", "btn-secondary",
+        )
+        for button, semantic_class in zip(decision_buttons[1:], semantic_classes):
             self.assertFalse(button.get("name"))
             self.assertFalse(button.get("type"))
             self.assertFalse(button.get("special"))
             self.assertFalse(button.get("disabled"))
             self.assertIn(semantic_class, button.get("class"))
+        for button in decision_buttons[1::2]:
             self.assertIn("opacity-100", button.get("class"))
-        status_field = children[4]
+        for button in decision_buttons[2::2]:
+            self.assertIn("opacity-75", button.get("class"))
+        status_field = children[7]
         self.assertEqual((status_field.tag, status_field.get("name")),
                          ("field", "status"))
         self.assertEqual(status_field.get("column_invisible"), "True")

@@ -248,8 +248,17 @@ class TestBidLifecycle(TransactionCase):
         self.assertEqual(
             (bid_a.status, bid_b.status, invitation_a.state, invitation_b.state), old_states
         )
+        self.assertTrue(bid_a.round_number < order.bidding_round)
+        self.assertTrue(bid_b.round_number < order.bidding_round)
+        self.assertEqual((bid_a.status, bid_b.status), ("selected", "not_selected"))
         new_invitation = self._invitation(vendor=self.vendor_a, order=order)
         self.assertEqual(new_invitation.round_number, 2)
+        new_bid = new_invitation.with_user(
+            self.vendor_user_a
+        ).action_vendor_submit_response("standard_terms_accepted")
+        self.assertEqual(new_bid.round_number, order.bidding_round)
+        self.assertEqual(new_bid.status, "submitted")
+        self.assertEqual((bid_a.status, bid_b.status), ("selected", "not_selected"))
 
     def test_direct_bypasses_are_denied(self):
         order = self._order()

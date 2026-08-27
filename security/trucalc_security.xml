@@ -118,6 +118,22 @@
                eval="[(4, ref('group_vendor_portal'))]"/>
     </record>
 
+    <record id="rule_vendor_engagement_company" model="ir.rule">
+        <field name="name">Vendor Engagement Company</field>
+        <field name="model_id" ref="model_trucalc_vendor_engagement"/>
+        <field name="domain_force">[('company_id', 'in', user.company_ids.ids)]</field>
+        <field name="groups"
+               eval="[(4, ref('group_trucalc_admin')), (4, ref('group_trucalc_operations'))]"/>
+    </record>
+
+    <record id="rule_vendor_engagement_event_company" model="ir.rule">
+        <field name="name">Vendor Engagement Event Company</field>
+        <field name="model_id" ref="model_trucalc_vendor_engagement_event"/>
+        <field name="domain_force">[('company_id', 'in', user.company_ids.ids)]</field>
+        <field name="groups"
+               eval="[(4, ref('group_trucalc_admin')), (4, ref('group_trucalc_operations'))]"/>
+    </record>
+
     <!-- These legacy ACL records must be deleted during upgrade; omitting their
          CSV rows alone would leave the already-installed database rows active. -->
     <delete id="access_trucalc_order_vendor_portal" model="ir.model.access"/>

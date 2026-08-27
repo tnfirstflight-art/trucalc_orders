@@ -14,6 +14,13 @@
                 <field name="property_address"/>
                 <field name="company_id"/>
                 <field name="status"/>
+                <field name="engagement_action_required" column_invisible="True"
+                       groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
+                <field name="engagement_action_required_label" widget="badge"
+                       decoration-danger="engagement_action_required"
+                       groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
+                <field name="engagement_action_required_reason"
+                       groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
                 <field name="assigned_vendor_id"/>
                 <field name="due_date" options="{'numeric': True}"/>
             </list>
@@ -53,7 +60,7 @@
                         type="object"
                         class="btn-primary"
                         groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
-                        invisible="not id or status != 'accepted'"/>
+                        invisible="not can_request_vendor_bids"/>
 
                     <button
                         name="action_open_manage_bid_requests_wizard"
@@ -61,7 +68,7 @@
                         type="object"
                         class="btn-secondary"
                         groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
-                        invisible="not id or status != 'bid_requested'"/>
+                        invisible="status != 'bid_requested' or not current_round_has_solicitation"/>
 
                     <button
                         name="action_open_extend_bid_deadline_wizard"
@@ -69,7 +76,7 @@
                         type="object"
                         class="btn-secondary"
                         groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
-                        invisible="not id or status != 'bid_requested'"/>
+                        invisible="status != 'bid_requested' or not current_round_has_solicitation"/>
 
                     <button
                         name="action_reopen_bidding"
@@ -77,6 +84,14 @@
                         type="object"
                         class="btn-secondary"
                         invisible="status not in ('assigned', 'engaged')"/>
+
+                    <button
+                        name="action_open_engagement_decision_wizard"
+                        string="Review Delivery Change"
+                        type="object"
+                        class="btn-primary"
+                        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                        invisible="engagement_response_state != 'delivery_change_requested'"/>
 
                     <button
                         name="action_assign_reviewer"
@@ -104,6 +119,8 @@
                         widget="statusbar"
                         statusbar_visible="new,accepted,bid_requested,engaged,report_received,reviewer_assigned,under_review,completed"
                         readonly="1"/>
+                    <field name="current_round_has_solicitation" invisible="1"/>
+                    <field name="can_request_vendor_bids" invisible="1"/>
 
                 </header>
 
@@ -113,6 +130,14 @@
                         <h1>
                             <field name="order_number" readonly="1"/>
                         </h1>
+                    </div>
+
+                    <div class="alert alert-danger d-flex align-items-center gap-2"
+                         role="alert"
+                         groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                         invisible="not engagement_action_required">
+                        <span class="badge text-bg-danger">Action Required</span>
+                        <strong><field name="engagement_action_required_reason"/></strong>
                     </div>
 
                     <group>
@@ -154,6 +179,21 @@
                             <field name="vendor_delivery_date" readonly="1"
                                    options="{'numeric': True}"/>
                             <field name="vendor_engaged_at" readonly="1"/>
+                            <field name="current_engagement_id" invisible="1"/>
+                            <field name="engagement_action_required" invisible="1"
+                                   groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
+                            <field name="engagement_response_state" readonly="1"
+                                   groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
+                            <field name="engagement_requested_delivery_date" readonly="1"
+                                   options="{'numeric': True}"
+                                   groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                                   invisible="engagement_response_state != 'delivery_change_requested'"/>
+                            <field name="engagement_request_reason" readonly="1"
+                                   groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                                   invisible="engagement_response_state != 'delivery_change_requested'"/>
+                            <field name="engagement_decline_reason" readonly="1"
+                                   groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                                   invisible="engagement_response_state != 'declined'"/>
 
                             <field name="fee_override" readonly="status in ('new', 'accepted', 'declined')"/>
 
@@ -226,20 +266,30 @@
                               groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations">
                             <field name="bid_ids" readonly="1"
                                    class="o_trucalc_vendor_responses">
-                                <list class="o_trucalc_vendor_responses">
+                                <list class="o_trucalc_vendor_responses"
+                                      decoration-muted="round_number &lt; parent.bidding_round">
                                     <button name="action_select_bid" type="object"
                                             string="Select"
                                             groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
                                             invisible="not is_currently_selectable"/>
                                     <button string="Selected"
                                             class="btn-success opacity-100"
-                                            invisible="status != 'selected'"/>
+                                            invisible="status != 'selected' or round_number &lt; parent.bidding_round"/>
+                                    <button string="Selected"
+                                            class="btn-secondary opacity-75"
+                                            invisible="status != 'selected' or round_number &gt;= parent.bidding_round"/>
                                     <button string="Not Selected"
                                             class="btn-secondary opacity-100"
-                                            invisible="status != 'not_selected'"/>
+                                            invisible="status != 'not_selected' or round_number &lt; parent.bidding_round"/>
+                                    <button string="Not Selected"
+                                            class="btn-secondary opacity-75"
+                                            invisible="status != 'not_selected' or round_number &gt;= parent.bidding_round"/>
                                     <button string="Disqualified"
                                             class="btn-danger opacity-100"
-                                            invisible="status != 'disqualified'"/>
+                                            invisible="status != 'disqualified' or round_number &lt; parent.bidding_round"/>
+                                    <button string="Disqualified"
+                                            class="btn-secondary opacity-75"
+                                            invisible="status != 'disqualified' or round_number &gt;= parent.bidding_round"/>
                                     <field name="status" column_invisible="True"/>
                                     <field name="is_currently_selectable" column_invisible="True"/>
                                     <field name="round_number"/>
@@ -269,6 +319,22 @@
 
             </form>
 
+        </field>
+    </record>
+
+    <record id="view_trucalc_order_search" model="ir.ui.view">
+        <field name="name">trucalc.order.search</field>
+        <field name="model">trucalc.order</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="order_number"/>
+                <field name="borrower"/>
+                <field name="loan_number"/>
+                <field name="status"/>
+                <filter name="action_required" string="Action Required"
+                        domain="[('engagement_action_required', '=', True)]"
+                        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
+            </search>
         </field>
     </record>
 

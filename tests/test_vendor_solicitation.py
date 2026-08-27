@@ -90,6 +90,180 @@ class TestVendorSolicitation(TransactionCase):
     def _deadline(self, days=2):
         return fields.Datetime.now() + timedelta(days=days)
 
+    def _reopened_unsolicited_order(self):
+        order = self._accepted_order()
+        prior_deadline = self._deadline()
+        order.action_request_vendor_bids(self.vendor_a, prior_deadline)
+        prior_invitation = order.invitation_ids
+        bid = prior_invitation.with_user(
+            self.vendor_user_a
+        ).action_vendor_submit_response("standard_terms_accepted")
+        bid.with_user(self.admin)._action_confirm_engagement()
+        prior_engagement = order.sudo().engagement_ids.filtered("active")
+        order.with_user(self.ops).action_reopen_bidding()
+        return order, prior_invitation, bid, prior_engagement, prior_deadline
+
+    def test_reopened_round_is_initialized_by_request_bids_once(self):
+        order, prior_invitation, prior_bid, prior_engagement, prior_deadline = (
+            self._reopened_unsolicited_order()
+        )
+        prior_authorization_ids = self.env[
+            "trucalc.order.vendor.authorization"
+        ].sudo().with_context(active_test=False).search([
+            ("order_id", "=", order.id),
+            ("round_number", "=", 1),
+        ]).ids
+        prior_audit_ids = self.env["trucalc.bid.audit"].search([
+            ("order_id", "=", order.id),
+        ]).ids
+        prior_event_ids = prior_engagement.event_ids.ids
+
+        self.assertEqual((order.status, order.bidding_round), ("bid_requested", 2))
+        self.assertFalse(order._current_round_invitations())
+        self.assertFalse(order.current_round_has_solicitation)
+        self.assertTrue(order.can_request_vendor_bids)
+        self.assertEqual(prior_invitation.response_deadline, prior_deadline)
+        self.assertEqual(prior_invitation.round_number, 1)
+        self.assertEqual(prior_invitation.state, "closed")
+        self.assertFalse(prior_engagement.active)
+        with self.assertRaisesRegex(ValidationError, "must be solicited before managing"):
+            order.action_open_manage_bid_requests_wizard()
+        with self.assertRaisesRegex(ValidationError, "must be solicited before extending"):
+            order.action_open_extend_bid_deadline_wizard()
+        with self.assertRaisesRegex(ValidationError, "no single response deadline"):
+            order.action_add_vendor_bid_requests(self.vendor_b)
+        with self.assertRaisesRegex(ValidationError, "no single response deadline"):
+            order.action_extend_bid_deadline(self._deadline(3))
+
+        action = order.action_open_request_bids_wizard()
+        self.assertEqual(action["name"], "Request Bids")
+        wizard = self.env[action["res_model"]].with_user(self.ops).with_context(
+            action["context"]
+        ).create({})
+        self.assertEqual(wizard.mode, "request")
+        self.assertFalse(wizard.response_deadline)
+        line_b = wizard.line_ids.filtered(lambda line: line.vendor_id == self.vendor_b)
+        line_b.selected = True
+        with self.assertRaises(ValidationError):
+            wizard.action_confirm()
+        self.assertFalse(order._current_round_invitations())
+        self.assertEqual((order.status, order.bidding_round), ("bid_requested", 2))
+
+        with self.assertRaises(ValidationError):
+            order.action_request_vendor_bids(self.no_fee_vendor, self._deadline(3))
+        self.assertFalse(order._current_round_invitations())
+        new_deadline = self._deadline(4)
+        wizard.response_deadline = new_deadline
+        wizard.action_confirm()
+        current = order._current_round_invitations()
+        self.assertEqual(len(current), 1)
+        self.assertEqual(current.vendor_id, self.vendor_b)
+        self.assertEqual(current.round_number, 2)
+        self.assertEqual(current.response_deadline, new_deadline)
+        self.assertEqual(order.bidding_round, 2)
+        self.assertTrue(order.current_round_has_solicitation)
+        self.assertFalse(order.can_request_vendor_bids)
+        current_authorizations = order.sudo().vendor_authorization_ids.filtered(
+            lambda authorization: authorization.round_number == 2
+        )
+        self.assertEqual(len(current_authorizations), 1)
+        self.assertEqual(current_authorizations.vendor_id, self.vendor_b)
+        self.assertEqual(current_authorizations.invitation_id, current)
+        self.assertTrue(current_authorizations.active)
+        self.assertEqual(order._current_round_deadline(), new_deadline)
+        self.assertEqual(prior_invitation.response_deadline, prior_deadline)
+        self.assertEqual((prior_bid.round_number, prior_bid.status), (1, "selected"))
+        self.assertEqual(prior_engagement.event_ids.ids, prior_event_ids)
+        all_authorization_ids = self.env[
+            "trucalc.order.vendor.authorization"
+        ].sudo().with_context(active_test=False).search([
+            ("order_id", "=", order.id),
+        ]).ids
+        self.assertTrue(set(prior_authorization_ids).issubset(
+            set(all_authorization_ids)
+        ))
+        self.assertEqual(
+            self.env["trucalc.bid.audit"].search([
+                ("order_id", "=", order.id),
+                ("id", "in", prior_audit_ids),
+            ]).ids,
+            prior_audit_ids,
+        )
+        self.assertEqual(
+            order.action_open_manage_bid_requests_wizard()["name"],
+            "Manage Bid Requests",
+        )
+        self.assertEqual(
+            order.action_open_extend_bid_deadline_wizard()["name"],
+            "Extend Bid Deadline",
+        )
+        with self.assertRaises(ValidationError):
+            order.action_open_request_bids_wizard()
+        with self.assertRaises(ValidationError):
+            order.action_request_vendor_bids(self.vendor_a, self._deadline(5))
+
+        order_arch = etree.fromstring(self.env.ref(
+            "trucalc_orders.view_trucalc_order_form"
+        ).arch_db.encode())
+        self.assertEqual(order_arch.xpath(
+            "//button[@name='action_open_request_bids_wizard']"
+        )[0].get("invisible"), "not can_request_vendor_bids")
+        for button_name in (
+            "action_open_manage_bid_requests_wizard",
+            "action_open_extend_bid_deadline_wizard",
+        ):
+            self.assertIn(
+                "current_round_has_solicitation",
+                order_arch.xpath("//button[@name='%s']" % button_name)[0].get(
+                    "invisible"
+                ),
+            )
+
+        round_two_bid = current.with_user(
+            self.vendor_user_b
+        ).action_vendor_submit_response("standard_terms_accepted")
+        round_two_bid.with_user(self.admin)._action_confirm_engagement()
+        order.with_user(self.ops).action_reopen_bidding()
+        self.assertEqual((order.status, order.bidding_round), ("bid_requested", 3))
+        self.assertFalse(order._current_round_invitations())
+        self.assertTrue(order.can_request_vendor_bids)
+        self.assertEqual(prior_invitation.response_deadline, prior_deadline)
+        self.assertEqual(current.response_deadline, new_deadline)
+        self.assertEqual(
+            set(order.invitation_ids.mapped("round_number")), {1, 2}
+        )
+
+    def test_reopened_round_with_partial_state_fails_closed(self):
+        order, prior_invitation, _bid, _engagement, _deadline = (
+            self._reopened_unsolicited_order()
+        )
+        prior_authorization = self.env[
+            "trucalc.order.vendor.authorization"
+        ].sudo().with_context(active_test=False).search([
+            ("order_id", "=", order.id),
+            ("source", "=", "invitation"),
+            ("round_number", "=", 1),
+        ])
+        self.assertEqual(len(prior_authorization), 1)
+        self.env.cr.execute(
+            "UPDATE trucalc_order_vendor_authorization SET round_number = %s "
+            "WHERE id = %s",
+            (order.bidding_round, prior_authorization.id),
+        )
+        prior_authorization.invalidate_recordset(["round_number"])
+        order.invalidate_recordset([
+            "can_request_vendor_bids", "current_round_has_solicitation",
+        ])
+        self.assertFalse(order._current_round_invitations())
+        self.assertFalse(order.current_round_has_solicitation)
+        self.assertFalse(order.can_request_vendor_bids)
+        with self.assertRaisesRegex(ValidationError, "clean, unsolicited reopened"):
+            order.action_open_request_bids_wizard()
+        with self.assertRaisesRegex(ValidationError, "clean, unsolicited reopened"):
+            order.action_request_vendor_bids(self.vendor_b, self._deadline())
+        self.assertEqual((order.status, order.bidding_round), ("bid_requested", 2))
+        self.assertEqual(prior_invitation.round_number, 1)
+
     def test_initial_solicitation_is_atomic_and_authoritative(self):
         self.assertTrue(
             getattr(self.env["trucalc.order"].action_bid_requested, "_api_private", False)
@@ -499,7 +673,8 @@ class TestVendorSolicitation(TransactionCase):
             self.vendor_user_a
         ).search([("order_number", "=", order.order_number)])
         self.assertEqual(projection.borrower, order.borrower)
-        self.assertEqual(projection.due_date, order.due_date)
+        self.assertNotIn("due_date", projection.fields_get())
+        self.assertFalse(projection.vendor_delivery_date)
         self.assertEqual(projection.response_deadline, deadline)
         self.assertEqual(projection.solicitation_standard_fee, 500)
         public_fields = projection.fields_get()

@@ -81,6 +81,20 @@ class TestVendorOrderPortal(HttpCase):
         ])
         return order, invitation, projection
 
+    @classmethod
+    def _engaged_order(cls, vendor, vendor_user, address):
+        order, invitation, _projection = cls._authorized_order(vendor, address)
+        bid = invitation.with_user(vendor_user).action_vendor_submit_response(
+            "standard_terms_accepted"
+        )
+        bid.with_user(cls.admin)._action_confirm_engagement()
+        cls.env.flush_all()
+        cls.env["trucalc.vendor.order"].invalidate_model()
+        projection = cls.env["trucalc.vendor.order"].with_user(vendor_user).search([
+            ("order_number", "=", order.order_number),
+        ])
+        return order, projection
+
     def _login(self, user):
         self.authenticate(user.login, self.password)
 
@@ -221,10 +235,10 @@ class TestVendorOrderPortal(HttpCase):
         self.assertFalse({"Bidding round", "Phase", "Assigned"} & labels)
         self.assertTrue({
             "Service", "Borrower", "Property type", "Property address",
-            "Status", "Response deadline", "Standard fee", "Due date",
+            "Status", "Response deadline", "Standard fee",
         } <= labels)
+        self.assertNotIn("Due date", labels)
         self.assertIn("500", rendered)
-        self.assertIn(str(order.due_date.year), rendered)
         for forbidden in (
             "order_id",
             "vendor_id",
@@ -249,7 +263,8 @@ class TestVendorOrderPortal(HttpCase):
         document = etree.HTML(listing)
         headers = [" ".join(node.itertext()).strip() for node in document.xpath("//th")]
         self.assertIn("Status", headers)
-        self.assertIn("Your Response", headers)
+        self.assertIn("Response", headers)
+        self.assertNotIn("Your Response", headers)
         row = document.xpath(
             "//a[contains(@href, '%s')]/ancestor::tr[1]" % order.order_number
         )[0]
@@ -261,3 +276,44 @@ class TestVendorOrderPortal(HttpCase):
         currency = order.company_id.currency_id
         self.assertIn(currency.symbol, detail)
         self.assertIn("500.00", detail)
+
+    def test_engaged_list_detail_disclosure_actions_and_date_format(self):
+        order, projection = self._engaged_order(
+            self.vendor_a, self.vendor_user_a, "488 Engagement Portal Street"
+        )
+        self._login(self.vendor_user_a)
+        listing = self.url_open("/my/trucalc/orders").text
+        row = etree.HTML(listing).xpath(
+            "//a[contains(@href, '%s')]/ancestor::tr[1]" % order.order_number
+        )[0]
+        row_text = " ".join(row.itertext())
+        self.assertIn("Engaged", row_text)
+        self.assertIn("Awaiting Acceptance", row_text)
+        self.assertIn(order.vendor_delivery_date.strftime("%m/%d/%Y"), row_text)
+
+        detail = self.url_open(f"/my/trucalc/orders/{order.order_number}").text
+        labels = {
+            label.strip()
+            for label in etree.HTML(detail).xpath("//dt/text()")
+            if label.strip()
+        }
+        self.assertTrue({
+            "Vendor Engaged Date", "Vendor Delivery Date", "Agreed fee",
+            "Engagement Response",
+        } <= labels)
+        self.assertIn(order.vendor_engaged_at.strftime("%m/%d/%Y"), detail)
+        self.assertIn(order.vendor_delivery_date.strftime("%m/%d/%Y"), detail)
+        self.assertIn("Accept Assignment", detail)
+        self.assertIn("Request Delivery Change", detail)
+        self.assertIn("Decline Assignment", detail)
+        for forbidden in (
+            "Client Due Date", "FORBIDDEN-LOAN-NUMBER", "987654.32",
+        ):
+            self.assertNotIn(forbidden, detail)
+
+        self.assertEqual(projection.engagement_response_state, "awaiting_acceptance")
+        self.env.invalidate_all()
+        engagement = order.sudo().engagement_ids.filtered("active")
+        self.assertEqual(engagement.response_state, "awaiting_acceptance")
+        self.assertFalse(engagement.event_ids)
+        self.assertEqual(engagement.agreed_vendor_fee, order.vendor_fee)

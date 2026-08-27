@@ -55,7 +55,7 @@
                         <th>Borrower</th>
                         <th>Property</th>
                         <th>Status</th>
-                        <th>Your Response</th>
+                        <th>Response</th>
                         <th>Due</th>
                     </tr>
                 </thead>
@@ -79,8 +79,9 @@
                         <td><span t-field="projection.order_status"/></td>
                         <td><t t-out="projection.vendor_response_label or '—'"/></td>
                         <td>
-                            <span t-if="projection.due_date" t-field="projection.due_date"/>
-                            <span t-elif="projection.response_deadline"
+                            <span t-if="projection.vendor_phase == 'assignment' and projection.vendor_delivery_date"
+                                  t-field="projection.vendor_delivery_date"/>
+                            <span t-elif="projection.vendor_phase != 'assignment' and projection.response_deadline"
                                   t-field="projection.response_deadline"/>
                             <span t-else="">—</span>
                         </td>
@@ -147,11 +148,6 @@
                             <span t-else="">Not recorded for this legacy invitation</span>
                         </dd>
 
-                        <dt t-if="projection.due_date" class="col-sm-4">Due date</dt>
-                        <dd t-if="projection.due_date" class="col-sm-8">
-                            <span t-field="projection.due_date"/>
-                        </dd>
-
                         <dt t-if="projection.vendor_phase in ('invitation', 'declined_history')"
                             class="col-sm-4">Requested delivery date</dt>
                         <dd t-if="projection.vendor_phase in ('invitation', 'declined_history')"
@@ -166,6 +162,28 @@
                             <span t-field="projection.agreed_vendor_fee"
                                   t-options="{'widget': 'monetary', 'display_currency': projection.currency_id}"/>
                         </dd>
+
+                        <dt t-if="projection.vendor_phase == 'assignment'"
+                            class="col-sm-4">Vendor Engaged Date</dt>
+                        <dd t-if="projection.vendor_phase == 'assignment'"
+                            class="col-sm-8">
+                            <span t-field="projection.vendor_engaged_at"
+                                  t-options="{'widget': 'date'}"/>
+                        </dd>
+
+                        <dt t-if="projection.vendor_phase == 'assignment'"
+                            class="col-sm-4">Vendor Delivery Date</dt>
+                        <dd t-if="projection.vendor_phase == 'assignment'"
+                            class="col-sm-8">
+                            <span t-field="projection.vendor_delivery_date"/>
+                        </dd>
+
+                        <dt t-if="projection.vendor_phase == 'assignment'"
+                            class="col-sm-4">Engagement Response</dt>
+                        <dd t-if="projection.vendor_phase == 'assignment'"
+                            class="col-sm-8">
+                            <t t-out="projection.engagement_response_label or '—'"/>
+                        </dd>
                     </dl>
                 </div>
             </div>
@@ -174,7 +192,7 @@
                 <t t-out="response_error"/>
             </div>
 
-            <div t-if="projection.vendor_phase in ('invitation', 'declined_history') or projection.response_type"
+            <div t-if="projection.vendor_phase != 'assignment' and (projection.vendor_phase in ('invitation', 'declined_history') or projection.response_type)"
                  class="card mt-3">
                 <div class="card-header"><strong>Vendor Response</strong></div>
                 <div class="card-body">
@@ -271,6 +289,134 @@
                         </form>
                     </div>
                 </div>
+            </div>
+
+            <div t-if="projection.vendor_phase == 'assignment'" class="card mt-3">
+                <div class="card-header"><strong>Engagement Response</strong></div>
+                <div class="card-body">
+                    <div t-if="projection.engagement_response_state == 'delivery_change_requested'"
+                         class="alert alert-info">
+                        <p class="mb-1"><strong>Requested Delivery Date:</strong>
+                            <span t-field="projection.pending_requested_delivery_date"/>
+                        </p>
+                        <p class="mb-0"><strong>Reason / Comments:</strong>
+                            <t t-out="projection.pending_request_reason"/>
+                        </p>
+                        <p class="mt-2 mb-0">
+                            TruCalc is reviewing your conditional acceptance request.
+                            The current Vendor Delivery Date remains authoritative until approval.
+                        </p>
+                    </div>
+                    <div t-if="projection.engagement_response_state == 'declined'"
+                         class="alert alert-secondary">
+                        <strong>Decline Reason:</strong>
+                        <t t-out="projection.engagement_decline_reason"/>
+                    </div>
+
+                    <div t-if="projection.can_accept_engagement"
+                         class="d-flex flex-wrap gap-2">
+                        <button type="button" class="btn btn-primary"
+                                data-bs-toggle="modal" data-bs-target="#accept-engagement-modal">
+                            Accept Assignment
+                        </button>
+                        <button type="button" class="btn btn-outline-primary"
+                                data-bs-toggle="modal" data-bs-target="#delivery-change-modal">
+                            Request Delivery Change
+                        </button>
+                        <button type="button" class="btn btn-outline-danger"
+                                data-bs-toggle="modal" data-bs-target="#decline-engagement-modal">
+                            Decline Assignment
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div t-if="projection.can_accept_engagement" id="accept-engagement-modal"
+                 class="modal fade" tabindex="-1" aria-hidden="true">
+                <div class="modal-dialog"><div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Accept Assignment</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"
+                                aria-label="Close"/>
+                    </div>
+                    <div class="modal-body">
+                        <p>By accepting this assignment, you confirm that you can perform
+                           the assignment for the agreed fee and deliver it by the stated
+                           Vendor Delivery Date.</p>
+                        <dl class="row mb-0">
+                            <dt class="col-5">Order Number</dt><dd class="col-7"><t t-out="projection.order_number"/></dd>
+                            <dt class="col-5">Service</dt><dd class="col-7"><span t-field="projection.service_type"/></dd>
+                            <dt class="col-5">Property</dt><dd class="col-7"><t t-out="projection.property_address"/></dd>
+                            <dt class="col-5">Agreed Vendor Fee</dt>
+                            <dd class="col-7"><span t-field="projection.agreed_vendor_fee"
+                                t-options="{'widget': 'monetary', 'display_currency': projection.currency_id}"/></dd>
+                            <dt class="col-5">Vendor Delivery Date</dt>
+                            <dd class="col-7"><span t-field="projection.vendor_delivery_date"/></dd>
+                        </dl>
+                    </div>
+                    <form t-att-action="'/my/trucalc/orders/%s/engagement/accept' % projection.order_number"
+                          method="post">
+                        <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary"
+                                    data-bs-dismiss="modal">Cancel</button>
+                            <button type="submit" class="btn btn-primary">Accept Assignment</button>
+                        </div>
+                    </form>
+                </div></div>
+            </div>
+
+            <div t-if="projection.can_request_delivery_change" id="delivery-change-modal"
+                 class="modal fade" tabindex="-1" aria-hidden="true">
+                <div class="modal-dialog"><div class="modal-content">
+                    <form t-att-action="'/my/trucalc/orders/%s/engagement/request-delivery-change' % projection.order_number"
+                          method="post">
+                        <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
+                        <div class="modal-header"><h5 class="modal-title">Request Delivery Change</h5></div>
+                        <div class="modal-body">
+                            <p>The agreed Vendor Fee remains unchanged. The current Vendor
+                               Delivery Date remains authoritative until TruCalc approves.</p>
+                            <div class="mb-3">
+                                <label class="form-label">Requested Delivery Date</label>
+                                <input type="date" name="requested_delivery_date"
+                                       class="form-control" required="required"/>
+                            </div>
+                            <div>
+                                <label class="form-label">Reason / Comments</label>
+                                <textarea name="reason" class="form-control" rows="3"
+                                          required="required"/>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary"
+                                    data-bs-dismiss="modal">Cancel</button>
+                            <button type="submit" class="btn btn-primary">Submit Request</button>
+                        </div>
+                    </form>
+                </div></div>
+            </div>
+
+            <div t-if="projection.can_decline_engagement" id="decline-engagement-modal"
+                 class="modal fade" tabindex="-1" aria-hidden="true">
+                <div class="modal-dialog"><div class="modal-content">
+                    <form t-att-action="'/my/trucalc/orders/%s/engagement/decline' % projection.order_number"
+                          method="post">
+                        <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
+                        <div class="modal-header"><h5 class="modal-title">Decline Assignment</h5></div>
+                        <div class="modal-body">
+                            <p>Declining does not automatically reopen bidding. TruCalc
+                               Operations must determine the next action.</p>
+                            <label class="form-label">Decline Reason</label>
+                            <textarea name="decline_reason" class="form-control" rows="3"
+                                      required="required"/>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary"
+                                    data-bs-dismiss="modal">Cancel</button>
+                            <button type="submit" class="btn btn-danger">Decline Assignment</button>
+                        </div>
+                    </form>
+                </div></div>
             </div>
         </t>
     </template>

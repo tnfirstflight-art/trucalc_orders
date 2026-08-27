@@ -50,7 +50,8 @@ class TruCalcVendorOrder(models.Model):
         readonly=True,
     )
     response_deadline = fields.Datetime(readonly=True)
-    due_date = fields.Date(readonly=True)
+    vendor_delivery_date = fields.Date(readonly=True)
+    vendor_engaged_at = fields.Datetime(readonly=True)
     is_assigned = fields.Boolean(readonly=True)
     agreed_vendor_fee = fields.Float(readonly=True)
     solicitation_standard_fee = fields.Float(
@@ -79,7 +80,22 @@ class TruCalcVendorOrder(models.Model):
     last_revised_at = fields.Datetime(readonly=True)
     revision_count = fields.Integer(readonly=True)
     can_respond = fields.Boolean(readonly=True)
-    vendor_response_label = fields.Char(string="Your Response", readonly=True)
+    vendor_response_label = fields.Char(string="Response", readonly=True)
+    engagement_response_state = fields.Selection(
+        selection=lambda self: self.env["trucalc.vendor.engagement"]._fields[
+            "response_state"
+        ].selection,
+        readonly=True,
+    )
+    engagement_response_label = fields.Char(
+        string="Engagement Response", readonly=True,
+    )
+    pending_requested_delivery_date = fields.Date(readonly=True)
+    pending_request_reason = fields.Text(readonly=True)
+    engagement_decline_reason = fields.Text(readonly=True)
+    can_accept_engagement = fields.Boolean(readonly=True)
+    can_request_delivery_change = fields.Boolean(readonly=True)
+    can_decline_engagement = fields.Boolean(readonly=True)
     currency_id = fields.Many2one("res.currency", readonly=True)
 
     # Integer-only and system-restricted: required for the rule, but deliberately
@@ -104,7 +120,10 @@ class TruCalcVendorOrder(models.Model):
                     o.status AS order_status,
                     CASE WHEN a.source = 'invitation' THEN a.expires_at END
                         AS response_deadline,
-                    o.due_date,
+                    CASE WHEN a.source = 'assignment' THEN o.vendor_delivery_date END
+                        AS vendor_delivery_date,
+                    CASE WHEN a.source = 'assignment' THEN o.vendor_engaged_at END
+                        AS vendor_engaged_at,
                     (a.source = 'assignment') AS is_assigned,
                     CASE WHEN a.source = 'assignment' THEN o.vendor_fee END
                         AS agreed_vendor_fee,
@@ -120,6 +139,14 @@ class TruCalcVendorOrder(models.Model):
                     b.status AS response_status,
                     b.submitted_at, b.last_revised_at, b.revision_count,
                     CASE
+                        WHEN a.source = 'assignment' AND e.response_state = 'awaiting_acceptance'
+                            THEN 'Awaiting Acceptance'
+                        WHEN a.source = 'assignment' AND e.response_state = 'delivery_change_requested'
+                            THEN 'Change Requested'
+                        WHEN a.source = 'assignment' AND e.response_state = 'accepted'
+                            THEN 'Accepted'
+                        WHEN a.source = 'assignment' AND e.response_state = 'declined'
+                            THEN 'Declined'
                         WHEN a.active IS NOT TRUE THEN 'Declined'
                         WHEN b.status = 'submitted' THEN 'Submitted'
                         WHEN b.status = 'selected' THEN 'Selected'
@@ -130,6 +157,17 @@ class TruCalcVendorOrder(models.Model):
                             THEN 'Open for Response'
                         ELSE NULL
                     END AS vendor_response_label,
+                    e.response_state AS engagement_response_state,
+                    CASE e.response_state
+                        WHEN 'awaiting_acceptance' THEN 'Awaiting Acceptance'
+                        WHEN 'delivery_change_requested' THEN 'Change Requested'
+                        WHEN 'accepted' THEN 'Accepted'
+                        WHEN 'declined' THEN 'Declined'
+                        ELSE NULL
+                    END AS engagement_response_label,
+                    pending.requested_delivery_date AS pending_requested_delivery_date,
+                    pending.reason AS pending_request_reason,
+                    e.decline_reason AS engagement_decline_reason,
                     company.currency_id AS currency_id,
                     (a.active IS TRUE AND a.source = 'invitation'
                      AND i.state = 'invited' AND o.status = 'bid_requested'
@@ -138,11 +176,32 @@ class TruCalcVendorOrder(models.Model):
                      AND i.round_number = o.bidding_round
                      AND (i.response_deadline IS NULL
                           OR CURRENT_TIMESTAMP AT TIME ZONE 'UTC' <= i.response_deadline)
-                     AND (b.id IS NULL OR b.status = 'submitted')) AS can_respond
+                     AND (b.id IS NULL OR b.status = 'submitted')) AS can_respond,
+                    (a.active IS TRUE AND a.source = 'assignment'
+                     AND o.status = 'engaged' AND e.active IS TRUE
+                     AND e.response_state = 'awaiting_acceptance')
+                        AS can_accept_engagement,
+                    (a.active IS TRUE AND a.source = 'assignment'
+                     AND o.status = 'engaged' AND e.active IS TRUE
+                     AND e.response_state = 'awaiting_acceptance')
+                        AS can_request_delivery_change,
+                    (a.active IS TRUE AND a.source = 'assignment'
+                     AND o.status = 'engaged' AND e.active IS TRUE
+                     AND e.response_state = 'awaiting_acceptance')
+                        AS can_decline_engagement
                 FROM trucalc_order_vendor_authorization a
                 JOIN trucalc_order o ON o.id = a.order_id
                 JOIN trucalc_vendor v ON v.id = a.vendor_id
                 JOIN res_company company ON company.id = o.company_id
+                LEFT JOIN trucalc_vendor_engagement e
+                    ON e.order_id = a.order_id
+                   AND e.vendor_id = a.vendor_id
+                   AND e.company_id = a.company_id
+                   AND e.round_number = a.round_number
+                   AND e.assignment_authorization_id = a.id
+                   AND e.active IS TRUE
+                LEFT JOIN trucalc_vendor_engagement_event pending
+                    ON pending.id = e.pending_request_event_id
                 LEFT JOIN trucalc_bid b
                     ON b.response_type IS NOT NULL
                    AND (
@@ -207,6 +266,47 @@ class TruCalcVendorOrder(models.Model):
     def action_vendor_decline(self, reason):
         invitation = self._trusted_invitation()
         return invitation.with_user(self.env.user).action_vendor_decline(reason)
+
+    def _trusted_engagement(self):
+        self.ensure_one()
+        vendor = self.env["trucalc.bid.invitation"]._vendor_identity()
+        authorization = self.env["trucalc.order.vendor.authorization"].sudo().browse(
+            self.id
+        ).exists()
+        if (
+            not authorization or not authorization.active
+            or authorization.source != "assignment"
+            or authorization.vendor_id != vendor
+        ):
+            raise AccessError(_("Engagement access is not authorized."))
+        engagement = self.env["trucalc.vendor.engagement"].sudo().search([
+            ("assignment_authorization_id", "=", authorization.id),
+            ("active", "=", True),
+        ])
+        order = authorization.order_id
+        if (
+            len(engagement) != 1
+            or engagement.vendor_id != vendor
+            or engagement.order_id != order
+            or engagement.company_id != authorization.company_id
+            or engagement.round_number != authorization.round_number
+            or order.status != "engaged"
+            or order.assigned_vendor_id != vendor
+            or order.bidding_round != authorization.round_number
+        ):
+            raise AccessError(_("Engagement access is not authorized."))
+        return engagement.with_user(self.env.user)
+
+    def action_vendor_accept_engagement(self):
+        return self._trusted_engagement().action_vendor_accept()
+
+    def action_vendor_request_delivery_change(self, requested_date, reason):
+        return self._trusted_engagement().action_vendor_request_delivery_change(
+            requested_date, reason
+        )
+
+    def action_vendor_decline_engagement(self, reason):
+        return self._trusted_engagement().action_vendor_decline(reason)
 
     @api.model_create_multi
     def create(self, vals_list):

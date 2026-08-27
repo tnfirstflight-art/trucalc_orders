@@ -146,6 +146,66 @@ class EvaluationOrder(models.Model):
         help="Date and time an authorized TruCalc user confirmed Vendor engagement.",
     )
 
+    engagement_ids = fields.One2many(
+        "trucalc.vendor.engagement", "order_id", string="Vendor Engagements",
+        readonly=True,
+    )
+    current_engagement_id = fields.Many2one(
+        "trucalc.vendor.engagement", compute="_compute_current_engagement",
+        compute_sudo=True, readonly=True, search="_search_current_engagement",
+    )
+    engagement_response_state = fields.Selection(
+        related="current_engagement_id.response_state", readonly=True,
+        string="Engagement Response",
+    )
+    engagement_requested_delivery_date = fields.Date(
+        related="current_engagement_id.pending_request_event_id.requested_delivery_date",
+        readonly=True, string="Requested Delivery Date",
+    )
+    engagement_request_reason = fields.Text(
+        related="current_engagement_id.pending_request_event_id.reason",
+        readonly=True, string="Delivery Change Reason / Comments",
+    )
+    engagement_decline_reason = fields.Text(
+        related="current_engagement_id.decline_reason", readonly=True,
+        string="Engagement Decline Reason",
+    )
+    engagement_action_required = fields.Boolean(
+        compute="_compute_engagement_action_required",
+        search="_search_engagement_action_required",
+        compute_sudo=True,
+        readonly=True,
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+    )
+    engagement_action_required_label = fields.Char(
+        compute="_compute_engagement_action_required",
+        compute_sudo=True,
+        readonly=True,
+        string="Operational Attention",
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+    )
+    engagement_action_required_reason = fields.Selection(
+        [
+            ("delivery_change_requested", "Delivery Change Requested"),
+            ("declined", "Vendor Declined"),
+        ],
+        compute="_compute_engagement_action_required",
+        compute_sudo=True,
+        readonly=True,
+        string="Reason",
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+    )
+    current_round_has_solicitation = fields.Boolean(
+        compute="_compute_current_round_solicitation_controls",
+        compute_sudo=True,
+        readonly=True,
+    )
+    can_request_vendor_bids = fields.Boolean(
+        compute="_compute_current_round_solicitation_controls",
+        compute_sudo=True,
+        readonly=True,
+    )
+
     status = fields.Selection(
         [
             ("new", "New"),
@@ -164,6 +224,67 @@ class EvaluationOrder(models.Model):
         default="new",
         tracking=True,
     )
+
+    @api.depends("engagement_ids.active")
+    def _compute_current_engagement(self):
+        for order in self:
+            order.current_engagement_id = order.engagement_ids.filtered("active")[:1]
+
+    def _search_current_engagement(self, operator, value):
+        return [
+            ("engagement_ids.active", "=", True),
+            ("engagement_ids", operator, value),
+        ]
+
+    @api.depends("current_engagement_id.response_state")
+    def _compute_engagement_action_required(self):
+        reasons = {
+            "delivery_change_requested": "delivery_change_requested",
+            "declined": "declined",
+        }
+        for order in self:
+            reason = reasons.get(order.current_engagement_id.response_state)
+            order.engagement_action_required = bool(reason)
+            order.engagement_action_required_label = (
+                _("Action Required") if reason else False
+            )
+            order.engagement_action_required_reason = reason
+
+    def _search_engagement_action_required(self, operator, value):
+        if operator not in ("=", "!=") or not isinstance(value, bool):
+            raise ValidationError(_("Action Required supports only Boolean searches."))
+        qualifying = self.env["trucalc.vendor.engagement"].sudo().search([
+            ("active", "=", True),
+            ("response_state", "in", ("delivery_change_requested", "declined")),
+            ("company_id", "in", self.env.companies.ids),
+        ]).mapped("order_id").ids
+        wants_qualifying = (operator == "=" and value) or (
+            operator == "!=" and not value
+        )
+        return [("id", "in" if wants_qualifying else "not in", qualifying)]
+
+    @api.depends(
+        "status", "bidding_round", "invitation_ids.round_number",
+        "bid_ids.round_number", "vendor_authorization_ids.round_number",
+        "vendor_authorization_ids.source",
+    )
+    def _compute_current_round_solicitation_controls(self):
+        for order in self:
+            invitations, authorizations, bids = order._current_round_solicitation_facts()
+            order.current_round_has_solicitation = bool(invitations)
+            order.can_request_vendor_bids = bool(
+                order.id
+                and (
+                    (order.status == "accepted" and order.bidding_round == 0)
+                    or (
+                        order.status == "bid_requested"
+                        and order.bidding_round > 0
+                        and not invitations
+                        and not authorizations
+                        and not bids
+                    )
+                )
+            )
 
     notes = fields.Text(
         string="Notes",
@@ -551,11 +672,19 @@ class EvaluationOrder(models.Model):
         self._require_bid_manager()
         self.ensure_one()
         self._lock_for_bid_lifecycle()
+        original_solicitation = self.status == "accepted" and self.bidding_round == 0
+        reopened_solicitation = self._is_clean_reopened_unsolicited_round()
+        if not original_solicitation and not reopened_solicitation:
+            raise ValidationError(_(
+                "Request Bids requires an Accepted original Order or a clean, "
+                "unsolicited reopened bidding round."
+            ))
         if not self.due_date:
             raise ValidationError(_("Set a Client Due Date before requesting Vendor bids."))
         vendors = self._validate_solicitation_vendors(vendors)
         deadline = self._validate_future_deadline(response_deadline)
-        self.action_bid_requested()
+        if original_solicitation:
+            self.action_bid_requested()
         invitations = self.env["trucalc.bid.invitation"].create([
             {
                 "order_id": self.id,
@@ -590,6 +719,41 @@ class EvaluationOrder(models.Model):
             ("round_number", "=", self.bidding_round),
             ("is_legacy_reconstructed", "=", False),
         ])
+
+    @api.private
+    def _current_round_solicitation_facts(self):
+        self.ensure_one()
+        if self.bidding_round <= 0:
+            return (
+                self.env["trucalc.bid.invitation"].browse(),
+                self.env["trucalc.order.vendor.authorization"].browse(),
+                self.env["trucalc.bid"].browse(),
+            )
+        invitations = self._current_round_invitations()
+        authorizations = self.env[
+            "trucalc.order.vendor.authorization"
+        ].sudo().with_context(active_test=False).search([
+            ("order_id", "=", self.id),
+            ("round_number", "=", self.bidding_round),
+            ("source", "=", "invitation"),
+        ])
+        bids = self.env["trucalc.bid"].search([
+            ("order_id", "=", self.id),
+            ("round_number", "=", self.bidding_round),
+        ])
+        return invitations, authorizations, bids
+
+    @api.private
+    def _is_clean_reopened_unsolicited_round(self):
+        self.ensure_one()
+        invitations, authorizations, bids = self._current_round_solicitation_facts()
+        return bool(
+            self.status == "bid_requested"
+            and self.bidding_round > 0
+            and not invitations
+            and not authorizations
+            and not bids
+        )
 
     @api.private
     def _current_round_deadline(self):
@@ -667,15 +831,23 @@ class EvaluationOrder(models.Model):
     def action_open_request_bids_wizard(self):
         self._require_bid_manager()
         self.ensure_one()
-        if not self.id or self.status != "accepted":
-            raise ValidationError(_("Only a persisted Accepted order may request bids."))
+        if not self.id or not (
+            (self.status == "accepted" and self.bidding_round == 0)
+            or self._is_clean_reopened_unsolicited_round()
+        ):
+            raise ValidationError(_(
+                "Request Bids requires an Accepted original Order or a clean, "
+                "unsolicited reopened bidding round."
+            ))
         return self._solicitation_wizard_action("request")
 
     def action_open_manage_bid_requests_wizard(self):
         self._require_bid_manager()
         self.ensure_one()
-        if self.status != "bid_requested":
-            raise ValidationError(_("Only a Bid Requested order may manage bid requests."))
+        if self.status != "bid_requested" or not self._current_round_invitations():
+            raise ValidationError(_(
+                "The current bidding round must be solicited before managing bid requests."
+            ))
         return self._solicitation_wizard_action("manage")
 
     @api.private
@@ -693,8 +865,10 @@ class EvaluationOrder(models.Model):
     def action_open_extend_bid_deadline_wizard(self):
         self._require_bid_manager()
         self.ensure_one()
-        if self.status != "bid_requested":
-            raise ValidationError(_("Only a Bid Requested order may extend its deadline."))
+        if self.status != "bid_requested" or not self._current_round_invitations():
+            raise ValidationError(_(
+                "The current bidding round must be solicited before extending its deadline."
+            ))
         return {
             "type": "ir.actions.act_window",
             "name": _("Extend Bid Deadline"),
@@ -717,12 +891,27 @@ class EvaluationOrder(models.Model):
         self._lock_for_bid_lifecycle()
         if self.status not in ("assigned", "engaged"):
             raise ValidationError(_("Only an assigned or engaged order may reopen bidding."))
+        active_engagement = self.env["trucalc.vendor.engagement"].sudo().search([
+            ("order_id", "=", self.id), ("active", "=", True),
+        ])
+        if self.status == "engaged" and len(active_engagement) != 1:
+            raise ValidationError(_(
+                "An Engaged order requires exactly one active Vendor engagement."
+            ))
+        if active_engagement:
+            self.env.cr.execute(
+                "SELECT id FROM trucalc_vendor_engagement WHERE id = %s FOR UPDATE",
+                (active_engagement.id,),
+            )
+            active_engagement.invalidate_recordset()
         old_status = self.status
         old_round = self.bidding_round
         old_vendor = self.assigned_vendor_id.id
         old_fee = self.vendor_fee
         old_delivery_date = self.vendor_delivery_date
         old_engaged_at = self.vendor_engaged_at
+        if active_engagement:
+            active_engagement.with_user(self.env.user)._close_for_reopen()
         self._controlled_lifecycle_write({
             "status": "bid_requested",
             "bidding_round": old_round + 1,
@@ -747,6 +936,28 @@ class EvaluationOrder(models.Model):
                         "vendor_engaged_at": False},
         )
         return True
+
+
+    def action_open_engagement_decision_wizard(self):
+        self._require_bid_manager()
+        self.ensure_one()
+        engagement = self.current_engagement_id
+        if (
+            not engagement
+            or engagement.response_state != "delivery_change_requested"
+        ):
+            raise ValidationError(_("There is no pending delivery-change request."))
+        return {
+            "type": "ir.actions.act_window",
+            "name": _("Review Delivery Change"),
+            "res_model": "trucalc.vendor.engagement.decision.wizard",
+            "view_mode": "form",
+            "view_id": self.env.ref(
+                "trucalc_orders.view_trucalc_vendor_engagement_decision_wizard_form"
+            ).id,
+            "target": "new",
+            "context": {"default_engagement_id": engagement.id},
+        }
 
     @api.constrains("reviewer_id")
     def _check_reviewer_capability(self):
