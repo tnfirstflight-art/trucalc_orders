@@ -1,46 +1,46 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
-
     <record id="view_trucalc_document_tree" model="ir.ui.view">
-        <field name="name">trucalc.document.tree</field>
+        <field name="name">trucalc.document.list</field>
         <field name="model">trucalc.document</field>
         <field name="arch" type="xml">
-            <list>
-                <field name="name"/>
-                <field name="document_type"/>
-                <field name="order_id"/>
-                <field name="uploaded_by"/>
-                <field name="upload_date"/>
+            <list delete="false">
+                <field name="active" column_invisible="True"/>
+                <field name="filename" string="Document Name"/>
+                <field name="tag_id"/>
+                <field name="visible_before_engagement"/>
+                <field name="visible_after_engagement"/>
+                <button name="action_download" type="object" icon="fa-download"
+                        title="Download" invisible="not active"/>
             </list>
         </field>
     </record>
-
     <record id="view_trucalc_document_form" model="ir.ui.view">
         <field name="name">trucalc.document.form</field>
         <field name="model">trucalc.document</field>
         <field name="arch" type="xml">
-            <form>
+            <form delete="false">
                 <sheet>
-
                     <group>
-                        <field name="name"/>
-                        <field name="document_type"/>
+                        <field name="active" invisible="1"/>
+                        <field name="order_id" readonly="1" force_save="1"/>
+                        <field name="tag_id" options="{'no_create': True, 'no_create_edit': True}"/>
+                        <field name="attachment" filename="filename" readonly="id"/>
+                        <field name="filename" readonly="1" force_save="1"/>
                     </group>
-
-                    <group>
-                        <field name="order_id"/>
-                        <field name="uploaded_by" readonly="1"/>
-                        <field name="upload_date" readonly="1"/>
+                    <group string="Vendor Visibility" groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations">
+                        <field name="visible_before_engagement"/>
+                        <field name="visible_after_engagement"/>
                     </group>
-
-                    <group>
-                        <field name="attachment" filename="filename"/>
-                        <field name="filename"/>
+                    <group string="Audit Information">
+                        <field name="origin" readonly="1"/>
+                        <field name="originating_bank_id" readonly="1" invisible="origin != 'bank'"/>
+                        <field name="uploaded_by" readonly="1"/><field name="upload_date" readonly="1"/>
+                        <field name="deleted_by_id" readonly="1" invisible="active"/>
+                        <field name="deleted_at" readonly="1" invisible="active"/>
                     </group>
-
                 </sheet>
             </form>
         </field>
     </record>
-
 </odoo>

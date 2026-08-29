@@ -64,8 +64,12 @@ class ResUsers(models.Model):
         for user in self:
             membership = user._trucalc_persona_membership()
             family_count = sum(bool(groups) for groups in membership.values())
-            bank_company = user.sudo().trucalc_bank_company_id
-            vendor = user.sudo().trucalc_vendor_id
+            user_sudo = user.sudo()
+            bank_company = user_sudo.trucalc_bank_company_id
+            vendor = user_sudo.trucalc_vendor_id
+            effective_groups = user_sudo.all_group_ids
+            portal_group = self.env.ref("base.group_portal")
+            internal_group = self.env.ref("base.group_user")
 
             if bank_company and vendor:
                 raise ValidationError(_(
@@ -91,6 +95,14 @@ class ResUsers(models.Model):
                 raise ValidationError(_(
                     "A TruCalc Bank user requires one bank mapping and no vendor mapping."
                 ))
+            if membership["bank"] and (
+                internal_group in effective_groups
+                or portal_group not in effective_groups
+                or not user_sudo.share
+            ):
+                raise ValidationError(_(
+                    "A TruCalc Bank user must be an external portal user."
+                ))
             if membership["vendor"] and (not vendor or bank_company):
                 raise ValidationError(_(
                     "A TruCalc Vendor user requires one vendor mapping and no bank mapping."
@@ -112,12 +124,16 @@ class ResUsers(models.Model):
         self.ensure_one()
         membership = self._trucalc_persona_membership()
         user = self.sudo()
+        effective_groups = user.all_group_ids
         if (
             len(membership["bank"]) != 1
             or membership["internal"]
             or membership["vendor"]
             or not user.trucalc_bank_company_id
             or user.trucalc_vendor_id
+            or self.env.ref("base.group_user") in effective_groups
+            or self.env.ref("base.group_portal") not in effective_groups
+            or not user.share
         ):
             raise AccessError(_("TruCalc bank authorization is not configured."))
         return user.trucalc_bank_company_id

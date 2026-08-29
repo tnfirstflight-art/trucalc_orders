@@ -15,6 +15,13 @@
                 <t t-set="url" t-value="'/my/trucalc/orders'"/>
                 <t t-set="config_card" t-value="True"/>
             </t>
+            <t t-if="request.env.user.has_group('trucalc_orders.group_bank_admin') or request.env.user.has_group('trucalc_orders.group_bank_requestor') or request.env.user.has_group('trucalc_orders.group_bank_view_only')"
+               t-call="portal.portal_docs_entry">
+                <t t-set="title">My TruCalc Requests</t>
+                <t t-set="text">View your Bank's authorized TruCalc requests</t>
+                <t t-set="url" t-value="'/my/trucalc/bank/orders'"/>
+                <t t-set="config_card" t-value="True"/>
+            </t>
         </div>
     </template>
 
@@ -32,6 +39,16 @@
             </li>
             <li t-if="page_name == 'trucalc_order'" class="breadcrumb-item active">
                 <t t-out="projection.order_number"/>
+            </li>
+            <li t-if="page_name in ('trucalc_bank_orders', 'trucalc_bank_documents')"
+                t-attf-class="breadcrumb-item #{'active' if page_name == 'trucalc_bank_orders' else ''}">
+                <a t-if="page_name == 'trucalc_bank_documents'"
+                   href="/my/trucalc/bank/orders">My TruCalc Requests</a>
+                <t t-else="">My TruCalc Requests</t>
+            </li>
+            <li t-if="page_name == 'trucalc_bank_documents'"
+                class="breadcrumb-item active">
+                <t t-out="order.order_number"/>
             </li>
         </xpath>
     </template>
@@ -190,6 +207,18 @@
 
             <div t-if="response_error" class="alert alert-danger mt-3" role="alert">
                 <t t-out="response_error"/>
+            </div>
+
+            <div t-if="documents" class="card mt-3">
+                <div class="card-header"><strong>Documents</strong></div>
+                <div class="list-group list-group-flush">
+                    <a t-foreach="documents" t-as="document"
+                       t-att-href="'/my/trucalc/orders/%s/documents/%s/download' % (projection.order_number, document.id)"
+                       class="list-group-item list-group-item-action">
+                        <t t-out="document.filename"/>
+                        <span class="text-muted"> — <t t-out="document.tag_id.name"/></span>
+                    </a>
+                </div>
             </div>
 
             <div t-if="projection.vendor_phase != 'assignment' and (projection.vendor_phase in ('invitation', 'declined_history') or projection.response_type)"
@@ -417,6 +446,102 @@
                         </div>
                     </form>
                 </div></div>
+            </div>
+        </t>
+    </template>
+
+    <template id="portal_bank_orders" name="Bank TruCalc Orders">
+        <t t-call="portal.portal_layout">
+            <t t-set="breadcrumbs_searchbar" t-value="True"/>
+            <t t-call="portal.portal_searchbar">
+                <t t-set="title">My TruCalc Requests</t>
+            </t>
+            <div t-if="not orders" class="alert alert-info" role="status">
+                You currently have no authorized TruCalc requests.
+            </div>
+            <t t-if="orders" t-call="portal.portal_table">
+                <thead>
+                    <tr>
+                        <th>Order Number</th>
+                        <th>Borrower</th>
+                        <th>Property Address</th>
+                        <th>Service Type</th>
+                        <th>Client Due Date</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr t-foreach="orders" t-as="order">
+                        <td>
+                            <a t-att-href="'/my/trucalc/bank/orders/%s/documents' % order.order_number">
+                                <t t-out="order.order_number"/>
+                            </a>
+                        </td>
+                        <td><t t-out="order.borrower"/></td>
+                        <td><t t-out="order.property_address"/></td>
+                        <td><span t-field="order.service_type"/></td>
+                        <td><span t-if="order.due_date" t-field="order.due_date"/></td>
+                        <td><span t-field="order.status"/></td>
+                    </tr>
+                </tbody>
+            </t>
+            <div t-if="pager" class="d-flex justify-content-center mt-3">
+                <t t-call="portal.pager"/>
+            </div>
+        </t>
+    </template>
+
+    <template id="portal_bank_documents" name="Bank TruCalc Documents">
+        <t t-call="portal.portal_layout">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h2>TruCalc Request <t t-out="order.order_number"/></h2>
+                <a href="/my/trucalc/bank/orders" class="btn btn-outline-secondary">Back to My TruCalc Requests</a>
+            </div>
+            <div class="card mb-3">
+                <div class="card-header"><strong>Request Details</strong></div>
+                <div class="card-body">
+                    <dl class="row mb-0">
+                        <dt class="col-sm-4">Order Number</dt>
+                        <dd class="col-sm-8"><t t-out="order.order_number"/></dd>
+                        <dt class="col-sm-4">Borrower</dt>
+                        <dd class="col-sm-8"><t t-out="order.borrower"/></dd>
+                        <dt class="col-sm-4">Property Address</dt>
+                        <dd class="col-sm-8"><t t-out="order.property_address"/></dd>
+                        <dt class="col-sm-4">Service Type</dt>
+                        <dd class="col-sm-8"><span t-field="order.service_type"/></dd>
+                        <dt class="col-sm-4">Client Due Date</dt>
+                        <dd class="col-sm-8"><span t-if="order.due_date" t-field="order.due_date"/></dd>
+                        <dt class="col-sm-4">Status</dt>
+                        <dd class="col-sm-8"><span t-field="order.status"/></dd>
+                    </dl>
+                </div>
+            </div>
+            <div t-if="upload_error" class="alert alert-danger"><t t-out="upload_error"/></div>
+            <h3>Documents</h3>
+            <form t-if="can_upload"
+                  t-att-action="'/my/trucalc/bank/orders/%s/documents/upload' % order.order_number"
+                  method="post" enctype="multipart/form-data" class="card card-body mb-3">
+                <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
+                <div class="mb-3">
+                    <label class="form-label">Document Tag</label>
+                    <select name="tag_id" class="form-select" required="required">
+                        <option value="">Select a Tag</option>
+                        <option t-foreach="tags" t-as="tag" t-att-value="tag.id"><t t-out="tag.name"/></option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">File</label>
+                    <input type="file" name="document_file" class="form-control" required="required"/>
+                </div>
+                <button type="submit" class="btn btn-primary">Upload Document</button>
+            </form>
+            <div class="list-group">
+                <a t-foreach="documents" t-as="document"
+                   t-att-href="'/my/trucalc/bank/orders/%s/documents/%s/download' % (order.order_number, document.id)"
+                   class="list-group-item list-group-item-action">
+                    <t t-out="document.filename"/> — <span class="text-muted" t-out="document.tag_id.name"/>
+                </a>
+                <div t-if="not documents" class="list-group-item text-muted">No supporting documents.</div>
             </div>
         </t>
     </template>

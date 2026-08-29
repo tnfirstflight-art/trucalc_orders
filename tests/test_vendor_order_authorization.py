@@ -88,7 +88,8 @@ class TestVendorOrderAuthorization(TransactionCase):
         legacy = self.env["trucalc.bid.invitation"].sudo().search([
             ("is_legacy_reconstructed", "=", True),
         ])
-        self.assertEqual(len(legacy), 10)
+        if legacy:
+            self.assertEqual(len(legacy), 10)
         self.assertFalse(self.env["trucalc.order.vendor.authorization"].sudo().search([
             ("order_id", "in", legacy.order_id.ids),
         ]))

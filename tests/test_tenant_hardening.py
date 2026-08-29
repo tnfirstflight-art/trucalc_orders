@@ -1,3 +1,5 @@
+import base64
+
 from odoo import Command, fields
 from odoo.exceptions import AccessError, ValidationError
 from odoo.tests import TransactionCase, tagged
@@ -49,6 +51,9 @@ class TestTenantHardening(TransactionCase):
         )
         cls.order_a = cls._order(cls.admin, cls.bank_a, "Existing Bank A")
         cls.order_b = cls._order(cls.admin, cls.bank_b, "Existing Bank B")
+        cls.document_tag = cls.env["trucalc.document.tag"].with_user(cls.admin).create({
+            "name": "4B1A Supporting",
+        })
 
     @classmethod
     def _user(cls, login, role_names, bank=False, vendor=False):
@@ -93,6 +98,11 @@ class TestTenantHardening(TransactionCase):
         for index, (roles, bank, vendor) in enumerate(valid):
             user = self._user("valid-%s" % index, roles, bank=bank, vendor=vendor)
             self.assertTrue(user)
+            if bank:
+                self.assertTrue(user.share)
+                self.assertTrue(user.has_group("base.group_portal"))
+                self.assertFalse(user.has_group("base.group_user"))
+                self.assertEqual(user._trucalc_bank_identity(), bank)
 
     def test_invalid_persona_combinations(self):
         invalid = (
@@ -114,6 +124,15 @@ class TestTenantHardening(TransactionCase):
             self._assert_invalid_user(roles, bank=bank, vendor=vendor)
 
         self._assert_invalid_user([], bank=self.bank_a, vendor=self.vendor_a)
+
+        with self.assertRaises(ValidationError):
+            self._user(
+                "invalid-internal-bank",
+                ["group_bank_requestor"],
+                bank=self.bank_a,
+            ).write({
+                "group_ids": [Command.link(self.env.ref("base.group_user").id)],
+            })
 
     def test_relational_group_commands_and_required_mapping_removal(self):
         with self.assertRaises(ValidationError):
@@ -143,6 +162,18 @@ class TestTenantHardening(TransactionCase):
                 "borrower": "Denied Missing Mapping",
                 "property_address": "5 Tenant Way",
             })
+
+    def test_corrupted_internal_bank_persona_fails_closed(self):
+        user = self._user(
+            "4b1a-corrupt-internal-bank", ["group_bank_requestor"], bank=self.bank_a
+        )
+        self.env.cr.execute(
+            "INSERT INTO res_groups_users_rel (gid, uid) VALUES (%s, %s)",
+            (self.env.ref("base.group_user").id, user.id),
+        )
+        user.invalidate_recordset(["group_ids", "share"])
+        with self.assertRaises(AccessError):
+            user._trucalc_bank_identity()
 
     def test_bank_order_create_derives_trusted_ownership(self):
         model = self.env["trucalc.order"].with_user(self.bank_requestor)
@@ -223,6 +254,41 @@ class TestTenantHardening(TransactionCase):
             with self.assertRaises(AccessError):
                 order.write(values)
 
+    def test_bank_order_record_rule_isolates_read_search_write_and_unlink(self):
+        for user in (self.bank_admin, self.bank_requestor, self.bank_viewer):
+            model = self.env["trucalc.order"].with_user(user)
+            self.assertEqual(model.search([]), self.order_a)
+            self.assertEqual(model.search([("id", "=", self.order_b.id)]), model)
+            self.assertEqual(model.browse(self.order_a.id).borrower, "Existing Bank A")
+            with self.assertRaises(AccessError):
+                model.browse(self.order_b.id).read(["borrower"])
+            with self.assertRaises(AccessError):
+                model.browse(self.order_b.id).write({"borrower": "Cross-Bank"})
+            self.assertFalse(model.has_access("unlink"))
+
+        with self.assertRaises(AccessError):
+            self.order_a.with_user(self.bank_viewer).write({"borrower": "Denied"})
+        self.assertFalse(
+            self.env["trucalc.order"].with_user(self.vendor_user).has_access("read")
+        )
+        self.assertEqual(
+            self.env["trucalc.order"].with_user(self.admin).search_count([
+                ("id", "in", (self.order_a.id, self.order_b.id)),
+            ]),
+            2,
+        )
+
+    def test_bank_order_record_rule_missing_mapping_fails_closed(self):
+        user = self._user(
+            "4b1a-corrupt-bank-search", ["group_bank_admin"], bank=self.bank_a
+        )
+        self.env.cr.execute(
+            "UPDATE res_users SET trucalc_bank_company_id = NULL WHERE id = %s",
+            (user.id,),
+        )
+        user.invalidate_recordset(["trucalc_bank_company_id"])
+        self.assertFalse(self.env["trucalc.order"].with_user(user).search([]))
+
     def test_view_only_cannot_create(self):
         with self.assertRaises(AccessError):
             self.env["trucalc.order"].with_user(self.bank_viewer).create({
@@ -241,14 +307,24 @@ class TestTenantHardening(TransactionCase):
 
     def test_bank_document_create_and_enumeration_behavior(self):
         model = self.env["trucalc.document"].with_user(self.bank_requestor)
-        document = model.create({"name": "Bank A", "order_id": self.order_a.id})
+        with self.assertRaises(AccessError):
+            model.create({"name": "Bank A", "order_id": self.order_a.id})
+        document = model._create_bank_document(
+            self.order_a, self.document_tag, "Bank A.pdf",
+            base64.b64encode(b"bank-a"), self.bank_requestor,
+        )
         self.assertEqual(document.company_id, self.bank_a)
         self.assertEqual(document.uploaded_by, self.bank_requestor)
+        self.assertEqual(document.origin, "bank")
 
         messages = []
         for order_id in (self.order_b.id, 999999999):
             with self.assertRaises(AccessError) as error:
-                model.create({"name": "Denied", "order_id": order_id})
+                model._create_bank_document(
+                    self.env["trucalc.order"].sudo().browse(order_id),
+                    self.document_tag, "Denied.pdf", base64.b64encode(b"denied"),
+                    self.bank_requestor,
+                )
             messages.append(str(error.exception))
         self.assertEqual(messages[0], messages[1])
 
@@ -263,19 +339,18 @@ class TestTenantHardening(TransactionCase):
                 })
 
     def test_bank_document_context_forgery_has_no_effect(self):
-        document = self.env["trucalc.document"].with_user(
-            self.bank_requestor
-        ).with_context(
-            allowed_company_ids=[self.bank_b.id],
-            default_company_id=self.bank_b.id,
-            default_uploaded_by=self.admin.id,
-        ).create({"name": "Context Safe", "order_id": self.order_a.id})
+        document = self.env["trucalc.document"].with_user(self.bank_requestor)._create_bank_document(
+            self.order_a, self.document_tag, "Context Safe.pdf",
+            base64.b64encode(b"safe"), self.bank_requestor,
+        )
         self.assertEqual(document.company_id, self.bank_a)
         self.assertEqual(document.uploaded_by, self.bank_requestor)
 
     def test_document_provenance_external_and_internal_behavior(self):
         document = self.env["trucalc.document"].with_user(self.admin).create({
             "name": "Provenance", "order_id": self.order_a.id,
+            "tag_id": self.document_tag.id, "filename": "Provenance.pdf",
+            "attachment": base64.b64encode(b"provenance"),
         })
         external_document = document.with_user(self.vendor_user)
         for values in (
@@ -287,7 +362,6 @@ class TestTenantHardening(TransactionCase):
             with self.assertRaises(AccessError):
                 external_document.write(values)
 
-        document.with_user(self.admin).write({"name": "Admin Edit"})
-        document.with_user(self.ops).write({"name": "Operations Edit"})
-        document.with_user(self.reviewer).write({"name": "Reviewer Edit"})
-        self.assertEqual(document.name, "Reviewer Edit")
+        for user in (self.admin, self.ops, self.reviewer):
+            with self.assertRaises(AccessError):
+                document.with_user(user).write({"name": "Denied Edit"})

@@ -3,7 +3,9 @@ from . import evaluation_order
 from . import ir_rule
 from . import res_users
 from . import vendor
+from . import document_tag
 from . import document
+from . import document_event
 from . import bid_audit
 from . import vendor_order_authorization
 from . import bid_invitation

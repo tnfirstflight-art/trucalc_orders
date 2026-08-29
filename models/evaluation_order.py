@@ -11,6 +11,14 @@ class EvaluationOrder(models.Model):
     _description = "TruCalc Order"
     _inherit = ["mail.thread", "mail.activity.mixin"]
 
+    def _mail_get_operation_for_mail_message_operation(self, message_operation):
+        operations = super()._mail_get_operation_for_mail_message_operation(
+            message_operation
+        )
+        if message_operation == "create" and self.env.user._trucalc_has_bank_role():
+            operations.update(dict.fromkeys(self, None))
+        return operations
+
     order_number = fields.Char(
         string="Order Number",
         required=True,
@@ -513,6 +521,24 @@ class EvaluationOrder(models.Model):
             raise ValidationError(
                 _("Only a New request without bid or assignment history may be disposed.")
             )
+
+    def action_add_document(self):
+        self._require_intake_manager()
+        self.ensure_one()
+        self.check_access("read")
+        return {
+            "type": "ir.actions.act_window",
+            "name": _("Add Document"),
+            "res_model": "trucalc.document",
+            "view_mode": "form",
+            "view_id": self.env.ref("trucalc_orders.view_trucalc_document_form").id,
+            "target": "new",
+            "context": {
+                "default_order_id": self.id,
+                "default_origin": "trucalc",
+                "trucalc_document_order_id": self.id,
+            },
+        }
 
     def action_accept_request(self):
         self._require_intake_manager()
