@@ -73,9 +73,6 @@ class TestVendorServiceCapability(TransactionCase):
         order.reviewer_id = capable
         order._onchange_reviewer_fee()
         self.assertEqual(order.review_fee, 200)
-        order._controlled_lifecycle_write({"status": "report_received"})
-        order.action_assign_reviewer()
-        self.assertEqual(order.status, "reviewer_assigned")
         with self.assertRaises(ValidationError), self.cr.savepoint():
             self._order().reviewer_id = incapable
 

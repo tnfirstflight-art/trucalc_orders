@@ -31,6 +31,101 @@ class ResUsers(models.Model):
             "trucalc_vendor_id",
         }
 
+    @api.model_create_multi
+    def create(self, vals_list):
+        users = super().create(vals_list)
+        users._trucalc_sync_home_action()
+        return users
+
+    def write(self, vals):
+        if self.env.context.get("trucalc_home_action_sync"):
+            return super().write(vals)
+        home_action = self.env.ref("trucalc_orders.action_trucalc_orders")
+        previously_restricted = {
+            user.id: user._trucalc_is_restricted_internal()
+            for user in self
+        }
+        previous_actions = {user.id: user.action_id for user in self}
+        result = super().write(vals)
+        self._trucalc_sync_home_action(
+            previously_restricted=previously_restricted,
+            previous_actions=previous_actions,
+            explicit_action="action_id" in vals,
+            home_action=home_action,
+        )
+        return result
+
+    @api.private
+    def _trucalc_is_restricted_internal(self):
+        self.ensure_one()
+        membership = self._trucalc_persona_membership()
+        user = self.sudo()
+        return bool(
+            user.active
+            and not user.share
+            and membership["internal"] == self.env.ref(
+                "trucalc_orders.group_trucalc_reviewer"
+            )
+            and not membership["bank"]
+            and not membership["vendor"]
+            and self.env.ref("base.group_user") in user.all_group_ids
+            and not user.trucalc_bank_company_id
+            and not user.trucalc_vendor_id
+        )
+
+    @api.private
+    def _trucalc_sync_home_action(
+        self, previously_restricted=None, previous_actions=None,
+        explicit_action=False, home_action=None,
+    ):
+        home_action = home_action or self.env.ref(
+            "trucalc_orders.action_trucalc_orders"
+        )
+        previously_restricted = previously_restricted or {}
+        previous_actions = previous_actions or {}
+        for user in self:
+            restricted = user._trucalc_is_restricted_internal()
+            if restricted and user.action_id.id != home_action.id:
+                user.sudo().with_context(trucalc_home_action_sync=True).write({
+                    "action_id": home_action.id,
+                })
+            elif (
+                not restricted
+                and previously_restricted.get(user.id)
+                and not explicit_action
+                and previous_actions.get(user.id).id == home_action.id
+                and user.action_id.id == home_action.id
+            ):
+                user.sudo().with_context(trucalc_home_action_sync=True).write({
+                    "action_id": False,
+                })
+
+    @api.private
+    def _trucalc_reviewer_partner_ids(self):
+        self.ensure_one()
+        if not self._trucalc_is_restricted_internal():
+            return self.env["res.partner"].browse()
+        user = self.sudo()
+        orders = self.env["trucalc.order"].sudo().search([
+            ("reviewer_user_id", "=", user.id),
+            ("company_id", "in", user.company_ids.ids),
+            ("status", "in", ("reviewer_assigned", "under_review", "completed")),
+        ])
+        documents = orders.document_ids.sudo().with_context(active_test=False)
+        return (
+            user.partner_id
+            | self.env.ref("base.partner_root")
+            | user.company_ids.partner_id
+            | orders.company_id.partner_id
+            | orders.requestor_company_id.partner_id
+            | orders.requestor_id.partner_id
+            | orders.reviewer_user_id.partner_id
+            | documents.uploaded_by.partner_id
+            | documents.deleted_by_id.partner_id
+            | orders.message_ids.sudo().author_id
+            | orders.message_partner_ids.sudo()
+        ).exists()
+
     @api.model
     @api.private
     def _trucalc_persona_groups(self):
@@ -137,6 +232,29 @@ class ResUsers(models.Model):
         ):
             raise AccessError(_("TruCalc bank authorization is not configured."))
         return user.trucalc_bank_company_id
+
+    @api.private
+    def _trucalc_reviewer_identity(self, company):
+        self.ensure_one()
+        company.ensure_one()
+        membership = self._trucalc_persona_membership()
+        user = self.sudo()
+        if (
+            not user.active
+            or user.share
+            or membership["bank"]
+            or membership["vendor"]
+            or membership["internal"] != self.env.ref(
+                "trucalc_orders.group_trucalc_reviewer"
+            )
+            or self.env.ref("base.group_user") not in user.all_group_ids
+            or company not in user.company_ids
+        ):
+            raise ValidationError(_(
+                "The assigned Reviewer user must be an active internal TruCalc "
+                "Reviewer authorized for the Order company."
+            ))
+        return user
 
     @api.private
     def _trucalc_provision_vendor_portal(self, vendor, actor):

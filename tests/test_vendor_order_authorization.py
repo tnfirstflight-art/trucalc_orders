@@ -236,16 +236,16 @@ class TestVendorOrderAuthorization(TransactionCase):
         invitation = self._invitation(order=order)
         bid = self._submit(invitation)
         bid.with_user(self.admin)._action_confirm_engagement()
-        order.reviewer_id = self.wrong_vendor
         assignment = self.env["trucalc.order.vendor.authorization"].sudo().search([
             ("order_id", "=", order.id), ("source", "=", "assignment"),
         ])
-        for method in ("action_report_received", "action_assign_reviewer", "action_start_review"):
-            getattr(order, method)()
+        for method in (
+            "action_report_received", "action_start_review",
+            "action_complete_review", "action_cancelled",
+        ):
+            with self.assertRaises(AccessError):
+                getattr(order, method)()
             self.assertTrue(assignment.active)
-        order.action_complete_review()
-        self.assertFalse(assignment.active)
-        self.assertEqual(assignment.deauthorization_reason, "completed")
 
         second = self._invitation()
         second_auth = self._authorization(second)
@@ -258,9 +258,10 @@ class TestVendorOrderAuthorization(TransactionCase):
     def test_cancel_deactivates_all_without_manufacturing(self):
         invitation = self._invitation()
         authorization = self._authorization(invitation)
-        invitation.order_id.action_cancelled()
-        self.assertFalse(authorization.active)
-        self.assertEqual(authorization.deauthorization_reason, "cancelled")
+        with self.assertRaises(AccessError):
+            invitation.order_id.action_cancelled()
+        self.assertTrue(authorization.active)
+        self.assertFalse(authorization.deauthorization_reason)
         inconsistent = self.env["trucalc.order"].sudo().browse(6)
         if inconsistent.exists():
             self.assertFalse(inconsistent.vendor_authorization_ids)

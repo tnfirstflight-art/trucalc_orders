@@ -87,17 +87,6 @@
     </record>
 
 
-    <!-- ================================================================
-         EXISTING COMPANY ORDER RULE
-
-         IMPORTANT:
-         This rule is intentionally preserved unchanged during Pass 1.
-
-         It currently applies to base.group_user. It will be replaced
-         during the ACL / record-rule hardening passes after the new
-         security architecture is established and tested.
-         ================================================================ -->
-
     <record id="rule_company_orders" model="ir.rule">
         <field name="name">Company Orders</field>
         <field name="model_id" ref="model_trucalc_order"/>
@@ -105,7 +94,27 @@
             [('company_id', 'in', user.company_ids.ids)]
         </field>
         <field name="groups"
-               eval="[(4, ref('base.group_user'))]"/>
+               eval="[(6, 0, [ref('group_trucalc_admin'), ref('group_trucalc_operations')])]"/>
+    </record>
+
+    <record id="rule_reviewer_assigned_orders" model="ir.rule">
+        <field name="name">Reviewer Assigned Orders</field>
+        <field name="model_id" ref="model_trucalc_order"/>
+        <field name="domain_force">
+            [('reviewer_user_id', '=', user.id),
+             ('company_id', 'in', user.company_ids.ids),
+             ('status', 'in', ('reviewer_assigned', 'under_review', 'completed'))]
+        </field>
+        <field name="groups" eval="[(4, ref('group_trucalc_reviewer'))]"/>
+    </record>
+
+    <record id="rule_reviewer_required_partners" model="ir.rule">
+        <field name="name">Reviewer Required Partners</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="domain_force">
+            [('id', 'in', user._trucalc_reviewer_partner_ids().ids)]
+        </field>
+        <field name="groups" eval="[(4, ref('group_trucalc_reviewer'))]"/>
     </record>
 
     <record id="rule_bank_company_orders" model="ir.rule">
@@ -154,6 +163,13 @@
     <record id="rule_trucalc_document_event_company" model="ir.rule">
         <field name="name">TruCalc Document Event Company</field>
         <field name="model_id" ref="model_trucalc_document_event"/>
+        <field name="domain_force">[('company_id', 'in', user.company_ids.ids)]</field>
+        <field name="groups" eval="[(4, ref('group_trucalc_admin')), (4, ref('group_trucalc_operations'))]"/>
+    </record>
+
+    <record id="rule_order_lifecycle_event_company" model="ir.rule">
+        <field name="name">Order Lifecycle Event Company</field>
+        <field name="model_id" ref="model_trucalc_order_lifecycle_event"/>
         <field name="domain_force">[('company_id', 'in', user.company_ids.ids)]</field>
         <field name="groups" eval="[(4, ref('group_trucalc_admin')), (4, ref('group_trucalc_operations'))]"/>
     </record>

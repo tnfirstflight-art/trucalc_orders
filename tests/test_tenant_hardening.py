@@ -242,8 +242,9 @@ class TestTenantHardening(TransactionCase):
 
     def test_bank_order_write_protects_ownership_and_lifecycle(self):
         order = self.order_a.with_user(self.bank_requestor)
-        order.write({"borrower": "Permitted Edit"})
-        self.assertEqual(order.borrower, "Permitted Edit")
+        with self.assertRaises(AccessError):
+            order.write({"borrower": "Denied Edit"})
+        self.assertEqual(order.borrower, "Existing Bank A")
         for values in (
             {"company_id": self.bank_b.id},
             {"requestor_company_id": self.bank_b.id},

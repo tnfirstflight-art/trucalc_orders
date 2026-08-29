@@ -17,6 +17,11 @@ class EvaluationOrder(models.Model):
         )
         if message_operation == "create" and self.env.user._trucalc_has_bank_role():
             operations.update(dict.fromkeys(self, None))
+        elif (
+            message_operation == "create"
+            and self.env.user._trucalc_is_restricted_internal()
+        ):
+            operations.update(dict.fromkeys(self._filtered_access("read"), "read"))
         return operations
 
     order_number = fields.Char(
@@ -306,9 +311,16 @@ class EvaluationOrder(models.Model):
 
     reviewer_id = fields.Many2one(
         "trucalc.vendor",
-        string="Reviewer",
+        string="Commercial Reviewer",
         tracking=True,
         domain="[('active', '=', True), ('fee_schedule_ids.service_type', '=', 'review')]",
+    )
+
+    reviewer_user_id = fields.Many2one(
+        "res.users",
+        string="Reviewer",
+        tracking=True,
+        domain="[('active', '=', True), ('share', '=', False)]",
     )
 
     review_fee = fields.Float(
@@ -326,6 +338,11 @@ class EvaluationOrder(models.Model):
         "trucalc.document",
         "order_id",
         string="Documents",
+    )
+
+    lifecycle_event_ids = fields.One2many(
+        "trucalc.order.lifecycle.event", "order_id",
+        string="Lifecycle Events", readonly=True, copy=False,
     )
 
     invitation_ids = fields.One2many(
@@ -435,6 +452,10 @@ class EvaluationOrder(models.Model):
             raise AccessError(_("The decline reason requires the controlled decline action."))
         if "order_date" in vals:
             raise AccessError(_("Order Date is system-controlled."))
+        if "status" in vals:
+            raise AccessError(_(
+                "Order status may only be changed through an authorized workflow action."
+            ))
         if "due_date" in vals and not vals["due_date"]:
             raise ValidationError(_("Client Due Date is required."))
         if self.env.user._trucalc_has_bank_role():
@@ -447,33 +468,28 @@ class EvaluationOrder(models.Model):
         }
         if protected.intersection(vals):
             raise AccessError(_("Order bid lifecycle fields require an explicit action."))
-        if "status" in vals:
-            protected_transitions = {
-                ("new", "bid_requested"),
-                ("new", "accepted"),
-                ("new", "declined"),
-                ("accepted", "bid_requested"),
-                ("assigned", "bid_requested"),
-                ("bid_requested", "assigned"),
-                ("bid_requested", "engaged"),
-                ("engaged", "bid_requested"),
-            }
-            if any(
-                order.status in ("new", "declined")
-                or (order.status, vals["status"]) in protected_transitions
-                for order in self
-            ):
-                raise AccessError(_("This order status transition requires an explicit action."))
         result = super().write(vals)
-        if vals.get("status") in ("completed", "cancelled"):
-            self.env["trucalc.order.vendor.authorization"]._deactivate(
-                [("order_id", "in", self.ids)], vals["status"]
-            )
         return result
 
     @api.private
     def _controlled_lifecycle_write(self, vals):
         return super(EvaluationOrder, self).write(vals)
+
+    @api.private
+    def _transition_status(self, from_status, to_status, event_type, values=None):
+        self.ensure_one()
+        self._lock_for_bid_lifecycle()
+        if self.status != from_status:
+            raise ValidationError(_(
+                "This lifecycle action is no longer valid for the current Order state."
+            ))
+        actor = self.env.user
+        transition_values = dict(values or {}, status=to_status)
+        super(EvaluationOrder, self).write(transition_values)
+        self.env["trucalc.order.lifecycle.event"]._log_event(
+            self, event_type, from_status, to_status, actor,
+        )
+        return True
 
     @api.model
     @api.private
@@ -909,7 +925,9 @@ class EvaluationOrder(models.Model):
         raise AccessError(_("An order may only be assigned by selecting a submitted bid."))
 
     def action_report_received(self):
-        self.status = "report_received"
+        raise AccessError(_(
+            "Report receipt is unavailable until the controlled report-delivery workflow."
+        ))
 
     def action_reopen_bidding(self):
         self._require_bid_manager()
@@ -998,20 +1016,38 @@ class EvaluationOrder(models.Model):
                     "The selected Reviewer must be active and have a Review standard fee."
                 ))
 
+    @api.constrains("reviewer_user_id", "company_id")
+    def _check_reviewer_user(self):
+        for order in self.filtered("reviewer_user_id"):
+            order.reviewer_user_id._trucalc_reviewer_identity(order.company_id)
+
     def action_assign_reviewer(self):
-        eligible_state = self.filtered(lambda order: order.status == "report_received")
-        eligible_state._check_reviewer_capability()
-        if any(not order.reviewer_id for order in eligible_state):
-            raise ValidationError(_("Select an eligible Reviewer before assignment."))
-        self.status = "reviewer_assigned"
+        self._require_intake_manager()
+        self.ensure_one()
+        self._lock_for_bid_lifecycle()
+        if self.status != "report_received":
+            raise ValidationError(_(
+                "A Reviewer may be assigned only after controlled report receipt."
+            ))
+        if not self.reviewer_user_id:
+            raise ValidationError(_("Select an internal Reviewer before assignment."))
+        self.reviewer_user_id._trucalc_reviewer_identity(self.company_id)
+        return self._transition_status(
+            "report_received", "reviewer_assigned", "reviewer_assigned",
+            {"reviewer_id": False, "review_fee": 0.0},
+        )
 
     def action_start_review(self):
-        self.status = "under_review"
+        raise AccessError(_(
+            "Review start is unavailable until the controlled Reviewer workflow."
+        ))
 
     def action_complete_review(self):
-        self.status = "completed"
+        raise AccessError(_(
+            "Review completion is unavailable until the controlled Reviewer workflow."
+        ))
 
     def action_cancelled(self):
-        if any(order.status in ("new", "declined") for order in self):
-            raise ValidationError(_("New and Declined requests cannot be cancelled."))
-        self.status = "cancelled"
+        raise AccessError(_(
+            "Cancellation is unavailable until the controlled cancellation workflow."
+        ))

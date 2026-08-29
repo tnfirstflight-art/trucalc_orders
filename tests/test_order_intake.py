@@ -235,7 +235,7 @@ class TestOrderIntake(TransactionCase):
             order.action_decline_request("Again")
         with self.assertRaises(ValidationError):
             order.action_bid_requested()
-        with self.assertRaises(ValidationError):
+        with self.assertRaises(AccessError):
             order.action_cancelled()
 
     def test_bidding_requires_accepted_and_audits_prior_state(self):
@@ -264,13 +264,13 @@ class TestOrderIntake(TransactionCase):
                 order.write({"status": status})
         with self.assertRaises(AccessError):
             order.action_report_received()
-        with self.assertRaises(AccessError):
+        with self.assertRaises(ValidationError):
             order.action_assign_reviewer()
         with self.assertRaises(AccessError):
             order.action_start_review()
         with self.assertRaises(AccessError):
             order.action_complete_review()
-        with self.assertRaises(ValidationError):
+        with self.assertRaises(AccessError):
             order.action_cancelled()
 
     def test_stale_disposition_calls_fail_after_first_result(self):
