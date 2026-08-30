@@ -3,10 +3,11 @@ id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_trucalc_admin,trucalc order administrator,model_trucalc_order,trucalc_orders.group_trucalc_admin,1,1,1,0
 access_trucalc_user,trucalc order operations,model_trucalc_order,trucalc_orders.group_trucalc_operations,1,1,1,0
 access_trucalc_reviewer,trucalc order reviewer,model_trucalc_order,trucalc_orders.group_trucalc_reviewer,1,0,0,0
-access_trucalc_order_bank_admin,trucalc order bank administrator,model_trucalc_order,trucalc_orders.group_bank_admin,1,0,1,0
-access_trucalc_order_bank_requestor,trucalc order bank requestor,model_trucalc_order,trucalc_orders.group_bank_requestor,1,0,1,0
+access_trucalc_order_bank_admin,trucalc order bank administrator,model_trucalc_order,trucalc_orders.group_bank_admin,1,0,0,0
+access_trucalc_order_bank_requestor,trucalc order bank requestor,model_trucalc_order,trucalc_orders.group_bank_requestor,1,0,0,0
 access_trucalc_order_bank_view_only,trucalc order bank view-only,model_trucalc_order,trucalc_orders.group_bank_view_only,1,0,0,0
 access_trucalc_vendor_order_portal,trucalc vendor order portal,model_trucalc_vendor_order,trucalc_orders.group_vendor_portal,1,0,0,0
+access_trucalc_service_area_admin,trucalc service area administrator,model_trucalc_service_area,trucalc_orders.group_trucalc_admin,1,1,1,0
 
 access_trucalc_vendor_admin,trucalc vendor administrator,model_trucalc_vendor,trucalc_orders.group_trucalc_admin,1,1,1,0
 access_trucalc_vendor_user,trucalc vendor operations,model_trucalc_vendor,trucalc_orders.group_trucalc_operations,1,1,1,0

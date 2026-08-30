@@ -27,6 +27,20 @@ class TruCalcVendorOrder(models.Model):
     city = fields.Char(readonly=True)
     state = fields.Char(readonly=True)
     zip_code = fields.Char(string="ZIP", readonly=True)
+    inspection_contact_name = fields.Char(
+        string="Inspection Contact Person", readonly=True,
+    )
+    inspection_contact_phone = fields.Char(
+        string="Inspection Contact Phone", readonly=True,
+    )
+    inspection_contact_phone_display = fields.Char(
+        string="Inspection Contact Phone",
+        compute="_compute_inspection_contact_phone_display",
+        readonly=True,
+    )
+    inspection_contact_email = fields.Char(
+        string="Inspection Contact Email", readonly=True,
+    )
     bidding_round = fields.Integer(readonly=True)
     vendor_phase = fields.Selection(
         [("invitation", "Open for Bid"), ("assignment", "Engaged"),
@@ -102,6 +116,14 @@ class TruCalcVendorOrder(models.Model):
     # provides no relational path from the public projection to Vendor records.
     vendor_id = fields.Integer(readonly=True, groups="base.group_system")
 
+    @api.depends("inspection_contact_phone")
+    def _compute_inspection_contact_phone_display(self):
+        formatter = self.env["trucalc.order"]._format_inspection_contact_phone
+        for projection in self:
+            projection.inspection_contact_phone_display = formatter(
+                projection.inspection_contact_phone
+            )
+
     def init(self):
         tools.drop_view_if_exists(self.env.cr, self._table)
         self.env.cr.execute(f"""
@@ -110,6 +132,27 @@ class TruCalcVendorOrder(models.Model):
                     a.id, a.vendor_id,
                     o.order_number, o.borrower, o.service_type, o.property_type,
                     o.property_address, o.city, o.state, o.zip_code, o.bidding_round,
+                    CASE WHEN a.active IS TRUE AND a.source = 'assignment'
+                              AND o.status = 'engaged'
+                              AND o.assigned_vendor_id = a.vendor_id
+                              AND o.bidding_round = a.round_number
+                              AND e.active IS TRUE
+                              AND e.response_state = 'accepted'
+                         THEN o.inspection_contact_name END AS inspection_contact_name,
+                    CASE WHEN a.active IS TRUE AND a.source = 'assignment'
+                              AND o.status = 'engaged'
+                              AND o.assigned_vendor_id = a.vendor_id
+                              AND o.bidding_round = a.round_number
+                              AND e.active IS TRUE
+                              AND e.response_state = 'accepted'
+                         THEN o.inspection_contact_phone END AS inspection_contact_phone,
+                    CASE WHEN a.active IS TRUE AND a.source = 'assignment'
+                              AND o.status = 'engaged'
+                              AND o.assigned_vendor_id = a.vendor_id
+                              AND o.bidding_round = a.round_number
+                              AND e.active IS TRUE
+                              AND e.response_state = 'accepted'
+                         THEN o.inspection_contact_email END AS inspection_contact_email,
                     CASE WHEN a.active IS NOT TRUE THEN 'declined_history'
                          ELSE a.source END AS vendor_phase,
                     CASE WHEN a.active IS NOT TRUE THEN 'declined'

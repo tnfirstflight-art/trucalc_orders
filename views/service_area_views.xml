@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_trucalc_service_area_form" model="ir.ui.view">
+        <field name="name">trucalc.service.area.form</field>
+        <field name="model">trucalc.service.area</field>
+        <field name="arch" type="xml">
+            <form string="New Service Area" delete="false">
+                <group>
+                    <field name="state_id" options="{'no_create': True, 'no_create_edit': True}"/>
+                    <field name="county"/>
+                    <field name="service_type"/>
+                </group>
+            </form>
+        </field>
+    </record>
+    <record id="action_trucalc_service_area_new" model="ir.actions.act_window">
+        <field name="name">New Service Area</field>
+        <field name="res_model">trucalc.service.area</field>
+        <field name="view_mode">form</field>
+        <field name="view_id" ref="view_trucalc_service_area_form"/>
+        <field name="target">new</field>
+        <field name="context">{'form_view_initial_mode': 'edit'}</field>
+    </record>
+    <record id="view_trucalc_service_area_list" model="ir.ui.view">
+        <field name="name">trucalc.service.area.list</field>
+        <field name="model">trucalc.service.area</field>
+        <field name="arch" type="xml">
+            <list create="false" delete="false" editable="bottom">
+                <header>
+                    <button name="%(action_trucalc_service_area_new)d" type="action"
+                            string="New" class="btn-primary" display="always"/>
+                </header>
+                <field name="state_id" readonly="1"/>
+                <field name="county" readonly="1"/>
+                <field name="service_type" readonly="1"/>
+                <field name="active" widget="boolean_toggle"
+                       options="{'autosave': True}"/>
+            </list>
+        </field>
+    </record>
+    <record id="view_trucalc_service_area_search" model="ir.ui.view">
+        <field name="name">trucalc.service.area.search</field>
+        <field name="model">trucalc.service.area</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="state_id"/>
+                <field name="county"/>
+                <field name="service_type"/>
+                <filter name="active" string="Active" domain="[('active', '=', True)]"/>
+                <filter name="inactive" string="Archived" domain="[('active', '=', False)]"/>
+                <separator/>
+                <filter name="group_state" string="Group by State" context="{'group_by': 'state_id'}"/>
+                <filter name="group_service" string="Group by Service Type" context="{'group_by': 'service_type'}"/>
+                <filter name="group_active" string="Group by Active" context="{'group_by': 'active'}"/>
+            </search>
+        </field>
+    </record>
+    <record id="action_trucalc_service_areas" model="ir.actions.act_window">
+        <field name="name">Service Areas</field>
+        <field name="res_model">trucalc.service.area</field>
+        <field name="view_mode">list</field>
+        <field name="view_id" ref="view_trucalc_service_area_list"/>
+        <field name="context">{'active_test': False}</field>
+    </record>
+    <menuitem id="menu_trucalc_service_areas" name="Service Areas"
+              parent="menu_trucalc_configuration"
+              action="action_trucalc_service_areas" sequence="20"
+              groups="trucalc_orders.group_trucalc_admin"/>
+</odoo>

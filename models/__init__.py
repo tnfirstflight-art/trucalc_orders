@@ -1,4 +1,5 @@
 from . import vendor_fee
+from . import service_area
 from . import evaluation_order
 from . import order_lifecycle_event
 from . import ir_rule

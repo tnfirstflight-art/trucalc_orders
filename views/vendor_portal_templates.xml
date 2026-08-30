@@ -40,15 +40,18 @@
             <li t-if="page_name == 'trucalc_order'" class="breadcrumb-item active">
                 <t t-out="projection.order_number"/>
             </li>
-            <li t-if="page_name in ('trucalc_bank_orders', 'trucalc_bank_documents')"
+            <li t-if="page_name in ('trucalc_bank_orders', 'trucalc_bank_documents', 'trucalc_bank_order_new')"
                 t-attf-class="breadcrumb-item #{'active' if page_name == 'trucalc_bank_orders' else ''}">
-                <a t-if="page_name == 'trucalc_bank_documents'"
+                <a t-if="page_name in ('trucalc_bank_documents', 'trucalc_bank_order_new')"
                    href="/my/trucalc/bank/orders">My TruCalc Requests</a>
                 <t t-else="">My TruCalc Requests</t>
             </li>
             <li t-if="page_name == 'trucalc_bank_documents'"
                 class="breadcrumb-item active">
                 <t t-out="order.order_number"/>
+            </li>
+            <li t-if="page_name == 'trucalc_bank_order_new'" class="breadcrumb-item active">
+                New Request
             </li>
         </xpath>
     </template>
@@ -147,6 +150,15 @@
 
                         <dt class="col-sm-4">Status</dt>
                         <dd class="col-sm-8"><span t-field="projection.order_status"/></dd>
+
+                        <t t-if="projection.inspection_contact_name">
+                            <dt class="col-sm-4">Inspection Contact Person</dt>
+                            <dd class="col-sm-8"><t t-out="projection.inspection_contact_name"/></dd>
+                            <dt class="col-sm-4">Inspection Contact Phone</dt>
+                            <dd class="col-sm-8"><t t-out="projection.inspection_contact_phone_display"/></dd>
+                            <dt class="col-sm-4">Inspection Contact Email</dt>
+                            <dd class="col-sm-8"><t t-out="projection.inspection_contact_email"/></dd>
+                        </t>
 
                         <dt t-if="projection.response_deadline" class="col-sm-4">
                             Response deadline
@@ -456,6 +468,9 @@
             <t t-call="portal.portal_searchbar">
                 <t t-set="title">My TruCalc Requests</t>
             </t>
+            <div t-if="can_submit" class="d-flex justify-content-end mb-3">
+                <a href="/my/trucalc/bank/orders/new" class="btn btn-primary">New Request</a>
+            </div>
             <div t-if="not orders" class="alert alert-info" role="status">
                 You currently have no authorized TruCalc requests.
             </div>
@@ -476,6 +491,7 @@
                             <a t-att-href="'/my/trucalc/bank/orders/%s/documents' % order.order_number">
                                 <t t-out="order.order_number"/>
                             </a>
+                            <span t-if="order.status == 'draft'" class="badge text-bg-secondary ms-1">Resume Draft</span>
                         </td>
                         <td><t t-out="order.borrower"/></td>
                         <td><t t-out="order.property_address"/></td>
@@ -491,13 +507,75 @@
         </t>
     </template>
 
+    <template id="portal_bank_order_new" name="New Bank TruCalc Request">
+        <t t-call="portal.portal_layout">
+            <h2>Create TruCalc Draft</h2>
+            <div t-if="submission_error" class="alert alert-danger" role="alert">
+                <t t-out="submission_error"/>
+            </div>
+            <div t-if="not service_areas" class="alert alert-info" role="status">
+                No active Service Areas are currently available. You may save a Draft,
+                but an active State, County, and Service Type will be required before Send.
+            </div>
+            <t t-call="trucalc_orders.portal_bank_draft_form"/>
+        </t>
+    </template>
+
+    <template id="portal_bank_draft_form" name="Bank TruCalc Draft Form">
+            <form t-att-action="order and ('/my/trucalc/bank/orders/%s/draft/save' % order.order_number) or '/my/trucalc/bank/orders/new'"
+                  method="post" class="card card-body o_trucalc_bank_draft_form"
+                  t-att-id="order and 'o_trucalc_bank_draft_form' or False"
+                  t-att-data-service-areas="service_area_matrix"
+                  t-att-data-selected-state="form_values.get('service_state_id', '')"
+                  t-att-data-selected-county="form_values.get('service_county', '')"
+                  t-att-data-selected-service="form_values.get('service_type', '')"
+                  t-att-data-selected-area="form_values.get('service_area_id', '')">
+                <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
+                <input type="hidden" name="service_area_id" t-att-value="form_values.get('service_area_id', '')"/>
+                <div class="row g-3">
+                    <div class="col-md-6"><label class="form-label">Borrower</label><input name="borrower" class="form-control" required="required" maxlength="255" t-att-value="form_values.get('borrower', '')"/></div>
+                    <div class="col-md-6"><label class="form-label">Loan Number</label><input name="loan_number" class="form-control" maxlength="255" t-att-value="form_values.get('loan_number', '')"/></div>
+                    <div class="col-12"><label class="form-label">Property Address</label><input name="property_address" class="form-control" required="required" maxlength="512" t-att-value="form_values.get('property_address', '')"/></div>
+                    <div class="col-md-6"><label class="form-label">City</label><input name="city" class="form-control" maxlength="255" t-att-value="form_values.get('city', '')"/></div>
+                    <div class="col-md-6"><label class="form-label">ZIP</label><input name="zip_code" class="form-control" maxlength="20" t-att-value="form_values.get('zip_code', '')"/></div>
+                    <div class="col-md-4"><label class="form-label">State</label><select name="service_state_id" class="form-select"><option value="">Select a State</option></select></div>
+                    <div class="col-md-4"><label class="form-label">County</label><select name="service_county" class="form-select" disabled="disabled"><option value="">Select a County</option></select></div>
+                    <div class="col-md-4"><label class="form-label">Service Type</label><select name="service_type" class="form-select" disabled="disabled"><option value="">Select a Service</option></select></div>
+                    <div class="col-md-6"><label class="form-label">Property Type</label><select name="property_type" class="form-select"><option value="">Select a Property Type</option><option t-foreach="property_types" t-as="item" t-att-value="item[0]" t-att-selected="form_values.get('property_type') == item[0]"><t t-out="item[1]"/></option></select></div>
+                    <div class="col-md-6"><label class="form-label">Client Due Date</label><input type="date" name="due_date" class="form-control" t-att-min="today" t-att-value="form_values.get('due_date', '')"/></div>
+                    <div class="col-md-4"><label class="form-label">Inspection Contact Person</label><input name="inspection_contact_name" class="form-control" maxlength="255" t-att-value="form_values.get('inspection_contact_name', '')"/></div>
+                    <div class="col-md-4"><label class="form-label">Inspection Contact Phone</label><input name="inspection_contact_phone" class="form-control" maxlength="64" t-att-value="form_values.get('inspection_contact_phone', '')"/></div>
+                    <div class="col-md-4"><label class="form-label">Inspection Contact Email</label><input type="email" name="inspection_contact_email" class="form-control" maxlength="254" t-att-value="form_values.get('inspection_contact_email', '')"/></div>
+                    <div class="col-12"><label class="form-label">Notes / Instructions</label><textarea name="notes" class="form-control" rows="4" maxlength="5000"><t t-out="form_values.get('notes', '')"/></textarea></div>
+                </div>
+                <div class="mt-3 d-flex gap-2">
+                    <button t-if="not order" type="submit" class="btn btn-primary">Create Draft</button>
+                    <button t-if="order" type="submit" name="draft_action" value="save"
+                            class="btn btn-secondary">Save Draft</button>
+                    <button t-if="order" type="submit" class="btn btn-primary"
+                            name="draft_action" value="send"
+                            t-att-formaction="'/my/trucalc/bank/orders/%s/draft/send' % order.order_number">Send Request</button>
+                    <a href="/my/trucalc/bank/orders" class="btn btn-outline-secondary">Cancel</a>
+                </div>
+            </form>
+    </template>
+
     <template id="portal_bank_documents" name="Bank TruCalc Documents">
         <t t-call="portal.portal_layout">
             <div class="d-flex justify-content-between align-items-center mb-3">
-                <h2>TruCalc Request <t t-out="order.order_number"/></h2>
+                <h2><t t-if="order.status == 'draft'">TruCalc Draft</t><t t-else="">TruCalc Request</t> <t t-out="order.order_number"/></h2>
                 <a href="/my/trucalc/bank/orders" class="btn btn-outline-secondary">Back to My TruCalc Requests</a>
             </div>
-            <div class="card mb-3">
+            <div t-if="submitted" class="alert alert-success" role="status">
+                Your TruCalc request was submitted successfully.
+            </div>
+            <div t-if="created" class="alert alert-success" role="status">
+                Draft created. Complete the request, add documents, and send it when ready.
+            </div>
+            <div t-if="saved" class="alert alert-success" role="status">Draft saved.</div>
+            <div t-if="submission_error" class="alert alert-danger" role="alert"><t t-out="submission_error"/></div>
+            <t t-if="order.status == 'draft'" t-call="trucalc_orders.portal_bank_draft_form"/>
+            <div t-if="order.status != 'draft'" class="card mb-3">
                 <div class="card-header"><strong>Request Details</strong></div>
                 <div class="card-body">
                     <dl class="row mb-0">
@@ -507,21 +585,32 @@
                         <dd class="col-sm-8"><t t-out="order.borrower"/></dd>
                         <dt class="col-sm-4">Property Address</dt>
                         <dd class="col-sm-8"><t t-out="order.property_address"/></dd>
+                        <dt class="col-sm-4">County</dt>
+                        <dd class="col-sm-8"><t t-out="order.county"/></dd>
+                        <dt class="col-sm-4">Loan Number</dt>
+                        <dd class="col-sm-8"><t t-out="order.loan_number"/></dd>
                         <dt class="col-sm-4">Service Type</dt>
                         <dd class="col-sm-8"><span t-field="order.service_type"/></dd>
                         <dt class="col-sm-4">Client Due Date</dt>
                         <dd class="col-sm-8"><span t-if="order.due_date" t-field="order.due_date"/></dd>
                         <dt class="col-sm-4">Status</dt>
                         <dd class="col-sm-8"><span t-field="order.status"/></dd>
+                        <dt class="col-sm-4">Inspection Contact Person</dt>
+                        <dd class="col-sm-8"><t t-out="order.inspection_contact_name"/></dd>
+                        <dt class="col-sm-4">Inspection Contact Phone</dt>
+                        <dd class="col-sm-8"><t t-out="order.inspection_contact_phone_display"/></dd>
+                        <dt class="col-sm-4">Inspection Contact Email</dt>
+                        <dd class="col-sm-8"><t t-out="order.inspection_contact_email"/></dd>
                     </dl>
                 </div>
             </div>
             <div t-if="upload_error" class="alert alert-danger"><t t-out="upload_error"/></div>
             <h3>Documents</h3>
-            <form t-if="can_upload"
+            <form t-if="can_upload and order.status != 'draft'"
                   t-att-action="'/my/trucalc/bank/orders/%s/documents/upload' % order.order_number"
                   method="post" enctype="multipart/form-data" class="card card-body mb-3">
                 <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
+                <input type="hidden" name="draft_action" value="upload"/>
                 <div class="mb-3">
                     <label class="form-label">Document Tag</label>
                     <select name="tag_id" class="form-select" required="required">
@@ -535,13 +624,52 @@
                 </div>
                 <button type="submit" class="btn btn-primary">Upload Document</button>
             </form>
-            <div class="list-group">
-                <a t-foreach="documents" t-as="document"
-                   t-att-href="'/my/trucalc/bank/orders/%s/documents/%s/download' % (order.order_number, document.id)"
-                   class="list-group-item list-group-item-action">
-                    <t t-out="document.filename"/> — <span class="text-muted" t-out="document.tag_id.name"/>
-                </a>
-                <div t-if="not documents" class="list-group-item text-muted">No supporting documents.</div>
+            <form t-if="can_upload and order.status == 'draft'"
+                  t-att-action="'/my/trucalc/bank/orders/%s/documents/upload' % order.order_number"
+                  method="post" enctype="multipart/form-data"
+                  class="card card-body mb-3 o_trucalc_bank_draft_upload_form"
+                  data-draft-form-id="o_trucalc_bank_draft_form">
+                <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
+                <input type="hidden" name="draft_action" value="upload"/>
+                <div class="mb-3">
+                    <label class="form-label">Document Tag</label>
+                    <select name="tag_id" class="form-select" required="required">
+                        <option value="">Select a Tag</option>
+                        <option t-foreach="tags" t-as="tag" t-att-value="tag.id"><t t-out="tag.name"/></option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">File</label>
+                    <input type="file" name="document_file" class="form-control"
+                           required="required"/>
+                </div>
+                <button type="submit" class="btn btn-primary">
+                    Save Draft &amp; Upload Document
+                </button>
+            </form>
+            <div class="table-responsive">
+                <table class="table table-striped align-middle">
+                    <thead><tr><th>File Name</th><th>Tag</th><th>Uploaded By</th><th>Uploaded Date</th><th>Actions</th></tr></thead>
+                    <tbody>
+                        <tr t-foreach="documents" t-as="document">
+                            <td><t t-out="document.filename"/></td>
+                            <td><t t-out="document.tag_id.name"/></td>
+                            <td><t t-out="document.uploaded_by.name"/></td>
+                            <td><span t-field="document.upload_date"/></td>
+                            <td class="d-flex gap-2">
+                                <a class="btn btn-sm btn-outline-primary"
+                                   t-att-href="'/my/trucalc/bank/orders/%s/documents/%s/download' % (order.order_number, document.id)">Download</a>
+                                <form t-if="can_delete_draft_documents"
+                                      t-att-action="'/my/trucalc/bank/orders/%s/documents/%s/delete' % (order.order_number, document.id)"
+                                      method="post">
+                                    <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
+                                    <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
+                                </form>
+                            </td>
+                        </tr>
+                        <tr t-if="not documents"><td colspan="5" class="text-muted">No supporting documents.</td></tr>
+                    </tbody>
+                </table>
             </div>
         </t>
     </template>

@@ -1,6 +1,7 @@
 from odoo import Command, fields
 from odoo.exceptions import AccessError, ValidationError
 from odoo.tests import TransactionCase, tagged
+from lxml import etree
 
 
 @tagged("post_install", "-at_install", "trucalc_downstream_lifecycle_security")
@@ -354,11 +355,11 @@ class TestDownstreamLifecycleSecurity(TransactionCase):
                 "event_at": fields.Datetime.now(),
             })
 
-    def test_bank_order_acl_is_read_create_without_write_or_unlink(self):
+    def test_bank_order_acl_is_read_only_without_create_write_or_unlink(self):
         for user in (self.bank_admin, self.bank_requestor):
             model = self.env["trucalc.order"].with_user(user)
             self.assertTrue(model.has_access("read"))
-            self.assertTrue(model.has_access("create"))
+            self.assertFalse(model.has_access("create"))
             self.assertFalse(model.has_access("write"))
             self.assertFalse(model.has_access("unlink"))
         model = self.env["trucalc.order"].with_user(self.bank_viewer)
@@ -367,23 +368,97 @@ class TestDownstreamLifecycleSecurity(TransactionCase):
         self.assertFalse(model.has_access("write"))
         self.assertFalse(model.has_access("unlink"))
 
-        bank_order = self.env["trucalc.order"].with_user(
+        with self.assertRaises(AccessError):
+            self.env["trucalc.order"].with_user(self.bank_requestor).create({
+                "borrower": "4D Bank Borrower", "property_address": "4 Bank Way",
+                "service_type": "evaluation",
+                "due_date": fields.Date.add(fields.Date.today(), days=14),
+            })
+
+    def test_bank_draft_is_excluded_from_operations_and_downstream_actions(self):
+        draft = self.env["trucalc.order"].with_user(
             self.bank_requestor
-        ).create({
-            "borrower": "4D Bank Borrower",
-            "property_address": "4 Bank Way",
-            "service_type": "evaluation",
-            "due_date": fields.Date.add(fields.Date.today(), days=14),
-        })
-        self.assertEqual(bank_order.company_id, self.bank)
-        self.assertEqual(bank_order.requestor_company_id, self.bank)
-        self.assertEqual(bank_order.requestor_id, self.bank_requestor)
-        for method in (
-            "action_report_received", "action_assign_reviewer",
-            "action_start_review", "action_complete_review", "action_cancelled",
-        ):
-            with self.assertRaises(AccessError):
-                getattr(bank_order, method)()
+        )._create_bank_draft({
+            "borrower": "4D Private Draft",
+            "property_address": "4 Draft Security Way",
+        }, self.bank_requestor)
+        self.assertTrue(draft.with_user(self.admin).has_access("read"))
+        self.assertFalse(draft.with_user(self.admin).has_access("write"))
+        for user in (self.ops, self.reviewer, self.vendor_user):
+            self.assertFalse(draft.with_user(user).has_access("read"))
+        with self.assertRaises(ValidationError):
+            draft.with_user(self.admin).action_accept_request()
+        with self.assertRaises(ValidationError):
+            draft.with_user(self.admin).action_open_decline_wizard()
+        with self.assertRaises(AccessError):
+            draft.with_user(self.admin).action_add_document()
+        orders_action = self.env.ref("trucalc_orders.action_trucalc_orders")
+        self.assertEqual(orders_action.domain, "[('status', '!=', 'draft')]")
+        support_action = self.env.ref("trucalc_orders.action_trucalc_draft_support")
+        self.assertEqual(support_action.domain, "[('status', '=', 'draft')]")
+
+    def test_order_actions_resolve_to_their_explicit_form_architectures(self):
+        order_list = self.env.ref("trucalc_orders.view_trucalc_order_list")
+        order_form = self.env.ref("trucalc_orders.view_trucalc_order_form")
+        support_list = self.env.ref(
+            "trucalc_orders.view_trucalc_draft_support_list"
+        )
+        support_form = self.env.ref(
+            "trucalc_orders.view_trucalc_draft_support_form"
+        )
+        orders_action = self.env.ref("trucalc_orders.action_trucalc_orders")
+        support_action = self.env.ref(
+            "trucalc_orders.action_trucalc_draft_support"
+        )
+
+        self.assertEqual(orders_action.views, [
+            (order_list.id, "list"), (order_form.id, "form"),
+        ])
+        self.assertEqual(support_action.views, [
+            (support_list.id, "list"), (support_form.id, "form"),
+        ])
+        self.assertEqual(
+            self.env["ir.ui.view"].default_view("trucalc.order", "form"),
+            order_form.id,
+        )
+        self.assertGreater(support_list.priority, order_list.priority)
+        self.assertGreater(support_form.priority, order_form.priority)
+
+        for user in (self.admin, self.ops, self.reviewer):
+            resolved = self.env["trucalc.order"].with_user(user).get_views(
+                orders_action.views
+            )
+            self.assertEqual(resolved["views"]["form"]["id"], order_form.id)
+            arch = etree.fromstring(resolved["views"]["form"]["arch"])
+            self.assertTrue(arch.xpath("//field[@name='status'][@widget='statusbar']"))
+            self.assertTrue(arch.xpath("//field[@name='document_ids']"))
+            self.assertTrue(arch.xpath(
+                "//field[@name='inspection_contact_phone_display']"
+            ))
+            self.assertFalse(arch.xpath(
+                "//field[@name='inspection_contact_phone']"
+            ))
+            self.assertTrue(arch.xpath("//chatter"))
+            if user in (self.admin, self.ops):
+                self.assertTrue(arch.xpath("//field[@name='bid_ids']"))
+                self.assertTrue(arch.xpath(
+                    "//button[@name='action_accept_request']"
+                ))
+
+        resolved_support = self.env["trucalc.order"].with_user(
+            self.admin
+        ).get_views(support_action.views)
+        self.assertEqual(
+            resolved_support["views"]["form"]["id"], support_form.id,
+        )
+        support_arch = etree.fromstring(
+            resolved_support["views"]["form"]["arch"]
+        )
+        self.assertEqual(support_arch.get("create"), "false")
+        self.assertEqual(support_arch.get("edit"), "false")
+        self.assertEqual(support_arch.get("delete"), "false")
+        self.assertFalse(support_arch.xpath("//chatter"))
+        self.assertFalse(support_arch.xpath("//button[@type='object']"))
 
     def test_lifecycle_event_company_rule_is_not_permissive(self):
         self.admin.write({

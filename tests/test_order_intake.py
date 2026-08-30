@@ -145,7 +145,7 @@ class TestOrderIntake(TransactionCase):
         self.assertFalse(property_group.xpath("./group"))
         self.assertEqual(
             [field.get("name") for field in property_group.xpath("./field")],
-            ["property_address", "city", "state", "zip_code", "property_type"],
+            ["property_address", "city", "state", "county", "zip_code", "property_type"],
         )
         self.assertTrue(arch.xpath("//field[@name='order_date_display']"))
         due_date = arch.xpath("//field[@name='due_date']")[0]

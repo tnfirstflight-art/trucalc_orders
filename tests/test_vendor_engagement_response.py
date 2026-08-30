@@ -53,6 +53,9 @@ class TestVendorEngagementResponse(TransactionCase):
             "company_id": self.env.company.id,
             "service_type": "evaluation",
             "due_date": delivery,
+            "inspection_contact_name": "4C1 Inspection Contact",
+            "inspection_contact_phone": "+1 901 555 0101 ext. 7",
+            "inspection_contact_email": "inspection.4c1@example.test",
         })
         order.with_user(self.admin).action_accept_request()
         order.with_user(self.admin).action_request_vendor_bids(
@@ -82,6 +85,9 @@ class TestVendorEngagementResponse(TransactionCase):
         self.assertEqual(engagement.vendor_delivery_date, order.vendor_delivery_date)
         self.assertFalse(engagement.event_ids)
         self.assertEqual(projection.engagement_response_label, "Awaiting Acceptance")
+        self.assertFalse(projection.inspection_contact_name)
+        self.assertFalse(projection.inspection_contact_phone)
+        self.assertFalse(projection.inspection_contact_email)
         self.assertTrue(projection.can_accept_engagement)
         self.assertNotIn("due_date", projection.fields_get())
         self.assertFalse(order.engagement_action_required)
@@ -92,6 +98,8 @@ class TestVendorEngagementResponse(TransactionCase):
     def test_direct_accept_is_final_immutable_and_vendor_attributed(self):
         order, _bid, engagement, projection = self._engaged()
         event = projection.action_vendor_accept_engagement()
+        self.env.flush_all()
+        projection.invalidate_recordset()
         self.assertEqual(engagement.response_state, "accepted")
         self.assertEqual(engagement.acceptance_mode, "direct_vendor")
         self.assertEqual(engagement.vendor_accepted_by_id, self.vendor_user)
@@ -99,6 +107,15 @@ class TestVendorEngagementResponse(TransactionCase):
         self.assertEqual((event.event_type, event.actor_id), ("vendor_accepted", self.vendor_user))
         self.assertEqual(event.agreed_vendor_fee, 0)
         self.assertEqual(order.vendor_delivery_date, engagement.vendor_delivery_date)
+        self.assertEqual(projection.inspection_contact_name, "4C1 Inspection Contact")
+        self.assertEqual(
+            projection.inspection_contact_phone, "9015550101 ext 7",
+        )
+        self.assertEqual(
+            projection.inspection_contact_phone_display,
+            "(901) 555-0101 ext. 7",
+        )
+        self.assertEqual(projection.inspection_contact_email, "inspection.4c1@example.test")
         self.assertFalse(order.engagement_action_required)
         with self.assertRaises(ValidationError):
             projection.action_vendor_decline_engagement("Too late")
@@ -117,6 +134,8 @@ class TestVendorEngagementResponse(TransactionCase):
             first_date, "Vendor scheduling constraint",
         )
         self.assertEqual(engagement.response_state, "delivery_change_requested")
+        projection.invalidate_recordset()
+        self.assertFalse(projection.inspection_contact_name)
         self.assertTrue(order.engagement_action_required)
         self.assertEqual(
             order.engagement_action_required_reason, "delivery_change_requested"
@@ -150,6 +169,9 @@ class TestVendorEngagementResponse(TransactionCase):
         self.assertEqual(approval.prior_event_id, request2)
         self.assertEqual(approval.actor_id, self.admin)
         self.assertEqual(engagement.response_state, "accepted")
+        self.env.flush_all()
+        projection.invalidate_recordset()
+        self.assertEqual(projection.inspection_contact_name, "4C1 Inspection Contact")
         self.assertEqual(engagement.acceptance_mode, "delivery_change_approved")
         self.assertFalse(engagement.vendor_accepted_by_id)
         self.assertEqual(engagement.conditional_request_event_id, request2)
@@ -165,11 +187,13 @@ class TestVendorEngagementResponse(TransactionCase):
         with self.assertRaises(ValidationError):
             projection.action_vendor_decline_engagement(" ")
         event = projection.action_vendor_decline_engagement("Cannot perform")
+        projection.invalidate_recordset()
         self.assertEqual((engagement.response_state, event.event_type), (
             "declined", "vendor_declined",
         ))
         self.assertEqual(engagement.declined_by_id, self.vendor_user)
         self.assertTrue(engagement.assignment_authorization_id.active)
+        self.assertFalse(projection.inspection_contact_name)
         self.assertEqual(order.status, "engaged")
         self.assertTrue(order.engagement_action_required)
         self.assertEqual(order.engagement_action_required_reason, "declined")

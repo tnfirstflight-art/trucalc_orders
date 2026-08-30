@@ -88,13 +88,38 @@
 
 
     <record id="rule_company_orders" model="ir.rule">
-        <field name="name">Company Orders</field>
+        <field name="name">Operations Submitted Company Orders</field>
         <field name="model_id" ref="model_trucalc_order"/>
         <field name="domain_force">
-            [('company_id', 'in', user.company_ids.ids)]
+            [('company_id', 'in', user.company_ids.ids), ('status', '!=', 'draft')]
         </field>
-        <field name="groups"
-               eval="[(6, 0, [ref('group_trucalc_admin'), ref('group_trucalc_operations')])]"/>
+        <field name="groups" eval="[(6, 0, [ref('group_trucalc_operations')])]"/>
+    </record>
+
+    <record id="rule_admin_orders_read" model="ir.rule">
+        <field name="name">Administrator Orders and Draft Support Read</field>
+        <field name="model_id" ref="model_trucalc_order"/>
+        <field name="domain_force">
+            ['|', ('status', '=', 'draft'), ('company_id', 'in', user.company_ids.ids)]
+        </field>
+        <field name="groups" eval="[(4, ref('group_trucalc_admin'))]"/>
+        <field name="perm_read" eval="True"/>
+        <field name="perm_write" eval="False"/>
+        <field name="perm_create" eval="False"/>
+        <field name="perm_unlink" eval="False"/>
+    </record>
+
+    <record id="rule_admin_orders_mutation" model="ir.rule">
+        <field name="name">Administrator Submitted Company Order Mutation</field>
+        <field name="model_id" ref="model_trucalc_order"/>
+        <field name="domain_force">
+            [('company_id', 'in', user.company_ids.ids), ('status', '!=', 'draft')]
+        </field>
+        <field name="groups" eval="[(4, ref('group_trucalc_admin'))]"/>
+        <field name="perm_read" eval="False"/>
+        <field name="perm_write" eval="True"/>
+        <field name="perm_create" eval="True"/>
+        <field name="perm_unlink" eval="True"/>
     </record>
 
     <record id="rule_reviewer_assigned_orders" model="ir.rule">
@@ -118,13 +143,32 @@
     </record>
 
     <record id="rule_bank_company_orders" model="ir.rule">
-        <field name="name">Bank Company Orders</field>
+        <field name="name">Bank Administrator Company Orders and Drafts</field>
         <field name="model_id" ref="model_trucalc_order"/>
         <field name="domain_force">
             [('company_id', '=', user.trucalc_bank_company_id.id or 0)]
         </field>
-        <field name="groups"
-               eval="[(4, ref('group_bank_admin')), (4, ref('group_bank_requestor')), (4, ref('group_bank_view_only'))]"/>
+        <field name="groups" eval="[(6, 0, [ref('group_bank_admin')])]"/>
+    </record>
+
+    <record id="rule_bank_requestor_orders" model="ir.rule">
+        <field name="name">Bank Requestor Submitted and Own Draft Orders</field>
+        <field name="model_id" ref="model_trucalc_order"/>
+        <field name="domain_force">
+            [('company_id', '=', user.trucalc_bank_company_id.id or 0),
+             '|', ('status', '!=', 'draft'), ('requestor_id', '=', user.id)]
+        </field>
+        <field name="groups" eval="[(4, ref('group_bank_requestor'))]"/>
+    </record>
+
+    <record id="rule_bank_view_only_orders" model="ir.rule">
+        <field name="name">Bank View-Only Submitted Orders</field>
+        <field name="model_id" ref="model_trucalc_order"/>
+        <field name="domain_force">
+            [('company_id', '=', user.trucalc_bank_company_id.id or 0),
+             ('status', '!=', 'draft')]
+        </field>
+        <field name="groups" eval="[(4, ref('group_bank_view_only'))]"/>
     </record>
 
     <record id="rule_vendor_order_projection" model="ir.rule">

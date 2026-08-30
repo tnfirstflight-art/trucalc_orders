@@ -17,7 +17,10 @@ class TruCalcOrderLifecycleEvent(models.Model):
         ondelete="restrict",
     )
     event_type = fields.Selection(
-        [("reviewer_assigned", "Reviewer Assigned")],
+        [
+            ("bank_request_sent", "Bank Request Sent"),
+            ("reviewer_assigned", "Reviewer Assigned"),
+        ],
         required=True, readonly=True, index=True,
     )
     from_status = fields.Char(required=True, readonly=True)

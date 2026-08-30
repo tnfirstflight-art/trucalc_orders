@@ -67,6 +67,9 @@ class TestVendorOrderPortal(HttpCase):
             "service_type": "evaluation",
             "property_type": "single_family",
             "due_date": fields.Date.today(),
+            "inspection_contact_name": "Authorized Contact",
+            "inspection_contact_phone": "+1 901 555 0166 ext. 4",
+            "inspection_contact_email": "authorized@example.test",
         })
         order.with_user(cls.admin).action_accept_request()
         order.with_user(cls.admin).action_bid_requested()
@@ -306,6 +309,7 @@ class TestVendorOrderPortal(HttpCase):
         self.assertIn("Accept Assignment", detail)
         self.assertIn("Request Delivery Change", detail)
         self.assertIn("Decline Assignment", detail)
+        self.assertNotIn("(901) 555-0166", detail)
         for forbidden in (
             "Client Due Date", "FORBIDDEN-LOAN-NUMBER", "987654.32",
         ):
@@ -317,3 +321,12 @@ class TestVendorOrderPortal(HttpCase):
         self.assertEqual(engagement.response_state, "awaiting_acceptance")
         self.assertFalse(engagement.event_ids)
         self.assertEqual(engagement.agreed_vendor_fee, order.vendor_fee)
+
+        projection.action_vendor_accept_engagement()
+        self.env.flush_all()
+        projection.invalidate_recordset()
+        accepted_detail = self.url_open(
+            f"/my/trucalc/orders/{order.order_number}"
+        ).text
+        self.assertIn("Authorized Contact", accepted_detail)
+        self.assertIn("(901) 555-0166 ext. 4", accepted_detail)

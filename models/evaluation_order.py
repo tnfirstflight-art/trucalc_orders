@@ -1,8 +1,21 @@
+import re
+
 from odoo import api, fields, models, tools, _
 from odoo.exceptions import AccessError, ValidationError
 from markupsafe import Markup, escape
 
 from .vendor_fee import SERVICE_SELECTION
+
+
+BANK_REQUEST_FIELDS = frozenset({
+    "borrower", "property_address", "city", "zip_code", "loan_number",
+    "service_type", "property_type", "due_date", "inspection_contact_name",
+    "inspection_contact_phone", "inspection_contact_email", "notes",
+    "service_area_id", "service_state_id", "service_county",
+})
+BANK_ORDER_CREATE_FIELDS = BANK_REQUEST_FIELDS - {
+    "service_state_id", "service_county",
+}
 
 
 
@@ -54,6 +67,20 @@ class EvaluationOrder(models.Model):
 
     zip_code = fields.Char(
         string="ZIP",
+    )
+
+    county = fields.Char(
+        string="County",
+        tracking=True,
+    )
+
+    service_area_id = fields.Many2one(
+        "trucalc.service.area",
+        string="Service Area",
+        readonly=True,
+        copy=False,
+        index=True,
+        ondelete="restrict",
     )
 
     company_id = fields.Many2one(
@@ -109,6 +136,24 @@ class EvaluationOrder(models.Model):
 
     loan_amount = fields.Float(
         string="Loan Amount",
+    )
+
+    inspection_contact_name = fields.Char(
+        string="Inspection Contact Person", copy=False, tracking=True,
+    )
+
+    inspection_contact_phone = fields.Char(
+        string="Inspection Contact Phone", copy=False, tracking=True,
+    )
+
+    inspection_contact_phone_display = fields.Char(
+        string="Inspection Contact Phone",
+        compute="_compute_inspection_contact_phone_display",
+        inverse="_inverse_inspection_contact_phone_display",
+    )
+
+    inspection_contact_email = fields.Char(
+        string="Inspection Contact Email", copy=False, tracking=True,
     )
 
     assigned_vendor_id = fields.Many2one(
@@ -221,6 +266,7 @@ class EvaluationOrder(models.Model):
 
     status = fields.Selection(
         [
+            ("draft", "Draft"),
             ("new", "New"),
             ("accepted", "Accepted"),
             ("bid_requested", "Bid Requested"),
@@ -372,6 +418,89 @@ class EvaluationOrder(models.Model):
                 order_date.strftime("%m/%d/%Y") if order_date else False
             )
 
+    @api.depends("inspection_contact_phone")
+    def _compute_inspection_contact_phone_display(self):
+        for order in self:
+            order.inspection_contact_phone_display = (
+                self._format_inspection_contact_phone(
+                    order.inspection_contact_phone
+                )
+            )
+
+    def _inverse_inspection_contact_phone_display(self):
+        for order in self:
+            order.inspection_contact_phone = (
+                self._normalize_inspection_contact_phone(
+                    order.inspection_contact_phone_display
+                )
+            )
+
+    @api.model
+    def _inspection_contact_phone_parts(self, value):
+        phone = value if isinstance(value, str) else ""
+        phone = re.sub(r"[\x00-\x1f\x7f]+", " ", phone)
+        phone = re.sub(r"\s+", " ", phone).strip()
+        extension = False
+        extension_match = re.search(
+            r"(?i)\s*(?:ext\.?|x)\s*[:#.-]?\s*(\d{1,10})\s*$", phone
+        )
+        base_phone = phone
+        if extension_match:
+            extension = extension_match.group(1)
+            base_phone = phone[:extension_match.start()].strip()
+        digits = "".join(re.findall(r"\d", base_phone))
+        us_digits = digits
+        if len(us_digits) == 11 and us_digits.startswith("1"):
+            us_digits = us_digits[1:]
+        explicit_non_us_country = base_phone.startswith("+") and not (
+            len(digits) == 11 and digits.startswith("1")
+        )
+        return phone, base_phone, digits, us_digits, extension, explicit_non_us_country
+
+    @api.model
+    def _format_inspection_contact_phone(self, value):
+        (
+            phone, _base_phone, _digits, us_digits, extension,
+            explicit_non_us_country,
+        ) = self._inspection_contact_phone_parts(value)
+        if not phone:
+            return False
+        if len(us_digits) == 10 and not explicit_non_us_country:
+            formatted = "(%s) %s-%s" % (
+                us_digits[:3], us_digits[3:6], us_digits[6:],
+            )
+            if extension:
+                formatted += " ext. %s" % extension
+            return formatted
+        return phone
+
+    @api.model
+    def _normalize_inspection_contact_phone(self, value, required=False):
+        (
+            phone, base_phone, digits, us_digits, extension,
+            explicit_non_us_country,
+        ) = self._inspection_contact_phone_parts(value)
+        if required and not phone:
+            raise ValidationError(_("Inspection Contact Phone is required."))
+        if not phone:
+            return False
+        if len(phone) > 64:
+            raise ValidationError(_(
+                "Inspection Contact Phone may not exceed 64 characters."
+            ))
+
+        if len(us_digits) == 10 and not explicit_non_us_country:
+            normalized = us_digits
+            if extension:
+                normalized += " ext %s" % extension
+            return normalized
+        if len(digits) < 7:
+            raise ValidationError(_("Enter a usable Inspection Contact Phone."))
+        normalized = base_phone
+        if extension:
+            normalized += " ext %s" % extension
+        return normalized
+
     @api.model_create_multi
     def create(self, vals_list):
         user = self.env.user
@@ -384,6 +513,25 @@ class EvaluationOrder(models.Model):
                 raise AccessError(_("Vendor Order authorization is server-maintained."))
             if "order_date" in vals:
                 raise AccessError(_("Order Date is system-controlled."))
+            if bank_company:
+                forbidden = set(vals) - BANK_ORDER_CREATE_FIELDS - {
+                    "company_id", "requestor_company_id", "requestor_id",
+                }
+                if forbidden or vals.get("loan_amount"):
+                    raise AccessError(_("The Bank request contains unauthorized Order fields."))
+                service_area = self.env["trucalc.service.area"].sudo().browse(
+                    vals.get("service_area_id")
+                ).exists()
+                if (
+                    len(service_area) != 1 or not service_area.active
+                    or service_area.service_type != vals.get("service_type")
+                ):
+                    raise AccessError(_("The selected Service Area is not authorized."))
+                vals.update({
+                    "state": service_area.state_id.code or service_area.state_id.name,
+                    "county": service_area.county,
+                    "service_area_id": service_area.id,
+                })
             if not vals.get("due_date"):
                 raise ValidationError(_("Client Due Date is required."))
             vals["order_date"] = authoritative_order_date
@@ -408,6 +556,12 @@ class EvaluationOrder(models.Model):
                 ):
                     raise AccessError(_("TruCalc bank order ownership is not authorized."))
                 vals.update(trusted)
+            if "inspection_contact_phone" in vals:
+                vals["inspection_contact_phone"] = (
+                    self._normalize_inspection_contact_phone(
+                        vals["inspection_contact_phone"]
+                    )
+                )
             if vals.get("order_number", "New") == "New":
                 sequence = self.env["ir.sequence"]
                 if bank_company:
@@ -445,6 +599,251 @@ class EvaluationOrder(models.Model):
             })
         return orders
 
+    @api.model
+    @api.private
+    def _require_bank_draft_actor(self, actor):
+        actor = actor.sudo().exists()
+        if len(actor) != 1 or actor != self.env.user or not actor.active:
+            raise AccessError(_("The Bank Draft operation is not authorized."))
+        bank = actor._trucalc_bank_identity()
+        if not (
+            actor.has_group("trucalc_orders.group_bank_admin")
+            or actor.has_group("trucalc_orders.group_bank_requestor")
+        ):
+            raise AccessError(_("The Bank Draft operation is not authorized."))
+        return actor, bank
+
+    @api.model
+    @api.private
+    def _authorize_bank_draft(self, order, actor):
+        actor, bank = self._require_bank_draft_actor(actor)
+        order = order.sudo().exists()
+        is_admin = actor.has_group("trucalc_orders.group_bank_admin")
+        if (
+            len(order) != 1
+            or order.status != "draft"
+            or order.company_id != bank
+            or order.requestor_company_id != bank
+            or (not is_admin and order.requestor_id != actor)
+        ):
+            raise AccessError(_("The Bank Draft operation is not authorized."))
+        return order, actor, bank
+
+    @api.model
+    @api.private
+    def _prepare_bank_request_values(self, values, actor, final=False):
+        if not isinstance(values, dict) or set(values) - BANK_REQUEST_FIELDS:
+            raise AccessError(_("The Bank request contains unauthorized Order fields."))
+
+        def clean_text(field_name, label, maximum=255, required=False):
+            value = values.get(field_name)
+            value = value.strip() if isinstance(value, str) else ""
+            if required and not value:
+                raise ValidationError(_("%(label)s is required.", label=label))
+            if len(value) > maximum:
+                raise ValidationError(_(
+                    "%(label)s may not exceed %(maximum)s characters.",
+                    label=label, maximum=maximum,
+                ))
+            return value or False
+
+        prepared = {
+            "borrower": clean_text("borrower", "Borrower", required=True),
+            "property_address": clean_text(
+                "property_address", "Property Address", 512, required=True,
+            ),
+            "city": clean_text("city", "City", required=final),
+            "zip_code": clean_text("zip_code", "ZIP", 20, required=final),
+            "loan_number": clean_text(
+                "loan_number", "Loan Number", required=final,
+            ),
+            "inspection_contact_name": clean_text(
+                "inspection_contact_name", "Inspection Contact Person",
+                required=final,
+            ),
+        }
+
+        property_type = clean_text(
+            "property_type", "Property Type", 64, required=final,
+        )
+        if property_type and property_type not in dict(
+            self._fields["property_type"].selection
+        ):
+            raise ValidationError(_("Select a valid Property Type."))
+        prepared["property_type"] = property_type
+
+        service_type = clean_text(
+            "service_type", "Service Type", 64, required=final,
+        )
+        if service_type and service_type not in dict(SERVICE_SELECTION):
+            raise ValidationError(_("Select a valid Service Type."))
+
+        area_input = values.get("service_area_id")
+        state_input = values.get("service_state_id")
+        county_input = values.get("service_county")
+        has_area_input = bool(area_input or service_type)
+        if has_area_input:
+            try:
+                service_area_id = int(area_input)
+                state_id = int(state_input)
+            except (TypeError, ValueError):
+                raise ValidationError(_(
+                    "Complete the State, County, and Service Type selection."
+                ))
+            service_area = self.env["trucalc.service.area"].sudo().browse(
+                service_area_id
+            ).exists()
+            county_input = county_input.strip() if isinstance(county_input, str) else ""
+            if (
+                len(service_area) != 1
+                or not service_area.active
+                or service_area.state_id.id != state_id
+                or service_area.county != county_input
+                or service_area.service_type != service_type
+            ):
+                raise ValidationError(_(
+                    "The selected State, County, and Service Type are not available."
+                ))
+            prepared.update({
+                "service_type": service_type,
+                "service_area_id": service_area.id,
+                "state": service_area.state_id.code or service_area.state_id.name,
+                "county": service_area.county,
+            })
+        else:
+            if final:
+                raise ValidationError(_("Select an active Service Area."))
+            prepared.update({
+                "service_type": False, "service_area_id": False,
+                "state": False, "county": False,
+            })
+
+        due_input = values.get("due_date")
+        try:
+            due_date = fields.Date.to_date(due_input) if due_input else False
+        except (TypeError, ValueError):
+            due_date = False
+        if final and not due_date:
+            raise ValidationError(_("Enter a valid Client Due Date."))
+        if due_input and not due_date:
+            raise ValidationError(_("Enter a valid Client Due Date."))
+        if due_date and due_date < fields.Date.context_today(self.with_user(actor)):
+            raise ValidationError(_("Client Due Date may not be in the past."))
+        prepared["due_date"] = due_date
+
+        prepared["inspection_contact_phone"] = (
+            self._normalize_inspection_contact_phone(
+                values.get("inspection_contact_phone"), required=final,
+            )
+        )
+        email_input = clean_text(
+            "inspection_contact_email", "Inspection Contact Email", 254,
+            required=final,
+        )
+        email = tools.email_normalize(email_input) if email_input else False
+        if email_input and not email:
+            raise ValidationError(_("Enter a valid Inspection Contact Email."))
+        prepared["inspection_contact_email"] = email
+        notes = values.get("notes")
+        notes = notes.strip() if isinstance(notes, str) else False
+        if notes and len(notes) > 5000:
+            raise ValidationError(_("Notes / Instructions may not exceed 5000 characters."))
+        prepared["notes"] = notes
+        return prepared
+
+    @api.model
+    @api.private
+    def _create_bank_draft(self, values, actor):
+        actor, bank = self._require_bank_draft_actor(actor)
+        create_values = self._prepare_bank_request_values(values, actor, final=False)
+        create_values.update({
+            "company_id": bank.id,
+            "requestor_company_id": bank.id,
+            "requestor_id": actor.id,
+            "status": "draft",
+            "order_date": False,
+            "order_number": self.env.ref(
+                "trucalc_orders.seq_trucalc_order"
+            ).sudo().next_by_id() or "New",
+        })
+        trusted_model = self.with_user(actor).sudo().with_context(
+            allowed_company_ids=[]
+        )
+        order = super(EvaluationOrder, trusted_model).create(create_values)
+        order.sudo().message_post(body=Markup(_(
+            "<p><strong>Bank Draft Created</strong></p><ul>"
+            "<li>Order Number: %(order)s</li><li>Bank: %(bank)s</li>"
+            "<li>Created By: %(requestor)s</li><li>Created At: %(created)s</li>"
+            "</ul>"
+        )) % {
+            "order": escape(order.order_number),
+            "bank": escape(order.company_id.name),
+            "requestor": escape(actor.name),
+            "created": escape(tools.format_datetime(
+                order.env, fields.Datetime.now(), tz=actor.tz, dt_format="medium"
+            )),
+        })
+        return order
+
+    @api.model
+    @api.private
+    def _update_bank_draft(self, order, values, actor):
+        order, actor, _bank = self._authorize_bank_draft(order, actor)
+        order._lock_bank_draft()
+        order, actor, _bank = self._authorize_bank_draft(order, actor)
+        update_values = self._prepare_bank_request_values(values, actor, final=False)
+        super(EvaluationOrder, order).write(update_values)
+        order.message_post(body=Markup(_(
+            "<p><strong>Bank Draft Updated</strong></p><ul>"
+            "<li>Updated By: %(actor)s</li><li>Updated At: %(updated)s</li>"
+            "</ul>"
+        )) % {
+            "actor": escape(actor.name),
+            "updated": escape(tools.format_datetime(
+                order.env, fields.Datetime.now(), tz=actor.tz, dt_format="medium"
+            )),
+        })
+        return order
+
+    @api.model
+    @api.private
+    def _send_bank_draft(self, order, values, actor):
+        order, actor, _bank = self._authorize_bank_draft(order, actor)
+        order._lock_bank_draft()
+        order, actor, _bank = self._authorize_bank_draft(order, actor)
+        send_values = self._prepare_bank_request_values(values, actor, final=True)
+        send_values.update({
+            "status": "new",
+            "order_date": fields.Date.context_today(order.with_user(actor)),
+        })
+        super(EvaluationOrder, order).write(send_values)
+        self.env["trucalc.order.lifecycle.event"]._log_event(
+            order, "bank_request_sent", "draft", "new", actor,
+        )
+        order.message_post(body=Markup(_(
+            "<p><strong>Bank Request Sent</strong></p><ul>"
+            "<li>Order Number: %(order)s</li><li>Bank: %(bank)s</li>"
+            "<li>Sent By: %(actor)s</li><li>Sent At: %(sent)s</li>"
+            "<li>Transition: Draft → New</li></ul>"
+        )) % {
+            "order": escape(order.order_number),
+            "bank": escape(order.company_id.name),
+            "actor": escape(actor.name),
+            "sent": escape(tools.format_datetime(
+                order.env, fields.Datetime.now(), tz=actor.tz, dt_format="medium"
+            )),
+        })
+        return order
+
+    @api.private
+    def _lock_bank_draft(self):
+        self.ensure_one()
+        self.flush_recordset(["status", "company_id", "requestor_company_id", "requestor_id"])
+        self.env.cr.execute(
+            "SELECT id FROM trucalc_order WHERE id = %s FOR UPDATE", (self.id,)
+        )
+        self.invalidate_recordset()
+
     def write(self, vals):
         if "vendor_authorization_ids" in vals:
             raise AccessError(_("Vendor Order authorization is server-maintained."))
@@ -468,6 +867,12 @@ class EvaluationOrder(models.Model):
         }
         if protected.intersection(vals):
             raise AccessError(_("Order bid lifecycle fields require an explicit action."))
+        if "inspection_contact_phone" in vals:
+            vals["inspection_contact_phone"] = (
+                self._normalize_inspection_contact_phone(
+                    vals["inspection_contact_phone"]
+                )
+            )
         result = super().write(vals)
         return result
 
@@ -541,6 +946,8 @@ class EvaluationOrder(models.Model):
     def action_add_document(self):
         self._require_intake_manager()
         self.ensure_one()
+        if self.status == "draft":
+            raise AccessError(_("TruCalc personnel may not modify a Bank Draft."))
         self.check_access("read")
         return {
             "type": "ir.actions.act_window",

@@ -101,7 +101,8 @@ class TrucalcDocument(models.Model):
             ("filename", "=ilike", filename),
         ]):
             raise ValidationError(_(
-                "An active document with this filename already exists on this Order."
+                'An active document named "%(filename)s" already exists on this Order.',
+                filename=filename,
             ))
 
     @api.model
@@ -154,6 +155,10 @@ class TrucalcDocument(models.Model):
             if not order:
                 raise AccessError(_("The document Order is not authorized."))
             order.check_access("read")
+            if order.status == "draft":
+                raise AccessError(_(
+                    "Bank Draft documents require the controlled Bank workflow."
+                ))
             prepared.append(self._prepare_common_create(vals, order, user, "trucalc"))
         documents = super().create(prepared)
         for document in documents:
@@ -175,6 +180,10 @@ class TrucalcDocument(models.Model):
         )
         if order.company_id != bank or not uploader:
             raise AccessError(_("The Bank document upload is not authorized."))
+        if order.status == "draft":
+            self.env["trucalc.order"].with_user(actor)._authorize_bank_draft(
+                order, actor,
+            )
         values = self._prepare_common_create({
             "order_id": order.id, "tag_id": tag.id,
             "filename": filename, "attachment": attachment,
@@ -186,12 +195,46 @@ class TrucalcDocument(models.Model):
         )
         return document
 
+    @api.model
+    @api.private
+    def _delete_bank_draft_document(self, document, order, actor):
+        order, actor, bank = self.env["trucalc.order"].with_user(
+            actor
+        )._authorize_bank_draft(order, actor)
+        document = document.sudo().exists()
+        if (
+            len(document) != 1
+            or not document.active
+            or document.order_id != order
+            or document.origin != "bank"
+            or document.originating_bank_id != bank
+        ):
+            raise AccessError(_("The Bank Draft document deletion is not authorized."))
+        self.env["trucalc.document.event"]._log_document_event(
+            document, "deleted", actor,
+            prior_visible_before_engagement=document.visible_before_engagement,
+            new_visible_before_engagement=False,
+            prior_visible_after_engagement=document.visible_after_engagement,
+            new_visible_after_engagement=False,
+        )
+        super(TrucalcDocument, document).write({
+            "attachment": False,
+            "active": False,
+            "deleted_at": fields.Datetime.now(),
+            "deleted_by_id": actor.id,
+            "visible_before_engagement": False,
+            "visible_after_engagement": False,
+        })
+        return True
+
     def _require_manager(self):
         if not (
             self.env.user.has_group("trucalc_orders.group_trucalc_admin")
             or self.env.user.has_group("trucalc_orders.group_trucalc_operations")
         ):
             raise AccessError(_("Only TruCalc Administrators and Operations may manage documents."))
+        if self.filtered(lambda document: document.order_id.status == "draft"):
+            raise AccessError(_("TruCalc personnel may not modify Bank Draft documents."))
 
     def _accepted_engagement_context(self):
         self.ensure_one()

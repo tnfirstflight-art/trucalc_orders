@@ -175,53 +175,15 @@ class TestTenantHardening(TransactionCase):
         with self.assertRaises(AccessError):
             user._trucalc_bank_identity()
 
-    def test_bank_order_create_derives_trusted_ownership(self):
+    def test_bank_order_raw_create_is_denied(self):
         model = self.env["trucalc.order"].with_user(self.bank_requestor)
-
-        def order_values(borrower="Bank Created", **overrides):
-            return {
-                "borrower": borrower,
-                "property_address": "2 Tenant Way",
+        self.assertFalse(model.has_access("create"))
+        with self.assertRaises(AccessError):
+            model.create({
+                "borrower": "Bank Created", "property_address": "2 Tenant Way",
                 "service_type": "evaluation",
                 "due_date": fields.Date.add(fields.Date.today(), days=14),
-                **overrides,
-            }
-
-        order = model.create(order_values())
-        self.assertNotEqual(order.order_number, "New")
-        self.assertEqual(order.company_id, self.bank_a)
-        self.assertEqual(order.requestor_company_id, self.bank_a)
-        self.assertEqual(order.requestor_id, self.bank_requestor)
-
-        correct = model.create(order_values(
-            "Explicit Correct",
-            company_id=self.bank_a.id,
-            requestor_company_id=self.bank_a.id,
-            requestor_id=self.bank_requestor.id,
-        ))
-        self.assertEqual(correct.company_id, self.bank_a)
-
-        admin_order = self.env["trucalc.order"].with_user(self.bank_admin).create(
-            order_values("Bank Administrator")
-        )
-        self.assertNotEqual(admin_order.order_number, "New")
-        self.assertEqual(admin_order.company_id, self.bank_a)
-        self.assertEqual(admin_order.requestor_id, self.bank_admin)
-
-        self.assertFalse(
-            self.env["ir.sequence"].with_user(self.bank_requestor).has_access("read")
-        )
-        self.assertFalse(
-            self.env["ir.sequence"].with_user(self.bank_admin).has_access("read")
-        )
-
-        for forged in (
-            {"company_id": self.bank_b.id},
-            {"requestor_company_id": self.bank_b.id},
-            {"requestor_id": self.admin.id},
-        ):
-            with self.assertRaises(AccessError):
-                model.create(order_values(**forged))
+            })
 
     def test_bank_order_context_forgery_has_no_effect(self):
         model = self.env["trucalc.order"].with_user(self.bank_requestor).with_context(
@@ -230,15 +192,12 @@ class TestTenantHardening(TransactionCase):
             default_requestor_company_id=self.bank_b.id,
             default_requestor_id=self.admin.id,
         )
-        order = model.create({
-            "borrower": "Context Forgery",
-            "property_address": "3 Tenant Way",
-            "service_type": "evaluation",
-            "due_date": fields.Date.add(fields.Date.today(), days=14),
-        })
-        self.assertEqual(order.company_id, self.bank_a)
-        self.assertEqual(order.requestor_company_id, self.bank_a)
-        self.assertEqual(order.requestor_id, self.bank_requestor)
+        with self.assertRaises(AccessError):
+            model.create({
+                "borrower": "Context Forgery", "property_address": "3 Tenant Way",
+                "service_type": "evaluation",
+                "due_date": fields.Date.add(fields.Date.today(), days=14),
+            })
 
     def test_bank_order_write_protects_ownership_and_lifecycle(self):
         order = self.order_a.with_user(self.bank_requestor)

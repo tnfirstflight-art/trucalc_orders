@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="trucalc_orders.InspectionPhoneBlurField"
+       t-inherit="web.FormPhoneField" t-inherit-mode="primary">
+        <xpath expr="//input" position="attributes">
+            <attribute name="t-on-blur">onBlur</attribute>
+        </xpath>
+    </t>
+</templates>

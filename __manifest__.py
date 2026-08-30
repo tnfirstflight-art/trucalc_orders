@@ -1,6 +1,6 @@
 {
     'name': 'TruCalc Orders',
-    'version': '1.15',
+    'version': '1.16',
     'author': 'TruCalc',
     'license': 'LGPL-3',
     'category': 'Services',
@@ -25,11 +25,19 @@
         'views/evaluation_order_views.xml',
         'views/document_views.xml',
         'views/document_tag_views.xml',
+        'views/service_area_views.xml',
         'views/bid_views.xml',
         'views/vendor_portal_templates.xml',
     ],
     'assets': {
+        'web.assets_frontend': [
+            'trucalc_orders/static/src/js/inspection_phone_format.js',
+            'trucalc_orders/static/src/js/bank_draft_service_area.js',
+        ],
         'web.assets_backend': [
+            'trucalc_orders/static/src/js/inspection_phone_format.js',
+            'trucalc_orders/static/src/js/inspection_phone_blur_field.js',
+            'trucalc_orders/static/src/xml/inspection_phone_blur_field.xml',
             'trucalc_orders/static/src/js/many2one_autosave_field.js',
             'trucalc_orders/static/src/scss/vendor_responses.scss',
         ],

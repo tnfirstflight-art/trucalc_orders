@@ -14,3 +14,5 @@ from . import test_vendor_engagement_response
 from . import test_engagement_documents
 from . import test_bank_order_portal
 from . import test_downstream_lifecycle_security
+from . import test_service_area
+from . import test_bank_request_submission
