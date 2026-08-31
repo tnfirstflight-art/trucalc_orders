@@ -42,11 +42,16 @@ class TestVendorOrderAuthorization(TransactionCase):
 
     @classmethod
     def _user(cls, login, group, vendor=False, bank_company=False):
+        groups = [group.id]
+        if group == cls.reviewer_group:
+            groups.append(cls.env.ref(
+                "trucalc_orders.group_trucalc_operations"
+            ).id)
         return cls.env["res.users"].with_context(no_reset_password=True).create({
             "name": login,
             "login": login,
             "email": "%s@example.test" % login,
-            "group_ids": [Command.set([group.id])],
+            "group_ids": [Command.set(groups)],
             "trucalc_vendor_id": vendor.id if vendor else False,
             "trucalc_bank_company_id": bank_company.id if bank_company else False,
         })

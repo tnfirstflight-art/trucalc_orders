@@ -10,6 +10,19 @@ from odoo.addons.portal.controllers.portal import CustomerPortal, pager as porta
 
 
 class TruCalcVendorPortal(CustomerPortal):
+    def _deliverable_response(self, deliverable):
+        deliverable.ensure_one()
+        attachment = request.env["ir.attachment"].sudo().search([
+            ("res_model", "=", "trucalc.vendor.deliverable"),
+            ("res_id", "=", deliverable.id), ("res_field", "=", "file_data"),
+        ], limit=1)
+        if not attachment or not deliverable.file_data:
+            raise request.not_found()
+        return request.make_response(base64.b64decode(deliverable.file_data), headers=[
+            ("Content-Type", "application/pdf"),
+            ("Content-Disposition", content_disposition(deliverable.filename)),
+        ])
+
     def _is_trucalc_vendor(self):
         return request.env.user.has_group(
             "trucalc_orders.group_vendor_portal"
@@ -72,21 +85,55 @@ class TruCalcVendorPortal(CustomerPortal):
         if not projection:
             raise request.not_found()
 
+        values = self._vendor_order_values(
+            projection, submitted=kwargs.get("deliverable_submitted") == "1",
+        )
+        return request.render("trucalc_orders.portal_my_trucalc_order", values)
+
+    def _vendor_order_values(self, projection, response_error=False,
+                             deliverable_error=False, submitted=False):
         authorization = request.env["trucalc.order.vendor.authorization"].sudo().browse(
             projection.id
         )
         documents = request.env["trucalc.document"]._vendor_authorized_documents(
             authorization, request.env.user
         )
-
+        deliverables = request.env[
+            "trucalc.vendor.deliverable"
+        ]._vendor_deliverables(authorization, request.env.user)
+        valuation = deliverables.filtered(
+            lambda item: item.artifact_type == "valuation" and item.is_current
+        )[:1]
+        vendor_invoice = deliverables.filtered(
+            lambda item: item.artifact_type == "vendor_invoice"
+        )[:1]
+        accepted_assignment = bool(
+            projection.vendor_phase == "assignment"
+            and projection.engagement_response_state == "accepted"
+        )
         values = self._prepare_portal_layout_values()
         values.update({
             "page_name": "trucalc_order",
             "projection": projection,
             "documents": documents,
-            "response_error": False,
+            "valuation": valuation,
+            "vendor_invoice": vendor_invoice,
+            "can_submit_valuation": bool(
+                accepted_assignment and projection.order_status == "engaged"
+                and not valuation
+            ),
+            "can_submit_vendor_invoice": bool(
+                accepted_assignment
+                and projection.order_status in (
+                    "engaged", "report_received", "reviewer_assigned", "under_review",
+                )
+                and not vendor_invoice
+            ),
+            "response_error": response_error,
+            "deliverable_error": deliverable_error,
+            "deliverable_submitted": submitted,
         })
-        return request.render("trucalc_orders.portal_my_trucalc_order", values)
+        return values
 
     @http.route(
         "/my/trucalc/orders/<string:order_number>/documents/<int:document_id>/download",
@@ -456,10 +503,90 @@ class TruCalcVendorPortal(CustomerPortal):
         return projection
 
     def _render_response_error(self, projection, message):
-        values = self._prepare_portal_layout_values()
-        values.update({"page_name": "trucalc_order", "projection": projection,
-                       "response_error": message})
+        values = self._vendor_order_values(projection, response_error=message)
         return request.render("trucalc_orders.portal_my_trucalc_order", values)
+
+    def _render_deliverable_error(self, projection, message):
+        values = self._vendor_order_values(projection, deliverable_error=message)
+        return request.render("trucalc_orders.portal_my_trucalc_order", values)
+
+    def _uploaded_pdf(self, field_name):
+        uploaded = request.httprequest.files.get(field_name)
+        if not uploaded or not uploaded.filename:
+            raise ValidationError("Select a PDF file to submit.")
+        payload = uploaded.stream.read(50 * 1024 * 1024 + 1)
+        return uploaded.filename, base64.b64encode(payload)
+
+    def _submit_deliverable(self, order_number, artifact_type, field_name):
+        projection = self._vendor_projection(order_number)
+        authorization = request.env["trucalc.order.vendor.authorization"].sudo().browse(
+            projection.id
+        )
+        try:
+            filename, file_data = self._uploaded_pdf(field_name)
+            request.env["trucalc.vendor.deliverable"]._submit(
+                authorization, request.env.user, artifact_type, filename, file_data,
+            )
+        except (AccessError, ValidationError) as error:
+            return self._render_deliverable_error(projection, error.args[0])
+        return request.redirect(
+            "/my/trucalc/orders/%s?deliverable_submitted=1" % order_number
+        )
+
+    @http.route(
+        "/my/trucalc/orders/<string:order_number>/deliverables/valuation",
+        type="http", auth="user", website=True, methods=["POST"],
+    )
+    def portal_trucalc_valuation_submit(self, order_number, **post):
+        return self._submit_deliverable(
+            order_number, "valuation", "valuation_file",
+        )
+
+    @http.route(
+        "/my/trucalc/orders/<string:order_number>/deliverables/vendor-invoice",
+        type="http", auth="user", website=True, methods=["POST"],
+    )
+    def portal_trucalc_vendor_invoice_submit(self, order_number, **post):
+        return self._submit_deliverable(
+            order_number, "vendor_invoice", "vendor_invoice_file",
+        )
+
+    @http.route(
+        "/my/trucalc/orders/<string:order_number>/deliverables/"
+        "<int:deliverable_id>/download",
+        type="http", auth="user", website=True, readonly=True,
+    )
+    def portal_trucalc_deliverable_download(
+        self, order_number, deliverable_id, **kwargs
+    ):
+        projection = self._vendor_projection(order_number)
+        deliverable = request.env["trucalc.vendor.deliverable"].browse(
+            deliverable_id
+        )
+        try:
+            deliverable = deliverable._authorize_download(request.env.user)
+        except AccessError:
+            raise request.not_found()
+        authorization = request.env["trucalc.order.vendor.authorization"].sudo().browse(
+            projection.id
+        )
+        if deliverable.authorization_id != authorization:
+            raise request.not_found()
+        return self._deliverable_response(deliverable)
+
+    @http.route(
+        "/trucalc/deliverables/<int:deliverable_id>/download",
+        type="http", auth="user", readonly=True,
+    )
+    def trucalc_internal_deliverable_download(self, deliverable_id, **kwargs):
+        deliverable = request.env["trucalc.vendor.deliverable"].browse(
+            deliverable_id
+        )
+        try:
+            deliverable = deliverable._authorize_download(request.env.user)
+        except AccessError:
+            raise request.not_found()
+        return self._deliverable_response(deliverable)
 
     @http.route(
         "/my/trucalc/orders/<string:order_number>/response",

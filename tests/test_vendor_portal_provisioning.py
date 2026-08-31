@@ -44,12 +44,15 @@ class TestVendorPortalProvisioning(TransactionCase):
 
     @classmethod
     def _user(cls, suffix, group, bank=False, vendor=False, active=True):
+        group_ids = [group.id]
+        if group == cls.groups["group_trucalc_reviewer"]:
+            group_ids.append(cls.groups["group_trucalc_operations"].id)
         return cls.env["res.users"].with_context(no_reset_password=True).create({
             "name": "4B2B1 %s" % suffix,
             "login": "4b2b1-%s" % suffix,
             "email": "4b2b1-%s@example.test" % suffix,
             "active": active,
-            "group_ids": [Command.set([group.id])],
+            "group_ids": [Command.set(group_ids)],
             "trucalc_bank_company_id": bank.id if bank else False,
             "trucalc_vendor_id": vendor.id if vendor else False,
         })

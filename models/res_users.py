@@ -63,9 +63,8 @@ class ResUsers(models.Model):
         return bool(
             user.active
             and not user.share
-            and membership["internal"] == self.env.ref(
-                "trucalc_orders.group_trucalc_reviewer"
-            )
+            and membership["reviewer"]
+            and not membership["internal"]
             and not membership["bank"]
             and not membership["vendor"]
             and self.env.ref("base.group_user") in user.all_group_ids
@@ -100,32 +99,6 @@ class ResUsers(models.Model):
                     "action_id": False,
                 })
 
-    @api.private
-    def _trucalc_reviewer_partner_ids(self):
-        self.ensure_one()
-        if not self._trucalc_is_restricted_internal():
-            return self.env["res.partner"].browse()
-        user = self.sudo()
-        orders = self.env["trucalc.order"].sudo().search([
-            ("reviewer_user_id", "=", user.id),
-            ("company_id", "in", user.company_ids.ids),
-            ("status", "in", ("reviewer_assigned", "under_review", "completed")),
-        ])
-        documents = orders.document_ids.sudo().with_context(active_test=False)
-        return (
-            user.partner_id
-            | self.env.ref("base.partner_root")
-            | user.company_ids.partner_id
-            | orders.company_id.partner_id
-            | orders.requestor_company_id.partner_id
-            | orders.requestor_id.partner_id
-            | orders.reviewer_user_id.partner_id
-            | documents.uploaded_by.partner_id
-            | documents.deleted_by_id.partner_id
-            | orders.message_ids.sudo().author_id
-            | orders.message_partner_ids.sudo()
-        ).exists()
-
     @api.model
     @api.private
     def _trucalc_persona_groups(self):
@@ -133,8 +106,8 @@ class ResUsers(models.Model):
             "internal": self.env["res.groups"].browse([
                 self.env.ref("trucalc_orders.group_trucalc_admin").id,
                 self.env.ref("trucalc_orders.group_trucalc_operations").id,
-                self.env.ref("trucalc_orders.group_trucalc_reviewer").id,
             ]),
+            "reviewer": self.env.ref("trucalc_orders.group_trucalc_reviewer"),
             "bank": self.env["res.groups"].browse([
                 self.env.ref("trucalc_orders.group_bank_admin").id,
                 self.env.ref("trucalc_orders.group_bank_requestor").id,
@@ -150,6 +123,7 @@ class ResUsers(models.Model):
         persona_groups = self._trucalc_persona_groups()
         return {
             "internal": groups & persona_groups["internal"],
+            "reviewer": groups & persona_groups["reviewer"],
             "bank": groups & persona_groups["bank"],
             "vendor": groups & persona_groups["vendor"],
         }
@@ -158,7 +132,14 @@ class ResUsers(models.Model):
     def _check_trucalc_persona(self):
         for user in self:
             membership = user._trucalc_persona_membership()
-            family_count = sum(bool(groups) for groups in membership.values())
+            internal_family = bool(
+                membership["internal"] or membership["reviewer"]
+            )
+            family_count = sum((
+                internal_family,
+                bool(membership["bank"]),
+                bool(membership["vendor"]),
+            ))
             user_sudo = user.sudo()
             bank_company = user_sudo.trucalc_bank_company_id
             vendor = user_sudo.trucalc_vendor_id
@@ -178,11 +159,16 @@ class ResUsers(models.Model):
                 raise ValidationError(_(
                     "A user may have only one TruCalc Internal role."
                 ))
+            if membership["reviewer"] and len(membership["internal"]) != 1:
+                raise ValidationError(_(
+                    "TruCalc Reviewer authorization requires exactly one normal "
+                    "TruCalc Internal role."
+                ))
             if len(membership["bank"]) > 1:
                 raise ValidationError(_(
                     "A user may have only one TruCalc Bank role."
                 ))
-            if membership["internal"] and (bank_company or vendor):
+            if internal_family and (bank_company or vendor):
                 raise ValidationError(_(
                     "A TruCalc Internal user cannot have an external authorization mapping."
                 ))
@@ -234,9 +220,8 @@ class ResUsers(models.Model):
         return user.trucalc_bank_company_id
 
     @api.private
-    def _trucalc_reviewer_identity(self, company):
+    def _trucalc_reviewer_identity(self):
         self.ensure_one()
-        company.ensure_one()
         membership = self._trucalc_persona_membership()
         user = self.sudo()
         if (
@@ -244,15 +229,15 @@ class ResUsers(models.Model):
             or user.share
             or membership["bank"]
             or membership["vendor"]
-            or membership["internal"] != self.env.ref(
-                "trucalc_orders.group_trucalc_reviewer"
-            )
+            or len(membership["internal"]) != 1
+            or not membership["reviewer"]
             or self.env.ref("base.group_user") not in user.all_group_ids
-            or company not in user.company_ids
+            or user.trucalc_bank_company_id
+            or user.trucalc_vendor_id
         ):
             raise ValidationError(_(
                 "The assigned Reviewer user must be an active internal TruCalc "
-                "Reviewer authorized for the Order company."
+                "Reviewer."
             ))
         return user
 

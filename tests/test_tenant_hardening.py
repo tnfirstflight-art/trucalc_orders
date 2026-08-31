@@ -45,7 +45,9 @@ class TestTenantHardening(TransactionCase):
             internal_user.write({
                 "company_ids": [Command.set(internal_companies.ids)]
             })
-        cls.reviewer = cls._user("4b1a-reviewer", ["group_trucalc_reviewer"])
+        cls.reviewer = cls._user("4b1a-reviewer", [
+            "group_trucalc_operations", "group_trucalc_reviewer",
+        ])
         cls.vendor_user = cls._user(
             "4b1a-vendor", ["group_vendor_portal"], vendor=cls.vendor_a
         )
@@ -89,7 +91,8 @@ class TestTenantHardening(TransactionCase):
         valid = (
             (["group_trucalc_admin"], False, False),
             (["group_trucalc_operations"], False, False),
-            (["group_trucalc_reviewer"], False, False),
+            (["group_trucalc_admin", "group_trucalc_reviewer"], False, False),
+            (["group_trucalc_operations", "group_trucalc_reviewer"], False, False),
             (["group_bank_admin"], self.bank_a, False),
             (["group_bank_requestor"], self.bank_a, False),
             (["group_bank_view_only"], self.bank_a, False),
@@ -109,7 +112,9 @@ class TestTenantHardening(TransactionCase):
             (["group_trucalc_admin", "group_bank_admin"], self.bank_a, False),
             (["group_trucalc_admin", "group_vendor_portal"], False, self.vendor_a),
             (["group_trucalc_operations", "group_bank_requestor"], self.bank_a, False),
+            (["group_trucalc_reviewer"], False, False),
             (["group_trucalc_reviewer", "group_vendor_portal"], False, self.vendor_a),
+            (["group_trucalc_reviewer", "group_bank_admin"], self.bank_a, False),
             (["group_bank_admin", "group_vendor_portal"], self.bank_a, self.vendor_a),
             (["group_bank_admin", "group_bank_requestor"], self.bank_a, False),
             (["group_trucalc_admin", "group_trucalc_operations"], False, False),

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_trucalc_vendor_deliverable_history_list" model="ir.ui.view">
+        <field name="name">trucalc.vendor.deliverable.history.list</field>
+        <field name="model">trucalc.vendor.deliverable</field>
+        <field name="arch" type="xml">
+            <list create="false" edit="false" delete="false" import="false" export_xlsx="false">
+                <field name="version"/>
+                <field name="submitted_at" string="Submitted At"/>
+                <field name="filename_link" widget="html" string="Filename"/>
+                <field name="status" widget="badge"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_trucalc_vendor_deliverable_history_form" model="ir.ui.view">
+        <field name="name">trucalc.vendor.deliverable.history.form</field>
+        <field name="model">trucalc.vendor.deliverable</field>
+        <field name="arch" type="xml">
+            <form create="false" edit="false" delete="false">
+                <sheet>
+                    <group>
+                        <field name="version"/>
+                        <field name="submitted_at"/>
+                        <field name="filename_link" widget="html"/>
+                        <field name="status"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+</odoo>

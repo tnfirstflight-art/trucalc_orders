@@ -15,3 +15,4 @@ from . import bid_invitation
 from . import bid
 from . import vendor_engagement
 from . import vendor_order_projection
+from . import vendor_deliverable

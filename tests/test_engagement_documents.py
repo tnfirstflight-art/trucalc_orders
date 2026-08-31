@@ -13,11 +13,24 @@ class TestEngagementDocuments(TransactionCase):
         super().setUpClass()
         cls.admin = cls._user("4c2-admin", "group_trucalc_admin")
         cls.ops = cls._user("4c2-ops", "group_trucalc_operations")
-        cls.reviewer = cls._user("4c2-reviewer", "group_trucalc_reviewer")
+        cls.reviewer = cls._user(
+            "4c2-reviewer",
+            ["group_trucalc_operations", "group_trucalc_reviewer"],
+        )
+        cls.operations_reviewer = cls._user(
+            "4c2-operations-reviewer",
+            ["group_trucalc_operations", "group_trucalc_reviewer"],
+        )
+        cls.admin_reviewer = cls._user(
+            "4c2-admin-reviewer",
+            ["group_trucalc_admin", "group_trucalc_reviewer"],
+        )
         cls.bank_a = cls.env["res.company"].create({"name": "4C2 Bank A"})
         cls.bank_b = cls.env["res.company"].create({"name": "4C2 Bank B"})
         internal_companies = cls.env.company | cls.bank_a | cls.bank_b
-        for internal_user in (cls.admin, cls.ops, cls.reviewer):
+        for internal_user in (
+            cls.admin, cls.ops, cls.operations_reviewer, cls.admin_reviewer,
+        ):
             internal_user.write({"company_ids": [Command.set(internal_companies.ids)]})
         cls.bank_admin = cls._user("4c2-bank-admin", "group_bank_admin", bank=cls.bank_a)
         cls.bank_requestor = cls._user("4c2-bank-requestor", "group_bank_requestor", bank=cls.bank_a)
@@ -35,9 +48,13 @@ class TestEngagementDocuments(TransactionCase):
 
     @classmethod
     def _user(cls, login, group, bank=False, vendor=False):
+        groups = group if isinstance(group, (list, tuple)) else [group]
         return cls.env["res.users"].with_context(no_reset_password=True).create({
             "name": login, "login": login, "email": f"{login}@example.test",
-            "group_ids": [Command.set([cls.env.ref(f"trucalc_orders.{group}").id])],
+            "group_ids": [Command.set([
+                cls.env.ref(f"trucalc_orders.{group_name}").id
+                for group_name in groups
+            ])],
             "trucalc_bank_company_id": bank.id if bank else False,
             "trucalc_vendor_id": vendor.id if vendor else False,
         })
@@ -353,14 +370,40 @@ class TestEngagementDocuments(TransactionCase):
         ]), attachment_count)
 
     def test_internal_quick_download_authorization_and_no_audit(self):
-        document = self._internal_document(self._order())
+        order = self._order()
+        order.with_user(self.admin).write({"reviewer_user_id": self.reviewer.id})
+        order.with_user(self.admin)._controlled_lifecycle_write({
+            "status": "reviewer_assigned",
+        })
+        document = self._internal_document(order)
+        unassigned_document = self._internal_document(
+            self._order(self.bank_b), "Unassigned.pdf",
+        )
         event_count = len(document.event_ids)
-        action = document.with_user(self.reviewer).action_download()
-        self.assertEqual(action["type"], "ir.actions.act_url")
-        self.assertIn(f"model=trucalc.document&id={document.id}", action["url"])
-        self.assertIn("field=attachment", action["url"])
-        self.assertIn("download=true", action["url"])
+        for internal in (
+            self.admin, self.ops, self.admin_reviewer,
+            self.operations_reviewer,
+        ):
+            action = document.with_user(internal).action_download()
+            self.assertEqual(action["type"], "ir.actions.act_url")
+            self.assertIn(f"model=trucalc.document&id={document.id}", action["url"])
+            self.assertTrue(unassigned_document.with_user(internal).has_access("read"))
         self.assertEqual(len(document.event_ids), event_count)
+        self.assertFalse(document.with_user(self.reviewer).has_access("read"))
+        with self.assertRaises(AccessError):
+            document.with_user(self.reviewer).action_download()
+        self.assertFalse(document.with_user(self.reviewer).has_access("write"))
+        self.operations_reviewer.sudo().write({
+            "group_ids": [Command.unlink(self.env.ref(
+                "trucalc_orders.group_trucalc_reviewer"
+            ).id)],
+        })
+        self.assertTrue(
+            document.with_user(self.operations_reviewer).has_access("read")
+        )
+        self.assertTrue(
+            unassigned_document.with_user(self.operations_reviewer).has_access("read")
+        )
         for user in (self.bank_requestor, self.bank_viewer, self.vendor_user):
             with self.assertRaises(AccessError):
                 document.with_user(user).action_download()

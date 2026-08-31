@@ -221,15 +221,84 @@
                 <t t-out="response_error"/>
             </div>
 
-            <div t-if="documents" class="card mt-3">
+            <div t-if="deliverable_error" class="alert alert-danger mt-3" role="alert">
+                <t t-out="deliverable_error"/>
+            </div>
+            <div t-if="deliverable_submitted" class="alert alert-success mt-3" role="status">
+                Vendor deliverable submitted successfully.
+            </div>
+
+            <div class="card mt-3">
+                <div class="card-header"><strong>Valuation and Invoice</strong></div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <strong>Valuation Upload:</strong>
+                        <a t-if="valuation"
+                           t-att-href="'/my/trucalc/orders/%s/deliverables/%s/download' % (projection.order_number, valuation.id)">
+                            <t t-out="valuation.filename"/>
+                        </a>
+                        <span t-if="not valuation" class="text-muted">Not submitted</span>
+                        <div t-if="valuation" class="text-muted small">
+                            <span>Submitted Date: </span><span t-field="valuation.submitted_at"/>
+                            <span class="ms-3">Status: </span><span t-field="valuation.status"/>
+                        </div>
+                        <form t-if="can_submit_valuation"
+                              t-att-action="'/my/trucalc/orders/%s/deliverables/valuation' % projection.order_number"
+                              method="post" enctype="multipart/form-data" class="mt-2">
+                            <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
+                            <label for="valuation_file" class="form-label">
+                                Select a Valuation PDF to upload
+                            </label>
+                            <div class="input-group">
+                                <input id="valuation_file" type="file" name="valuation_file"
+                                       accept="application/pdf,.pdf"
+                                       class="form-control" required="required"/>
+                                <button type="submit" class="btn btn-primary">Submit Valuation</button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div>
+                        <strong>Vendor Invoice:</strong>
+                        <a t-if="vendor_invoice"
+                           t-att-href="'/my/trucalc/orders/%s/deliverables/%s/download' % (projection.order_number, vendor_invoice.id)">
+                            <t t-out="vendor_invoice.filename"/>
+                        </a>
+                        <span t-if="not vendor_invoice" class="text-muted">Not submitted</span>
+                        <div t-if="vendor_invoice" class="text-muted small">
+                            <span>Submitted Date: </span><span t-field="vendor_invoice.submitted_at"/>
+                            <span class="ms-3">Status: </span><span t-field="vendor_invoice.status"/>
+                        </div>
+                        <form t-if="can_submit_vendor_invoice"
+                              t-att-action="'/my/trucalc/orders/%s/deliverables/vendor-invoice' % projection.order_number"
+                              method="post" enctype="multipart/form-data" class="mt-2">
+                            <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
+                            <label for="vendor_invoice_file" class="form-label">
+                                Select a Vendor Invoice PDF to upload
+                            </label>
+                            <div class="input-group">
+                                <input id="vendor_invoice_file" type="file" name="vendor_invoice_file"
+                                       accept="application/pdf,.pdf"
+                                       class="form-control" required="required"/>
+                                <button type="submit" class="btn btn-primary">Submit Vendor Invoice</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mt-3">
                 <div class="card-header"><strong>Documents</strong></div>
-                <div class="list-group list-group-flush">
+                <div t-if="documents" class="list-group list-group-flush">
                     <a t-foreach="documents" t-as="document"
                        t-att-href="'/my/trucalc/orders/%s/documents/%s/download' % (projection.order_number, document.id)"
                        class="list-group-item list-group-item-action">
                         <t t-out="document.filename"/>
                         <span class="text-muted"> — <t t-out="document.tag_id.name"/></span>
                     </a>
+                </div>
+                <div t-if="not documents" class="card-body text-muted">
+                    No supporting documents are currently available.
                 </div>
             </div>
 

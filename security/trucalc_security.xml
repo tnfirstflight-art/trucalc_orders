@@ -14,15 +14,24 @@
                ref="module_category_trucalc_evaluations"/>
     </record>
 
+    <record id="privilege_trucalc_reviewer_authorization"
+            model="res.groups.privilege">
+        <field name="name">Reviewer Authorization</field>
+        <field name="sequence">20</field>
+        <field name="category_id"
+               ref="module_category_trucalc_evaluations"/>
+    </record>
+
     <!-- ================================================================
          TRUCALC INTERNAL USER GROUPS
 
          These groups are for TruCalc personnel with Odoo backend access.
-         There are exactly three TruCalc internal roles.
+         Administrator and Operations are mutually exclusive normal roles.
+         Reviewer authorization is an additive internal capability.
          ================================================================ -->
 
     <record id="group_trucalc_admin" model="res.groups">
-        <field name="name">TruCalc Administrator</field>
+        <field name="name">Administrator</field>
         <field name="sequence">10</field>
         <field name="privilege_id"
                ref="privilege_trucalc_internal_role"/>
@@ -30,7 +39,7 @@
     </record>
 
     <record id="group_trucalc_operations" model="res.groups">
-        <field name="name">TruCalc Operations</field>
+        <field name="name">Operations</field>
         <field name="sequence">20</field>
         <field name="privilege_id"
                ref="privilege_trucalc_internal_role"/>
@@ -39,9 +48,9 @@
 
     <record id="group_trucalc_reviewer" model="res.groups">
         <field name="name">TruCalc Reviewer</field>
-        <field name="sequence">30</field>
+        <field name="sequence">10</field>
         <field name="privilege_id"
-               ref="privilege_trucalc_internal_role"/>
+               ref="privilege_trucalc_reviewer_authorization"/>
         <field name="implied_ids" eval="[(4, ref('base.group_user'))]"/>
     </record>
 
@@ -127,19 +136,13 @@
         <field name="model_id" ref="model_trucalc_order"/>
         <field name="domain_force">
             [('reviewer_user_id', '=', user.id),
-             ('company_id', 'in', user.company_ids.ids),
              ('status', 'in', ('reviewer_assigned', 'under_review', 'completed'))]
         </field>
         <field name="groups" eval="[(4, ref('group_trucalc_reviewer'))]"/>
-    </record>
-
-    <record id="rule_reviewer_required_partners" model="ir.rule">
-        <field name="name">Reviewer Required Partners</field>
-        <field name="model_id" ref="base.model_res_partner"/>
-        <field name="domain_force">
-            [('id', 'in', user._trucalc_reviewer_partner_ids().ids)]
-        </field>
-        <field name="groups" eval="[(4, ref('group_trucalc_reviewer'))]"/>
+        <field name="perm_read" eval="True"/>
+        <field name="perm_write" eval="False"/>
+        <field name="perm_create" eval="False"/>
+        <field name="perm_unlink" eval="False"/>
     </record>
 
     <record id="rule_bank_company_orders" model="ir.rule">
@@ -201,7 +204,7 @@
         <field name="name">TruCalc Document Company</field>
         <field name="model_id" ref="model_trucalc_document"/>
         <field name="domain_force">[('company_id', 'in', user.company_ids.ids)]</field>
-        <field name="groups" eval="[(4, ref('group_trucalc_admin')), (4, ref('group_trucalc_operations')), (4, ref('group_trucalc_reviewer'))]"/>
+        <field name="groups" eval="[(6, 0, [ref('group_trucalc_admin'), ref('group_trucalc_operations')])]"/>
     </record>
 
     <record id="rule_trucalc_document_event_company" model="ir.rule">
@@ -218,6 +221,20 @@
         <field name="groups" eval="[(4, ref('group_trucalc_admin')), (4, ref('group_trucalc_operations'))]"/>
     </record>
 
+    <record id="rule_vendor_deliverable_admin_company" model="ir.rule">
+        <field name="name">Administrator Vendor Deliverables by Company</field>
+        <field name="model_id" ref="model_trucalc_vendor_deliverable"/>
+        <field name="domain_force">[('company_id', 'in', user.company_ids.ids)]</field>
+        <field name="groups" eval="[(4, ref('group_trucalc_admin'))]"/>
+    </record>
+
+    <record id="rule_vendor_deliverable_operations_company" model="ir.rule">
+        <field name="name">Operations Vendor Deliverables by Company</field>
+        <field name="model_id" ref="model_trucalc_vendor_deliverable"/>
+        <field name="domain_force">[('company_id', 'in', user.company_ids.ids)]</field>
+        <field name="groups" eval="[(4, ref('group_trucalc_operations'))]"/>
+    </record>
+
     <!-- These legacy ACL records must be deleted during upgrade; omitting their
          CSV rows alone would leave the already-installed database rows active. -->
     <delete id="access_trucalc_order_vendor_portal" model="ir.model.access"/>
@@ -226,5 +243,10 @@
     <delete id="access_trucalc_document_bank_requestor" model="ir.model.access"/>
     <delete id="access_trucalc_document_bank_view_only" model="ir.model.access"/>
     <delete id="access_trucalc_bid_vendor_portal" model="ir.model.access"/>
+    <delete id="access_trucalc_document_reviewer" model="ir.model.access"/>
+    <delete id="access_trucalc_vendor_deliverable_reviewer" model="ir.model.access"/>
+    <delete id="rule_reviewer_required_partners" model="ir.rule"/>
+    <delete id="rule_trucalc_document_reviewer_assignment" model="ir.rule"/>
+    <delete id="rule_vendor_deliverable_reviewer_assignment" model="ir.rule"/>
 
 </odoo>

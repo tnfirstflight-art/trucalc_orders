@@ -34,12 +34,15 @@ class TestVendorEngagementResponse(TransactionCase):
 
     @classmethod
     def _user(cls, login, group, vendor=False, bank_company=False):
+        groups = [group]
+        if group == "group_trucalc_reviewer":
+            groups.append("group_trucalc_operations")
         return cls.env["res.users"].with_context(no_reset_password=True).create({
             "name": login,
             "login": login,
             "email": f"{login}@example.test",
             "group_ids": [Command.set([
-                cls.env.ref(f"trucalc_orders.{group}").id
+                cls.env.ref(f"trucalc_orders.{name}").id for name in groups
             ])],
             "trucalc_vendor_id": vendor.id if vendor else False,
             "trucalc_bank_company_id": bank_company.id if bank_company else False,
@@ -201,12 +204,10 @@ class TestVendorEngagementResponse(TransactionCase):
         projection.invalidate_recordset()
         self.assertFalse(projection.can_accept_engagement)
 
-    def test_security_rejects_other_vendor_reviewer_and_direct_crud(self):
+    def test_security_rejects_external_personas_and_direct_crud(self):
         _order, _bid, engagement, projection = self._engaged()
         with self.assertRaises(AccessError):
             projection.with_user(self.other_vendor_user).action_vendor_accept_engagement()
-        with self.assertRaises(AccessError):
-            engagement.with_user(self.reviewer).action_approve_delivery_change()
         with self.assertRaises(AccessError):
             engagement.with_user(self.bank).action_approve_delivery_change()
         with self.assertRaises(AccessError):
@@ -215,10 +216,6 @@ class TestVendorEngagementResponse(TransactionCase):
             self.env["trucalc.vendor.engagement"].with_user(self.admin).create({})
         with self.assertRaises(AccessError):
             self.env["trucalc.vendor.engagement.event"].with_user(self.admin).create({})
-        with self.assertRaises(AccessError):
-            _order.with_user(self.reviewer).write({
-                "engagement_action_required": True,
-            })
 
     def test_reopen_closes_engagement_and_removes_vendor_projection(self):
         order, _bid, engagement, projection = self._engaged()

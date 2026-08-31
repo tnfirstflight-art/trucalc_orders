@@ -73,6 +73,10 @@ class TestBidLifecycle(TransactionCase):
         cls, login, group, vendor=False, extra_group=False, bank_company=False
     ):
         groups = [group.id]
+        if group == cls.reviewer_group:
+            groups.append(cls.env.ref(
+                "trucalc_orders.group_trucalc_operations"
+            ).id)
         if extra_group:
             groups.append(extra_group.id)
         return cls.env["res.users"].with_context(no_reset_password=True).create({
@@ -121,7 +125,7 @@ class TestBidLifecycle(TransactionCase):
             self.env["trucalc.bid.invitation"].with_user(manager).create(
                 {"order_id": order.id, "vendor_id": self.vendor_a.id}
             )
-        for denied in [self.reviewer, self.vendor_user_a, *self.bank_users]:
+        for denied in [self.vendor_user_a, *self.bank_users]:
             with self.assertRaises(AccessError):
                 self._order().with_user(denied).action_bid_requested()
 

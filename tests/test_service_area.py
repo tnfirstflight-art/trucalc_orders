@@ -30,10 +30,13 @@ class TestServiceArea(TransactionCase):
 
     @classmethod
     def _user(cls, login, group, bank=False, vendor=False):
+        groups = [group]
+        if group == "group_trucalc_reviewer":
+            groups.append("group_trucalc_operations")
         return cls.env["res.users"].with_context(no_reset_password=True).create({
             "name": login, "login": login, "email": f"{login}@example.test",
             "group_ids": [Command.set([
-                cls.env.ref(f"trucalc_orders.{group}").id
+                cls.env.ref(f"trucalc_orders.{name}").id for name in groups
             ])],
             "trucalc_bank_company_id": bank.id if bank else False,
             "trucalc_vendor_id": vendor.id if vendor else False,

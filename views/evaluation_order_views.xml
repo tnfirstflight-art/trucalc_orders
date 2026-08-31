@@ -154,7 +154,8 @@
                         <group string="Order Information">
 
                             <field name="requestor_id" readonly="1"/>
-                            <field name="company_id"/>
+                            <field name="create_date" invisible="1"/>
+                            <field name="company_id" readonly="create_date"/>
                             <field name="order_date_display" string="Order Date"/>
 
                             <field name="assigned_vendor_id" readonly="status in ('new', 'accepted', 'declined')"/>
@@ -186,7 +187,7 @@
                             <field name="fee_override" readonly="status in ('new', 'accepted', 'declined')"/>
 
                             <field name="reviewer_user_id"
-                                   groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer"
+                                   groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
                                    readonly="status in ('new', 'accepted', 'declined')"/>
 
                             <field name="status" readonly="1"/>
@@ -196,6 +197,55 @@
                         </group>
 
                     </group>
+
+                    <div name="deliverables_display" class="mb-3">
+                        <field name="current_valuation_id" invisible="1"
+                               groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
+                        <field name="previous_valuation_count" invisible="1"
+                               groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
+                        <div name="valuation_display" class="mb-3"
+                             groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations">
+                            <div class="mb-1">
+                                <strong class="me-1">Valuation:</strong>
+                                <field name="valuation_filename_link" widget="html" nolabel="1" class="oe_inline"/>
+                                <button name="action_view_previous_valuations" type="object"
+                                        string="View Previous Versions" class="btn-link p-0 ms-3"
+                                        invisible="previous_valuation_count == 0"/>
+                            </div>
+                            <div invisible="not current_valuation_id" class="d-flex align-items-center gap-4">
+                                <div class="d-flex align-items-center">
+                                    <span class="text-muted me-1">Submitted Date:</span>
+                                    <field name="valuation_submitted_at" nolabel="1" class="oe_inline"
+                                           options="{'show_time': False, 'numeric': True}"/>
+                                </div>
+                                <div class="d-flex align-items-center">
+                                    <span class="text-muted me-1">Status:</span>
+                                    <field name="valuation_deliverable_status" nolabel="1" class="oe_inline"/>
+                                </div>
+                            </div>
+                        </div>
+
+                        <field name="vendor_invoice_id" invisible="1"
+                               groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
+                        <div name="vendor_invoice_display"
+                             groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations">
+                            <div class="mb-1">
+                                <strong class="me-1">Vendor Invoice:</strong>
+                                <field name="vendor_invoice_filename_link" widget="html" nolabel="1" class="oe_inline"/>
+                            </div>
+                            <div invisible="not vendor_invoice_id" class="d-flex align-items-center gap-4">
+                                <div class="d-flex align-items-center">
+                                    <span class="text-muted me-1">Submitted Date:</span>
+                                    <field name="vendor_invoice_submitted_at" nolabel="1" class="oe_inline"
+                                           options="{'show_time': False, 'numeric': True}"/>
+                                </div>
+                                <div class="d-flex align-items-center">
+                                    <span class="text-muted me-1">Status:</span>
+                                    <field name="vendor_invoice_deliverable_status" nolabel="1" class="oe_inline"/>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
 
                     <group string="Inspection Contact">
                         <field name="inspection_contact_name"/>

@@ -57,11 +57,14 @@ class TestOrderIntake(TransactionCase):
 
     @classmethod
     def _user(cls, login, group_name, bank=False, vendor=False):
+        group_ids = [cls.groups[group_name].id]
+        if group_name == "group_trucalc_reviewer":
+            group_ids.append(cls.groups["group_trucalc_operations"].id)
         return cls.env["res.users"].with_context(no_reset_password=True).create({
             "name": login,
             "login": login,
             "email": "%s@example.test" % login,
-            "group_ids": [Command.set([cls.groups[group_name].id])],
+            "group_ids": [Command.set(group_ids)],
             "trucalc_bank_company_id": bank.id if bank else False,
             "trucalc_vendor_id": vendor.id if vendor else False,
         })
@@ -151,6 +154,53 @@ class TestOrderIntake(TransactionCase):
         due_date = arch.xpath("//field[@name='due_date']")[0]
         self.assertEqual(due_date.get("required"), "1")
 
+    def test_company_is_set_at_creation_and_immutable_afterward(self):
+        other_company = self.env["res.company"].create({
+            "name": "4B2C0 Immutable Other Bank",
+        })
+        order = self.env["trucalc.order"].with_user(self.admin).create({
+            "borrower": "Immutable Company Test",
+            "property_address": "3 Intake Way",
+            "company_id": self.env.company.id,
+            "service_type": "evaluation",
+            "due_date": fields.Date.add(fields.Date.today(), days=14),
+        })
+        self.assertEqual(order.company_id, self.env.company)
+
+        new_form = Form(
+            self.env["trucalc.order"].with_user(self.admin),
+            view="trucalc_orders.view_trucalc_order_form",
+        )
+        new_form.company_id = self.env.company
+        persisted_form = Form(
+            order.with_user(self.admin),
+            view="trucalc_orders.view_trucalc_order_form",
+        )
+        with self.assertRaises(AssertionError):
+            persisted_form.company_id = other_company
+
+        for actor in (self.admin, self.ops):
+            with self.subTest(actor=actor.login), self.assertRaises(AccessError):
+                order.with_user(actor).write({"company_id": other_company.id})
+            self.assertEqual(order.company_id, self.env.company)
+
+        with self.assertRaises(AccessError):
+            order.sudo().write({"company_id": other_company.id})
+        self.assertEqual(order.company_id, self.env.company)
+
+        arch = html.fromstring(
+            self.env.ref("trucalc_orders.view_trucalc_order_form").arch
+        )
+        company_field = arch.xpath(
+            "//group[@string='Order Information']/field[@name='company_id']"
+        )
+        self.assertEqual(len(company_field), 1)
+        self.assertEqual(company_field[0].get("readonly"), "create_date")
+        self.assertEqual(len(arch.xpath(
+            "//group[@string='Order Information']/field"
+            "[@name='create_date'][@invisible='1']"
+        )), 1)
+
     def _assert_no_vendor_lifecycle(self, order):
         self.assertEqual(order.bidding_round, 0)
         self.assertFalse(order.assigned_vendor_id)
@@ -173,7 +223,6 @@ class TestOrderIntake(TransactionCase):
 
     def test_accept_is_role_and_state_protected(self):
         denied = [
-            self.reviewer,
             *self.bank_users,
             self.vendor_user,
             self.portal_user,
@@ -212,7 +261,6 @@ class TestOrderIntake(TransactionCase):
 
     def test_decline_rejects_roles_blank_reason_and_direct_writes(self):
         denied = [
-            self.reviewer,
             *self.bank_users,
             self.vendor_user,
             self.portal_user,
@@ -305,7 +353,7 @@ class TestOrderIntake(TransactionCase):
         for user in (self.admin, self.ops):
             self.assertTrue(model.with_user(user).has_access("create"))
         for user in (
-            self.reviewer, *self.bank_users, self.vendor_user,
+            *self.bank_users, self.vendor_user,
             self.portal_user, self.internal_user,
         ):
             self.assertFalse(model.with_user(user).has_access("create"))

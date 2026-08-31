@@ -29,9 +29,14 @@ class TestVendorBidResponse(TransactionCase):
 
     @classmethod
     def _user(cls, login, group, vendor=False):
+        groups = [group]
+        if group == "group_trucalc_reviewer":
+            groups.append("group_trucalc_operations")
         return cls.env["res.users"].with_context(no_reset_password=True).create({
             "name": login, "login": login, "email": f"{login}@example.test",
-            "group_ids": [Command.set([cls.env.ref(f"trucalc_orders.{group}").id])],
+            "group_ids": [Command.set([
+                cls.env.ref(f"trucalc_orders.{name}").id for name in groups
+            ])],
             "trucalc_vendor_id": vendor.id if vendor else False,
         })
 
@@ -182,7 +187,7 @@ class TestVendorBidResponse(TransactionCase):
         )
         self.assertTrue(bid.is_currently_selectable)
         self.assertTrue(other_bid.is_currently_selectable)
-        for denied in (self.vendor_user_b, self.reviewer):
+        for denied in (self.vendor_user_b,):
             with self.assertRaises(AccessError):
                 bid.with_user(denied).action_select_bid()
         prior_message_ids = set(order.message_ids.ids)

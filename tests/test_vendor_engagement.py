@@ -41,6 +41,10 @@ class TestVendorEngagement(TransactionCase):
         groups = [cls.env.ref(f"trucalc_orders.{group}").id] if group else [
             cls.env.ref("base.group_user").id
         ]
+        if group == "group_trucalc_reviewer":
+            groups.append(cls.env.ref(
+                "trucalc_orders.group_trucalc_operations"
+            ).id)
         return cls.env["res.users"].with_context(no_reset_password=True).create({
             "name": login, "login": login, "email": f"{login}@example.test",
             "group_ids": [Command.set(groups)],
@@ -110,7 +114,7 @@ class TestVendorEngagement(TransactionCase):
                  len(order.message_ids)),
             )
         for user in (
-            self.reviewer, self.bank, self.vendor_user_a, self.generic,
+            self.bank, self.vendor_user_a, self.generic,
         ):
             with self.assertRaises(AccessError):
                 bid.with_user(user).action_select_bid()

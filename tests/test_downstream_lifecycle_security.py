@@ -14,10 +14,15 @@ class TestDownstreamLifecycleSecurity(TransactionCase):
         cls.bank = cls.env["res.company"].create({"name": "4D Bank"})
         cls.admin = cls._user("admin", "group_trucalc_admin")
         cls.ops = cls._user("ops", "group_trucalc_operations")
-        cls.reviewer = cls._user("reviewer", "group_trucalc_reviewer")
-        cls.other_reviewer = cls._user("other-reviewer", "group_trucalc_reviewer")
+        reviewer_groups = ["group_trucalc_operations", "group_trucalc_reviewer"]
+        cls.reviewer = cls._user(
+            "reviewer", reviewer_groups, companies=cls.other_company,
+        )
+        cls.other_reviewer = cls._user(
+            "other-reviewer", reviewer_groups, companies=cls.other_company,
+        )
         cls.cross_company_reviewer = cls._user(
-            "cross-company-reviewer", "group_trucalc_reviewer",
+            "cross-company-reviewer", reviewer_groups,
             companies=cls.other_company,
         )
         cls.bank_admin = cls._user(
@@ -42,6 +47,7 @@ class TestDownstreamLifecycleSecurity(TransactionCase):
     @classmethod
     def _user(cls, suffix, group, bank=False, vendor=False, companies=False):
         companies = companies or cls.company
+        groups = group if isinstance(group, (list, tuple)) else [group]
         return cls.env["res.users"].with_context(no_reset_password=True).create({
             "name": "4D %s" % suffix,
             "login": "4d-%s@example.test" % suffix,
@@ -49,7 +55,8 @@ class TestDownstreamLifecycleSecurity(TransactionCase):
             "company_id": companies.id,
             "company_ids": [Command.set(companies.ids)],
             "group_ids": [Command.set([
-                cls.env.ref("trucalc_orders.%s" % group).id,
+                cls.env.ref("trucalc_orders.%s" % group_name).id
+                for group_name in groups
             ])],
             "trucalc_bank_company_id": bank.id if bank else False,
             "trucalc_vendor_id": vendor.id if vendor else False,
@@ -138,113 +145,178 @@ class TestDownstreamLifecycleSecurity(TransactionCase):
             self.assertEqual(order.status, "report_received")
             self.assertFalse(order.lifecycle_event_ids)
 
-    def test_reviewer_identity_is_strict_and_company_compatible(self):
+    def test_reviewer_identity_is_strict_and_allows_cross_company_assignment(self):
         order = self._order()
         for invalid in (
             self.admin, self.bank_admin, self.vendor_user,
-            self.cross_company_reviewer,
         ):
             with self.assertRaises(ValidationError), self.cr.savepoint():
                 order.with_user(self.admin).write({"reviewer_user_id": invalid.id})
+        with self.assertRaises(ValidationError), self.cr.savepoint():
+            self._user("reviewer-only", "group_trucalc_reviewer")
         self.reviewer.active = False
         with self.assertRaises(ValidationError), self.cr.savepoint():
             order.with_user(self.admin).write({"reviewer_user_id": self.reviewer.id})
         self.reviewer.active = True
-        order.with_user(self.admin).write({"reviewer_user_id": self.reviewer.id})
-        self.assertEqual(order.reviewer_user_id, self.reviewer)
+        order.with_user(self.admin).write({
+            "reviewer_user_id": self.cross_company_reviewer.id,
+        })
+        order.with_user(self.admin)._controlled_lifecycle_write({
+            "status": "report_received",
+        })
+        order.with_user(self.admin).action_assign_reviewer()
+        self.assertEqual(order.reviewer_user_id, self.cross_company_reviewer)
+        self.assertEqual(order.status, "reviewer_assigned")
+        self.assertNotIn(order.company_id, self.cross_company_reviewer.company_ids)
+
+    def test_reviewer_authorization_is_an_independent_access_right(self):
+        self.assertEqual(
+            self.env.ref("trucalc_orders.group_trucalc_operations").name,
+            "Operations",
+        )
+        self.assertEqual(
+            self.env.ref("trucalc_orders.group_trucalc_admin").name,
+            "Administrator",
+        )
+        reviewer_group = self.env.ref("trucalc_orders.group_trucalc_reviewer")
+        self.assertEqual(reviewer_group.name, "TruCalc Reviewer")
+        role_privilege = self.env.ref(
+            "trucalc_orders.privilege_trucalc_internal_role"
+        )
+        reviewer_privilege = self.env.ref(
+            "trucalc_orders.privilege_trucalc_reviewer_authorization"
+        )
+        self.assertEqual(reviewer_privilege.name, "Reviewer Authorization")
+        self.assertEqual(reviewer_group.privilege_id, reviewer_privilege)
+        self.assertNotEqual(reviewer_group.privilege_id, role_privilege)
+        hierarchy = self.env["res.groups"]._get_view_group_hierarchy()
+        category = next(item for item in hierarchy["categories"] if item["id"] == (
+            self.env.ref(
+                "trucalc_orders.module_category_trucalc_evaluations"
+            ).id
+        ))
+        self.assertIn(role_privilege.id, category["privilege_ids"])
+        self.assertIn(reviewer_privilege.id, category["privilege_ids"])
+
+    def test_standard_odoo_role_is_clearly_labeled(self):
+        role_field = self.env["res.users"]._fields["role"]
+        self.assertEqual(
+            role_field.selection,
+            [("group_user", "User"), ("group_system", "Administrator")],
+        )
+        combined_arch = etree.fromstring(
+            self.env.ref("base.view_users_form").get_combined_arch()
+        )
+        role_nodes = combined_arch.xpath(
+            "//page[@name='access_rights']//field[@name='role']"
+        )
+        self.assertEqual(len(role_nodes), 1)
+        self.assertEqual(role_nodes[0].get("string"), "Odoo Access Level")
 
     def test_reviewer_reads_only_own_eligible_status_orders(self):
-        assigned = self._ready_for_assignment()
+        assigned = self._ready_for_assignment(self.cross_company_reviewer)
         assigned.with_user(self.admin).action_assign_reviewer()
         unassigned = self._ready_for_assignment(self.other_reviewer)
         unassigned.with_user(self.admin).action_assign_reviewer()
         new_order = self._order()
-        reviewer_model = self.env["trucalc.order"].with_user(self.reviewer)
+        reviewer_model = self.env["trucalc.order"].with_user(
+            self.cross_company_reviewer
+        )
         self.assertEqual(reviewer_model.search([("id", "in", (
             assigned.id, unassigned.id, new_order.id,
-        ))]), assigned.with_user(self.reviewer))
+        ))]), assigned.with_user(self.cross_company_reviewer))
         with self.assertRaises(AccessError):
-            unassigned.with_user(self.reviewer).read(["status"])
-        self.assertFalse(assigned.with_user(self.reviewer).has_access("write"))
+            unassigned.with_user(self.cross_company_reviewer).read(["status"])
+        self.assertFalse(
+            assigned.with_user(self.cross_company_reviewer).has_access("write")
+        )
 
     def test_reviewer_home_action_and_restricted_application_shell(self):
-        home_action = self.env.ref("trucalc_orders.action_trucalc_orders")
-        self.assertEqual(self.reviewer.action_id.id, home_action.id)
+        self.assertFalse(self.reviewer.action_id)
         self.assertFalse(self.admin.action_id)
         self.assertFalse(self.ops.action_id)
 
-        menu_model = self.env["ir.ui.menu"].with_user(self.reviewer)
-        loaded = menu_model.load_menus(False)
-        restricted_xmlids = (
+        reviewer_loaded = self.env["ir.ui.menu"].with_user(
+            self.reviewer
+        ).load_menus(False)
+        operations_loaded = self.env["ir.ui.menu"].with_user(
+            self.ops
+        ).load_menus(False)
+        normal_internal_xmlids = (
             "mail.menu_root_discuss",
             "project_todo.menu_todo_todos",
             "contacts.menu_contacts",
             "base.menu_management",
         )
-        for xmlid in restricted_xmlids:
+        for xmlid in normal_internal_xmlids:
             menu = self.env.ref(xmlid, raise_if_not_found=False)
             if menu:
-                self.assertNotIn(menu.id, loaded)
-        self.assertIn(self.env.ref("trucalc_orders.menu_trucalc_root").id, loaded)
+                self.assertEqual(
+                    menu.id in reviewer_loaded,
+                    menu.id in operations_loaded,
+                )
+        self.assertIn(
+            self.env.ref("trucalc_orders.menu_trucalc_root").id,
+            reviewer_loaded,
+        )
 
-        for user in (self.admin, self.ops):
-            loaded = self.env["ir.ui.menu"].with_user(user).load_menus(False)
-            for xmlid in restricted_xmlids:
-                menu = self.env.ref(xmlid, raise_if_not_found=False)
-                if menu and menu.with_user(user)._filter_visible_menus():
-                    self.assertIn(menu.id, loaded)
-
-    def test_existing_reviewer_home_action_is_corrected_idempotently(self):
+    def test_additive_reviewer_does_not_override_normal_home_action(self):
         home_action = self.env.ref("trucalc_orders.action_trucalc_orders")
         self.reviewer.sudo().with_context(trucalc_home_action_sync=True).write({
-            "action_id": False,
+            "action_id": home_action.id,
         })
-        self.assertFalse(self.reviewer.action_id)
-        self.reviewer._trucalc_sync_home_action()
         self.assertEqual(self.reviewer.action_id.id, home_action.id)
         self.reviewer._trucalc_sync_home_action()
         self.assertEqual(self.reviewer.action_id.id, home_action.id)
 
-    def test_reviewer_partner_rule_is_an_effective_allowlist(self):
-        order = self._ready_for_assignment()
-        order.with_user(self.admin).action_assign_reviewer()
-        order.with_user(self.admin).message_post(body="Reviewer-visible audit context")
-
-        allowed = (
-            self.reviewer.partner_id
-            | self.env.ref("base.partner_root")
-            | self.company.partner_id
-            | self.admin.partner_id
-        )
-        unrelated = (
-            self.other_reviewer.partner_id
+    def test_reviewer_authorization_does_not_change_internal_partner_access(self):
+        reviewer_group = self.env.ref("trucalc_orders.group_trucalc_reviewer")
+        partners = (
+            self.admin.partner_id
+            | self.ops.partner_id
+            | self.reviewer.partner_id
+            | self.other_reviewer.partner_id
             | self.bank_admin.partner_id
             | self.bank.partner_id
             | self.vendor_user.partner_id
+            | self.company.partner_id
             | self.other_company.partner_id
         )
-        partners = self.env["res.partner"].with_user(
-            self.reviewer
-        ).with_context(active_test=False)
-        visible = partners.search([("id", "in", (allowed | unrelated).ids)])
-        self.assertEqual(visible, allowed.with_user(self.reviewer))
-        for partner in unrelated:
-            with self.assertRaises(AccessError):
-                partner.with_user(self.reviewer).read(["name"])
 
-        values = order.with_user(self.reviewer).read([
-            "order_number", "company_id", "requestor_id", "reviewer_user_id",
-        ])[0]
-        self.assertEqual(values["company_id"][0], self.company.id)
-        self.assertEqual(values["requestor_id"][0], self.admin.id)
-        self.assertEqual(values["reviewer_user_id"][0], self.reviewer.id)
-        messages = order.message_ids.with_user(self.reviewer).read(["author_id"])
-        self.assertTrue(messages)
-        self.assertIn(self.admin.partner_id.id, {
-            value["author_id"][0] for value in messages if value["author_id"]
-        })
+        for user in (self.admin, self.ops):
+            partner_model = self.env["res.partner"].with_user(
+                user
+            ).with_context(active_test=False)
+            visible_before = partner_model.search([("id", "in", partners.ids)])
+            values_before = visible_before.read(["name"])
 
-    def test_reviewer_collaborates_on_assigned_readonly_order(self):
+            # This reproduces the Access Rights operation that previously made
+            # Discuss re-evaluate channel partners through the Reviewer rule.
+            user.with_context(no_reset_password=True).write({
+                "group_ids": [Command.link(reviewer_group.id)],
+            })
+            self.assertTrue(user.has_group(
+                "trucalc_orders.group_trucalc_reviewer"
+            ))
+            visible_with_reviewer = partner_model.search([
+                ("id", "in", partners.ids),
+            ])
+            self.assertEqual(visible_with_reviewer, visible_before)
+            self.assertEqual(visible_with_reviewer.read(["name"]), values_before)
+
+            user.with_context(no_reset_password=True).write({
+                "group_ids": [Command.unlink(reviewer_group.id)],
+            })
+            visible_after = partner_model.search([("id", "in", partners.ids)])
+            self.assertEqual(visible_after, visible_before)
+            self.assertEqual(visible_after.read(["name"]), values_before)
+
+        self.assertFalse(self.env.ref(
+            "trucalc_orders.rule_reviewer_required_partners",
+            raise_if_not_found=False,
+        ))
+
+    def test_reviewer_collaborates_on_assigned_order_without_record_write_access(self):
         order = self._ready_for_assignment()
         order.with_user(self.admin).action_assign_reviewer()
         reviewer_order = order.with_user(self.reviewer)

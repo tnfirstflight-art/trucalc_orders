@@ -65,9 +65,12 @@ class TestVendorSolicitation(TransactionCase):
 
     @classmethod
     def _user(cls, login, group_name, bank=False, vendor=False):
+        group_ids = [cls.groups[group_name].id]
+        if group_name == "group_trucalc_reviewer":
+            group_ids.append(cls.groups["group_trucalc_operations"].id)
         return cls.env["res.users"].with_context(no_reset_password=True).create({
             "name": login, "login": login, "email": "%s@example.test" % login,
-            "group_ids": [Command.set([cls.groups[group_name].id])],
+            "group_ids": [Command.set(group_ids)],
             "trucalc_bank_company_id": bank.id if bank else False,
             "trucalc_vendor_id": vendor.id if vendor else False,
         })
@@ -307,7 +310,7 @@ class TestVendorSolicitation(TransactionCase):
             ]))
 
     def test_roles_state_deadline_and_eligibility_are_revalidated(self):
-        denied = [self.reviewer, *self.bank_users,
+        denied = [*self.bank_users,
                   self.vendor_user_a, self.vendor_user_b]
         for user in denied:
             with self.assertRaises(AccessError):
@@ -463,7 +466,7 @@ class TestVendorSolicitation(TransactionCase):
         )
         line_a.selected = False
         self.assertEqual(wizard.line_ids.filtered("selected").mapped("vendor_id"), self.vendor_b)
-        for user in (self.reviewer, *self.bank_users,
+        for user in (*self.bank_users,
                      self.vendor_user_a, self.vendor_user_b):
             self.assertFalse(self.env["trucalc.bid.request.wizard"].with_user(
                 user

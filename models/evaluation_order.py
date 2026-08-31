@@ -30,11 +30,13 @@ class EvaluationOrder(models.Model):
         )
         if message_operation == "create" and self.env.user._trucalc_has_bank_role():
             operations.update(dict.fromkeys(self, None))
-        elif (
-            message_operation == "create"
-            and self.env.user._trucalc_is_restricted_internal()
+        elif message_operation == "create" and self.env.user.has_group(
+            "trucalc_orders.group_trucalc_reviewer"
         ):
-            operations.update(dict.fromkeys(self._filtered_access("read"), "read"))
+            reviewer_readonly = (
+                self._filtered_access("read") - self._filtered_access("write")
+            )
+            operations.update(dict.fromkeys(reviewer_readonly, "read"))
         return operations
 
     order_number = fields.Char(
@@ -390,6 +392,78 @@ class EvaluationOrder(models.Model):
         "trucalc.order.lifecycle.event", "order_id",
         string="Lifecycle Events", readonly=True, copy=False,
     )
+
+    current_valuation_id = fields.Many2one(
+        "trucalc.vendor.deliverable", compute="_compute_vendor_deliverables",
+        compute_sudo=True, readonly=True,
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+    )
+    vendor_invoice_id = fields.Many2one(
+        "trucalc.vendor.deliverable", compute="_compute_vendor_deliverables",
+        compute_sudo=True, readonly=True,
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+    )
+    valuation_filename_link = fields.Html(
+        compute="_compute_vendor_deliverables", compute_sudo=True, sanitize=False,
+        readonly=True, string="Valuation",
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+    )
+    vendor_invoice_filename_link = fields.Html(
+        compute="_compute_vendor_deliverables", compute_sudo=True, sanitize=False,
+        readonly=True, string="Vendor Invoice",
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+    )
+    previous_valuation_count = fields.Integer(
+        compute="_compute_vendor_deliverables", compute_sudo=True, readonly=True,
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+    )
+    valuation_submitted_at = fields.Datetime(
+        compute="_compute_vendor_deliverables", compute_sudo=True, readonly=True,
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+    )
+    valuation_deliverable_status = fields.Selection(
+        [("submitted", "Submitted")], compute="_compute_vendor_deliverables",
+        compute_sudo=True, readonly=True, string="Valuation Status",
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+    )
+    vendor_invoice_submitted_at = fields.Datetime(
+        compute="_compute_vendor_deliverables", compute_sudo=True, readonly=True,
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+    )
+    vendor_invoice_deliverable_status = fields.Selection(
+        [("submitted", "Submitted")], compute="_compute_vendor_deliverables",
+        compute_sudo=True, readonly=True, string="Vendor Invoice Status",
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+    )
+
+    def _compute_vendor_deliverables(self):
+        Deliverable = self.env["trucalc.vendor.deliverable"].sudo()
+        grouped = {}
+        if self.ids:
+            for deliverable in Deliverable.search([
+                ("order_id", "in", self.ids),
+            ], order="version desc, id desc"):
+                grouped.setdefault(deliverable.order_id.id, []).append(deliverable)
+        for order in self:
+            deliverables = grouped.get(order.id, [])
+            valuation = next((item for item in deliverables if (
+                item.artifact_type == "valuation" and item.is_current
+            )), Deliverable.browse())
+            invoice = next((item for item in deliverables if (
+                item.artifact_type == "vendor_invoice"
+            )), Deliverable.browse())
+            order.current_valuation_id = valuation
+            order.vendor_invoice_id = invoice
+            order.valuation_filename_link = valuation.filename_link if valuation else False
+            order.vendor_invoice_filename_link = invoice.filename_link if invoice else False
+            order.previous_valuation_count = len([
+                item for item in deliverables
+                if item.artifact_type == "valuation" and not item.is_current
+            ])
+            order.valuation_submitted_at = valuation.submitted_at if valuation else False
+            order.valuation_deliverable_status = valuation.status if valuation else False
+            order.vendor_invoice_submitted_at = invoice.submitted_at if invoice else False
+            order.vendor_invoice_deliverable_status = invoice.status if invoice else False
 
     invitation_ids = fields.One2many(
         "trucalc.bid.invitation",
@@ -845,6 +919,12 @@ class EvaluationOrder(models.Model):
         self.invalidate_recordset()
 
     def write(self, vals):
+        if "company_id" in vals and any(
+            order.company_id.id != vals["company_id"] for order in self
+        ):
+            raise AccessError(_(
+                "The Bank/Client Company is immutable after Order creation."
+            ))
         if "vendor_authorization_ids" in vals:
             raise AccessError(_("Vendor Order authorization is server-maintained."))
         if "decline_reason" in vals:
@@ -881,18 +961,23 @@ class EvaluationOrder(models.Model):
         return super(EvaluationOrder, self).write(vals)
 
     @api.private
-    def _transition_status(self, from_status, to_status, event_type, values=None):
+    def _transition_status(
+        self, from_status, to_status, event_type, values=None, deliverable=False,
+        actor=False,
+    ):
         self.ensure_one()
-        self._lock_for_bid_lifecycle()
-        if self.status != from_status:
+        actor = actor or self.env.user
+        order = self.sudo()
+        order._lock_for_bid_lifecycle()
+        if order.status != from_status:
             raise ValidationError(_(
                 "This lifecycle action is no longer valid for the current Order state."
             ))
-        actor = self.env.user
         transition_values = dict(values or {}, status=to_status)
-        super(EvaluationOrder, self).write(transition_values)
+        super(EvaluationOrder, order).write(transition_values)
         self.env["trucalc.order.lifecycle.event"]._log_event(
-            self, event_type, from_status, to_status, actor,
+            order, event_type, from_status, to_status, actor,
+            deliverable=deliverable,
         )
         return True
 
@@ -1336,6 +1421,37 @@ class EvaluationOrder(models.Model):
             "Report receipt is unavailable until the controlled report-delivery workflow."
         ))
 
+    def action_view_previous_valuations(self):
+        self.ensure_one()
+        self.check_access("read")
+        user = self.env.user
+        if not (
+            user.has_group("trucalc_orders.group_trucalc_admin")
+            or user.has_group("trucalc_orders.group_trucalc_operations")
+        ):
+            raise AccessError(_("Valuation history access is not authorized."))
+        return {
+            "type": "ir.actions.act_window",
+            "name": _("Previous Valuation Versions"),
+            "res_model": "trucalc.vendor.deliverable",
+            "view_mode": "list,form",
+            "views": [
+                (self.env.ref(
+                    "trucalc_orders.view_trucalc_vendor_deliverable_history_list"
+                ).id, "list"),
+                (self.env.ref(
+                    "trucalc_orders.view_trucalc_vendor_deliverable_history_form"
+                ).id, "form"),
+            ],
+            "domain": [
+                ("order_id", "=", self.id),
+                ("artifact_type", "=", "valuation"),
+                ("is_current", "=", False),
+            ],
+            "target": "new",
+            "context": {"create": False, "edit": False, "delete": False},
+        }
+
     def action_reopen_bidding(self):
         self._require_bid_manager()
         self.ensure_one()
@@ -1423,10 +1539,10 @@ class EvaluationOrder(models.Model):
                     "The selected Reviewer must be active and have a Review standard fee."
                 ))
 
-    @api.constrains("reviewer_user_id", "company_id")
+    @api.constrains("reviewer_user_id")
     def _check_reviewer_user(self):
         for order in self.filtered("reviewer_user_id"):
-            order.reviewer_user_id._trucalc_reviewer_identity(order.company_id)
+            order.reviewer_user_id._trucalc_reviewer_identity()
 
     def action_assign_reviewer(self):
         self._require_intake_manager()
@@ -1438,7 +1554,7 @@ class EvaluationOrder(models.Model):
             ))
         if not self.reviewer_user_id:
             raise ValidationError(_("Select an internal Reviewer before assignment."))
-        self.reviewer_user_id._trucalc_reviewer_identity(self.company_id)
+        self.reviewer_user_id._trucalc_reviewer_identity()
         return self._transition_status(
             "report_received", "reviewer_assigned", "reviewer_assigned",
             {"reviewer_id": False, "review_fee": 0.0},
