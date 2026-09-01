@@ -164,8 +164,11 @@ class TestBankOrderPortal(HttpCase):
             self.bank_admin, self.bank_requestor, self.bank_viewer,
         ):
             self._login(user)
-            self.assertIn("My TruCalc Requests", self.url_open("/my").text)
+            home = self.url_open("/my").text
+            self.assertIn("My TruCalc Requests", home)
+            self.assertIn("o_trucalc_bank_portal", home)
             listing = self.url_open("/my/trucalc/bank/orders").text
+            self.assertIn("o_trucalc_bank_portal", listing)
             self.assertIn(self.order_a.order_number, listing)
             self.assertIn("Approved Bank Borrower", listing)
             self.assertIn("101 Bank A Way", listing)
@@ -174,6 +177,7 @@ class TestBankOrderPortal(HttpCase):
             detail = self.url_open(
                 "/my/trucalc/bank/orders/%s/documents" % self.order_a.order_number
             ).text
+            self.assertIn("o_trucalc_bank_portal", detail)
             self.assertIn("Approved Bank Borrower", detail)
             self.assertIn("101 Bank A Way", detail)
             self.assertEqual(
@@ -190,6 +194,7 @@ class TestBankOrderPortal(HttpCase):
             self.assertIn("New Request", listing)
             form = self.url_open("/my/trucalc/bank/orders/new")
             self.assertEqual(form.status_code, 200)
+            self.assertIn("o_trucalc_bank_portal", form.text)
             self.assertIn("Inspection Contact Person", form.text)
             self.assertIn("Loan Number", form.text)
             self.assertIn("Select a State", form.text)

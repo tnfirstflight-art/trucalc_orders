@@ -127,7 +127,9 @@ class TestVendorOrderPortal(HttpCase):
         self._login(self.vendor_user_a)
         home = self.url_open("/my").text
         self.assertIn("My TruCalc Orders", home)
+        self.assertNotIn("o_trucalc_bank_portal", home)
         listing_a = self.url_open("/my/trucalc/orders").text
+        self.assertNotIn("o_trucalc_bank_portal", listing_a)
         self.assertIn(order_a.order_number, listing_a)
         self.assertIn("411 Vendor A Street", listing_a)
         self.assertIn("Forbidden Borrower 411 Vendor A Street", listing_a)
@@ -136,6 +138,7 @@ class TestVendorOrderPortal(HttpCase):
         detail_a = self.url_open(
             f"/my/trucalc/orders/{order_a.order_number}"
         ).text
+        self.assertNotIn("o_trucalc_bank_portal", detail_a)
         self.assertIn(order_a.order_number, detail_a)
         self.assertIn("411 Vendor A Street", detail_a)
         self.assertIn("Forbidden Borrower 411 Vendor A Street", detail_a)

@@ -35,6 +35,7 @@
         'web.assets_frontend': [
             'trucalc_orders/static/src/js/inspection_phone_format.js',
             'trucalc_orders/static/src/js/bank_draft_service_area.js',
+            'trucalc_orders/static/src/scss/bank_portal.scss',
         ],
         'web.assets_backend': [
             'trucalc_orders/static/src/js/inspection_phone_format.js',

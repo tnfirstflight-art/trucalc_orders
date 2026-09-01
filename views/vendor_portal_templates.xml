@@ -15,13 +15,15 @@
                 <t t-set="url" t-value="'/my/trucalc/orders'"/>
                 <t t-set="config_card" t-value="True"/>
             </t>
-            <t t-if="request.env.user.has_group('trucalc_orders.group_bank_admin') or request.env.user.has_group('trucalc_orders.group_bank_requestor') or request.env.user.has_group('trucalc_orders.group_bank_view_only')"
-               t-call="portal.portal_docs_entry">
-                <t t-set="title">My TruCalc Requests</t>
-                <t t-set="text">View your Bank's authorized TruCalc requests</t>
-                <t t-set="url" t-value="'/my/trucalc/bank/orders'"/>
-                <t t-set="config_card" t-value="True"/>
-            </t>
+            <div t-if="request.env.user.has_group('trucalc_orders.group_bank_admin') or request.env.user.has_group('trucalc_orders.group_bank_requestor') or request.env.user.has_group('trucalc_orders.group_bank_view_only')"
+                 class="o_trucalc_bank_portal">
+                <t t-call="portal.portal_docs_entry">
+                    <t t-set="title">My TruCalc Requests</t>
+                    <t t-set="text">View your Bank's authorized TruCalc requests</t>
+                    <t t-set="url" t-value="'/my/trucalc/bank/orders'"/>
+                    <t t-set="config_card" t-value="True"/>
+                </t>
+            </div>
         </div>
     </template>
 
@@ -533,6 +535,7 @@
 
     <template id="portal_bank_orders" name="Bank TruCalc Orders">
         <t t-call="portal.portal_layout">
+            <div class="o_trucalc_bank_portal">
             <t t-set="breadcrumbs_searchbar" t-value="True"/>
             <t t-call="portal.portal_searchbar">
                 <t t-set="title">My TruCalc Requests</t>
@@ -573,11 +576,13 @@
             <div t-if="pager" class="d-flex justify-content-center mt-3">
                 <t t-call="portal.pager"/>
             </div>
+            </div>
         </t>
     </template>
 
     <template id="portal_bank_order_new" name="New Bank TruCalc Request">
         <t t-call="portal.portal_layout">
+            <div class="o_trucalc_bank_portal">
             <h2>Create TruCalc Draft</h2>
             <div t-if="submission_error" class="alert alert-danger" role="alert">
                 <t t-out="submission_error"/>
@@ -587,6 +592,7 @@
                 but an active State, County, and Service Type will be required before Send.
             </div>
             <t t-call="trucalc_orders.portal_bank_draft_form"/>
+            </div>
         </t>
     </template>
 
@@ -631,6 +637,7 @@
 
     <template id="portal_bank_documents" name="Bank TruCalc Documents">
         <t t-call="portal.portal_layout">
+            <div class="o_trucalc_bank_portal">
             <div class="d-flex justify-content-between align-items-center mb-3">
                 <h2><t t-if="order.status == 'draft'">TruCalc Draft</t><t t-else="">TruCalc Request</t> <t t-out="order.order_number"/></h2>
                 <a href="/my/trucalc/bank/orders" class="btn btn-outline-secondary">Back to My TruCalc Requests</a>
@@ -739,6 +746,7 @@
                         <tr t-if="not documents"><td colspan="5" class="text-muted">No supporting documents.</td></tr>
                     </tbody>
                 </table>
+            </div>
             </div>
         </t>
     </template>
