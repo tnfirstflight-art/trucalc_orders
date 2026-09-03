@@ -417,17 +417,19 @@ class TestVendorDeliverables(TransactionCase):
         with self.assertRaises(AccessError):
             invoice.with_user(self.bank)._authorize_download(self.bank)
 
-        order.with_user(self.admin).write({"reviewer_user_id": self.reviewer.id})
+        order.with_user(self.admin)._controlled_lifecycle_write({"reviewer_user_id": self.reviewer.id})
         order.with_user(self.admin).action_assign_reviewer()
-        self.assertFalse(valuation.with_user(self.reviewer).has_access("read"))
+        self.assertTrue(valuation.with_user(self.reviewer).has_access("read"))
         self.assertFalse(invoice.with_user(self.reviewer).has_access("read"))
         self.assertFalse(valuation.with_user(self.other_reviewer).has_access("read"))
-        with self.assertRaises(AccessError):
-            valuation.with_user(self.reviewer)._authorize_download(self.reviewer)
+        self.assertEqual(
+            valuation.with_user(self.reviewer)._authorize_download(self.reviewer),
+            valuation,
+        )
         with self.assertRaises(AccessError):
             invoice.with_user(self.reviewer)._authorize_download(self.reviewer)
-        with self.assertRaises(AccessError):
-            order.with_user(self.reviewer).action_start_review()
+        order.with_user(self.reviewer).action_start_review()
+        self.assertEqual(order.status, "under_review")
 
         self.operations_reviewer.sudo().write({
             "group_ids": [Command.unlink(self.env.ref(
@@ -534,6 +536,10 @@ class TestVendorDeliverablePortal(HttpCase):
     def setUpClass(cls):
         super().setUpClass()
         cls.admin = cls._user("4d2-http-admin", "group_trucalc_admin")
+        cls.reviewer = cls._user(
+            "4d3-http-reviewer",
+            ["group_trucalc_operations", "group_trucalc_reviewer"],
+        )
         cls.bank = cls._user(
             "4d2-http-bank", "group_bank_admin", bank=cls.env.company,
         )
@@ -554,11 +560,13 @@ class TestVendorDeliverablePortal(HttpCase):
 
     @classmethod
     def _user(cls, login, group, vendor=False, bank=False):
+        groups = group if isinstance(group, (list, tuple)) else [group]
         return cls.env["res.users"].with_context(no_reset_password=True).create({
             "name": login, "login": login, "email": f"{login}@example.test",
             "password": cls.password,
             "group_ids": [Command.set([
-                cls.env.ref(f"trucalc_orders.{group}").id,
+                cls.env.ref(f"trucalc_orders.{group_name}").id
+                for group_name in groups
             ])],
             "trucalc_vendor_id": vendor.id if vendor else False,
             "trucalc_bank_company_id": bank.id if bank else False,
@@ -726,3 +734,30 @@ class TestVendorDeliverablePortal(HttpCase):
         self.assertEqual(self.url_open(
             f"/trucalc/deliverables/{deliverable.id}/download"
         ).status_code, 404)
+
+    def test_bank_release_requires_exact_current_approval(self):
+        order = self._engaged()
+        self._upload(
+            self.vendor_user, order, "valuation", "Approved Valuation.pdf",
+            b"%PDF-1.7\napproved",
+        )
+        valuation = self.env["trucalc.vendor.deliverable"].sudo().search([
+            ("order_id", "=", order.id), ("artifact_type", "=", "valuation"),
+        ])
+        bank_url = (
+            f"/my/trucalc/bank/orders/{order.order_number}/valuation/"
+            f"{valuation.id}/download"
+        )
+        self._login(self.bank)
+        self.assertEqual(self.url_open(bank_url).status_code, 404)
+        order.with_user(self.admin).action_assign_reviewer(self.reviewer)
+        order.with_user(self.reviewer).action_start_review()
+        order.with_user(self.reviewer).action_approve_valuation(valuation)
+        self._login(self.bank)
+        page = self.url_open(
+            f"/my/trucalc/bank/orders/{order.order_number}/documents"
+        ).text
+        self.assertIn("Approved Valuation.pdf", page)
+        response = self.url_open(bank_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b"%PDF-1.7\napproved")

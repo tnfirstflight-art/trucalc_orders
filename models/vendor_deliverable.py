@@ -288,6 +288,17 @@ class TruCalcVendorDeliverable(models.Model):
             if deliverable not in allowed:
                 raise AccessError(_("Vendor deliverable download is not authorized."))
             return deliverable
+        if actor.has_group("trucalc_orders.group_trucalc_reviewer"):
+            actor._trucalc_reviewer_identity()
+            if (
+                deliverable.artifact_type == "valuation"
+                and deliverable.order_id.reviewer_user_id == actor
+                and deliverable.order_id.status in (
+                    "reviewer_assigned", "under_review",
+                )
+            ):
+                deliverable.with_user(actor).check_access("read")
+                return deliverable
         if actor.has_group("trucalc_orders.group_trucalc_admin") or actor.has_group(
             "trucalc_orders.group_trucalc_operations"
         ):

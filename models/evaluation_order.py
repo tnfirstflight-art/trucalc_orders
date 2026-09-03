@@ -370,6 +370,14 @@ class EvaluationOrder(models.Model):
         tracking=True,
         domain="[('active', '=', True), ('share', '=', False)]",
     )
+    valuation_approved = fields.Boolean(
+        compute="_compute_vendor_deliverables", compute_sudo=True, readonly=True,
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer",
+    )
+    valuation_approved_at = fields.Datetime(
+        compute="_compute_vendor_deliverables", compute_sudo=True, readonly=True,
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer",
+    )
 
     review_fee = fields.Float(
         string="Review Fee",
@@ -396,7 +404,7 @@ class EvaluationOrder(models.Model):
     current_valuation_id = fields.Many2one(
         "trucalc.vendor.deliverable", compute="_compute_vendor_deliverables",
         compute_sudo=True, readonly=True,
-        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer",
     )
     vendor_invoice_id = fields.Many2one(
         "trucalc.vendor.deliverable", compute="_compute_vendor_deliverables",
@@ -406,7 +414,7 @@ class EvaluationOrder(models.Model):
     valuation_filename_link = fields.Html(
         compute="_compute_vendor_deliverables", compute_sudo=True, sanitize=False,
         readonly=True, string="Valuation",
-        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer",
     )
     vendor_invoice_filename_link = fields.Html(
         compute="_compute_vendor_deliverables", compute_sudo=True, sanitize=False,
@@ -415,28 +423,28 @@ class EvaluationOrder(models.Model):
     )
     previous_valuation_count = fields.Integer(
         compute="_compute_vendor_deliverables", compute_sudo=True, readonly=True,
-        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer",
     )
     valuation_submitted_at = fields.Datetime(
         compute="_compute_vendor_deliverables", compute_sudo=True, readonly=True,
-        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer",
     )
     valuation_deliverable_status = fields.Selection(
         [("submitted", "Submitted")], compute="_compute_vendor_deliverables",
         compute_sudo=True, readonly=True, string="Valuation Status",
-        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer",
     )
     valuation_version = fields.Integer(
         compute="_compute_vendor_deliverables", compute_sudo=True, readonly=True,
-        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer",
     )
     valuation_revision_requested = fields.Boolean(
         compute="_compute_vendor_deliverables", compute_sudo=True, readonly=True,
-        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer",
     )
     valuation_revision_instructions = fields.Text(
         compute="_compute_vendor_deliverables", compute_sudo=True, readonly=True,
-        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer",
     )
     vendor_invoice_submitted_at = fields.Datetime(
         compute="_compute_vendor_deliverables", compute_sudo=True, readonly=True,
@@ -485,6 +493,13 @@ class EvaluationOrder(models.Model):
                 revision_request.vendor_revision_instructions
                 if revision_request else False
             )
+            approval = self.env[
+                "trucalc.order.lifecycle.event"
+            ]._valuation_approval(valuation) if valuation else self.env[
+                "trucalc.order.lifecycle.event"
+            ].browse()
+            order.valuation_approved = bool(approval)
+            order.valuation_approved_at = approval.event_at if approval else False
             order.vendor_invoice_submitted_at = invoice.submitted_at if invoice else False
             order.vendor_invoice_deliverable_status = invoice.status if invoice else False
 
@@ -942,6 +957,12 @@ class EvaluationOrder(models.Model):
         self.invalidate_recordset()
 
     def write(self, vals):
+        if "reviewer_user_id" in vals and not self.env.context.get(
+            "trucalc_controlled_reviewer_assignment"
+        ):
+            raise AccessError(_(
+                "Reviewer assignment requires the controlled assignment action."
+            ))
         if "company_id" in vals and any(
             order.company_id.id != vals["company_id"] for order in self
         ):
@@ -1567,7 +1588,24 @@ class EvaluationOrder(models.Model):
         for order in self.filtered("reviewer_user_id"):
             order.reviewer_user_id._trucalc_reviewer_identity()
 
-    def action_assign_reviewer(self):
+    def action_open_reviewer_assignment_wizard(self):
+        self._require_intake_manager()
+        self.ensure_one()
+        if self.status not in ("report_received", "reviewer_assigned", "under_review"):
+            raise ValidationError(_("Reviewer assignment is not available in this state."))
+        return {
+            "type": "ir.actions.act_window",
+            "name": _("Assign Reviewer") if self.status == "report_received" else _("Reassign Reviewer"),
+            "res_model": "trucalc.reviewer.assignment.wizard",
+            "view_mode": "form",
+            "view_id": self.env.ref(
+                "trucalc_orders.view_trucalc_reviewer_assignment_wizard_form"
+            ).id,
+            "target": "new",
+            "context": {"default_order_id": self.id},
+        }
+
+    def action_assign_reviewer(self, reviewer_user=False):
         self._require_intake_manager()
         self.ensure_one()
         self._lock_for_bid_lifecycle()
@@ -1575,18 +1613,168 @@ class EvaluationOrder(models.Model):
             raise ValidationError(_(
                 "A Reviewer may be assigned only after controlled report receipt."
             ))
-        if not self.reviewer_user_id:
+        reviewer_user = (
+            reviewer_user.sudo().exists()
+            if reviewer_user else self.reviewer_user_id.sudo().exists()
+        )
+        if len(reviewer_user) != 1:
             raise ValidationError(_("Select an internal Reviewer before assignment."))
-        self.reviewer_user_id._trucalc_reviewer_identity()
+        reviewer_user._trucalc_reviewer_identity()
         return self._transition_status(
             "report_received", "reviewer_assigned", "reviewer_assigned",
-            {"reviewer_id": False, "review_fee": 0.0},
+            {"reviewer_user_id": reviewer_user.id, "reviewer_id": False, "review_fee": 0.0},
         )
 
+    def action_reassign_reviewer(self, reviewer_user, reason):
+        self._require_intake_manager()
+        self.ensure_one()
+        reason = reason.strip() if isinstance(reason, str) else ""
+        if not reason:
+            raise ValidationError(_("A reassignment reason is required."))
+        reviewer_user = reviewer_user.sudo().exists()
+        if len(reviewer_user) != 1:
+            raise ValidationError(_("Select an internal Reviewer."))
+        reviewer_user._trucalc_reviewer_identity()
+        self._lock_for_bid_lifecycle()
+        order = self.sudo()
+        prior = order.reviewer_user_id
+        if order.status not in ("reviewer_assigned", "under_review") or not prior:
+            raise ValidationError(_("Reviewer reassignment is not available in this state."))
+        if reviewer_user == prior:
+            raise ValidationError(_("Select a different Reviewer."))
+        if order.status == "under_review" and self.env[
+            "trucalc.order.lifecycle.event"
+        ]._valuation_approval(order.current_valuation_id):
+            raise ValidationError(_("An approved Valuation prevents Reviewer reassignment."))
+        from_status = order.status
+        to_status = "reviewer_assigned"
+        order.with_context(trucalc_controlled_reviewer_assignment=True)._controlled_lifecycle_write({
+            "reviewer_user_id": reviewer_user.id,
+            "status": to_status,
+        })
+        self.env["trucalc.order.lifecycle.event"]._log_reviewer_reassignment(
+            order, prior, reviewer_user, reason, from_status, to_status, self.env.user,
+        )
+        return True
+
     def action_start_review(self):
-        raise AccessError(_(
-            "Review start is unavailable until the controlled Reviewer workflow."
-        ))
+        self.ensure_one()
+        actor = self._require_reviewer_actor()
+        self._lock_for_bid_lifecycle()
+        order = self.sudo()
+        self._require_reviewer_actor()
+        if order.reviewer_user_id != actor:
+            raise AccessError(_("Only the assigned Reviewer may accept this review."))
+        return order._transition_status(
+            "reviewer_assigned", "under_review", "review_accepted", actor=actor,
+        )
+
+    @api.model
+    @api.private
+    def _require_reviewer_actor(self):
+        actor = self.env.user
+        try:
+            actor._trucalc_reviewer_identity()
+        except ValidationError:
+            raise AccessError(_(
+                "Only an active TruCalc Reviewer may perform this action."
+            ))
+        return actor
+
+    @api.private
+    def _require_assigned_reviewer(self):
+        self.ensure_one()
+        actor = self._require_reviewer_actor()
+        if self.reviewer_user_id != actor:
+            raise AccessError(_("Only the assigned Reviewer may perform this review action."))
+        return actor
+
+    def action_open_valuation_revision_wizard(self):
+        self.ensure_one()
+        self._require_assigned_reviewer()
+        if self.status != "under_review" or not self.current_valuation_id:
+            raise ValidationError(_("The current Valuation is not eligible for revision."))
+        return {
+            "type": "ir.actions.act_window",
+            "name": _("Request Valuation Revision"),
+            "res_model": "trucalc.valuation.revision.wizard",
+            "view_mode": "form",
+            "view_id": self.env.ref(
+                "trucalc_orders.view_trucalc_valuation_revision_wizard_form"
+            ).id,
+            "target": "new",
+            "context": {
+                "default_order_id": self.id,
+                "default_target_valuation_id": self.current_valuation_id.id,
+            },
+        }
+
+    def action_request_valuation_revision(self, target, instructions):
+        self.ensure_one()
+        actor = self._require_assigned_reviewer()
+        self._lock_for_bid_lifecycle()
+        order = self.sudo()
+        self._require_reviewer_actor()
+        if order.reviewer_user_id != actor:
+            raise AccessError(_("Valuation revision is not authorized."))
+        if order.status != "under_review":
+            raise ValidationError(_("The current Valuation is not eligible for revision."))
+        target = target.sudo().exists()
+        if len(target) != 1:
+            raise ValidationError(_("The targeted Valuation is no longer available."))
+        self.env.cr.execute(
+            "SELECT id FROM trucalc_vendor_deliverable WHERE id = %s FOR UPDATE",
+            (target.id,),
+        )
+        target.invalidate_recordset()
+        order.invalidate_recordset()
+        if target != order.current_valuation_id or self.env[
+            "trucalc.order.lifecycle.event"
+        ]._valuation_approval(target):
+            raise ValidationError(_("The targeted Valuation is no longer eligible for revision."))
+        event = self.env["trucalc.order.lifecycle.event"]._request_valuation_revision(
+            order, target, instructions, actor,
+        )
+        order.message_post(body=Markup(_(
+            "Valuation revision requested for version %(version)s: %(filename)s"
+        )) % {
+            "version": target.version,
+            "filename": escape(target.filename),
+        })
+        return event
+
+    def action_approve_valuation(self, target=False):
+        self.ensure_one()
+        actor = self._require_assigned_reviewer()
+        target = (target or self.current_valuation_id).sudo().exists()
+        self._lock_for_bid_lifecycle()
+        order = self.sudo()
+        self._require_reviewer_actor()
+        if order.reviewer_user_id != actor:
+            raise AccessError(_("Valuation approval is not authorized."))
+        if order.status != "under_review":
+            raise ValidationError(_("The current Valuation is not eligible for approval."))
+        if len(target) != 1:
+            raise ValidationError(_("The targeted Valuation is no longer available."))
+        self.env.cr.execute(
+            "SELECT id FROM trucalc_vendor_deliverable WHERE id = %s FOR UPDATE",
+            (target.id,),
+        )
+        target.invalidate_recordset()
+        order.invalidate_recordset()
+        Event = self.env["trucalc.order.lifecycle.event"]
+        if (
+            target.order_id != order or target.artifact_type != "valuation"
+            or target.status != "submitted" or not target.is_current
+            or target != order.current_valuation_id
+        ):
+            raise ValidationError(_("Only the exact current Valuation may be approved."))
+        if Event._open_valuation_revision_request(target):
+            raise ValidationError(_("A Valuation with an open revision request cannot be approved."))
+        if Event._valuation_approval(target):
+            raise ValidationError(_("This Valuation has already been approved."))
+        Event._log_valuation_approval(order, target, actor)
+        return True
 
     def action_complete_review(self):
         raise AccessError(_(

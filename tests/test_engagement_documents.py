@@ -371,7 +371,7 @@ class TestEngagementDocuments(TransactionCase):
 
     def test_internal_quick_download_authorization_and_no_audit(self):
         order = self._order()
-        order.with_user(self.admin).write({"reviewer_user_id": self.reviewer.id})
+        order.with_user(self.admin)._controlled_lifecycle_write({"reviewer_user_id": self.reviewer.id})
         order.with_user(self.admin)._controlled_lifecycle_write({
             "status": "reviewer_assigned",
         })

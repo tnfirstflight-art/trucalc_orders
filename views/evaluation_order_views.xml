@@ -95,12 +95,31 @@
                         invisible="engagement_response_state != 'delivery_change_requested'"/>
 
                     <button
-                        name="action_assign_reviewer"
+                        name="action_open_reviewer_assignment_wizard"
                         string="Assign Reviewer"
                         type="object"
                         class="btn-primary"
                         groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
                         invisible="status != 'report_received'"/>
+
+                    <button name="action_open_reviewer_assignment_wizard"
+                            string="Reassign Reviewer" type="object" class="btn-secondary"
+                            groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                            invisible="status not in ('reviewer_assigned', 'under_review') or valuation_approved"/>
+
+                    <button name="action_start_review" string="Accept Review" type="object"
+                            class="btn-primary" groups="trucalc_orders.group_trucalc_reviewer"
+                            invisible="status != 'reviewer_assigned' or reviewer_user_id != uid"/>
+
+                    <button name="action_open_valuation_revision_wizard"
+                            string="Request Revision" type="object" class="btn-outline-primary"
+                            groups="trucalc_orders.group_trucalc_reviewer"
+                            invisible="status != 'under_review' or reviewer_user_id != uid or not current_valuation_id or valuation_approved or valuation_revision_requested"/>
+
+                    <button name="action_approve_valuation" string="Approve Valuation"
+                            type="object" class="btn-primary"
+                            groups="trucalc_orders.group_trucalc_reviewer"
+                            invisible="status != 'under_review' or reviewer_user_id != uid or not current_valuation_id or valuation_approved or valuation_revision_requested"/>
 
                     <field
                         name="status"
@@ -187,8 +206,8 @@
                             <field name="fee_override" readonly="status in ('new', 'accepted', 'declined')"/>
 
                             <field name="reviewer_user_id"
-                                   groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
-                                   readonly="status in ('new', 'accepted', 'declined')"/>
+                                   groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer"
+                                   readonly="1"/>
 
                             <field name="status" readonly="1"/>
 
@@ -200,11 +219,13 @@
 
                     <div name="deliverables_display" class="mb-3">
                         <field name="current_valuation_id" invisible="1"
-                               groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
+                               groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer"/>
                         <field name="previous_valuation_count" invisible="1"
-                               groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
+                               groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer"/>
+                        <field name="valuation_approved" invisible="1"
+                               groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer"/>
                         <div name="valuation_display" class="mb-3"
-                             groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations">
+                             groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer">
                             <div class="mb-1">
                                 <strong class="me-1">Valuation:</strong>
                                 <field name="valuation_filename_link" widget="html" nolabel="1" class="oe_inline"/>
@@ -231,6 +252,11 @@
                                  invisible="not valuation_revision_requested">
                                 <strong>Revision Requested</strong>
                                 <div><field name="valuation_revision_instructions" nolabel="1" readonly="1"/></div>
+                            </div>
+                            <div class="alert alert-success mt-2" role="status"
+                                 invisible="not valuation_approved">
+                                <strong>Valuation Approved</strong>
+                                <span class="ms-2"><field name="valuation_approved_at" nolabel="1" readonly="1"/></span>
                             </div>
                         </div>
 

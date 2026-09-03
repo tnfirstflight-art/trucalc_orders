@@ -98,7 +98,13 @@
                                 <t t-out="projection.zip_code"/>
                             </small>
                         </td>
-                        <td><span t-field="projection.order_status"/></td>
+                        <td>
+                            <span t-field="projection.order_status"/>
+                            <div t-if="projection.order_status == 'under_review' and projection.review_indicator"
+                                 class="text-muted small">
+                                <span t-field="projection.review_indicator"/>
+                            </div>
+                        </td>
                         <td><t t-out="projection.vendor_response_label or '—'"/></td>
                         <td>
                             <span t-if="projection.vendor_phase == 'assignment' and projection.vendor_delivery_date"
@@ -690,6 +696,18 @@
                 </div>
             </div>
             <div t-if="upload_error" class="alert alert-danger"><t t-out="upload_error"/></div>
+            <div t-if="approved_valuation" class="card mb-3">
+                <div class="card-header"><strong>Approved Valuation</strong></div>
+                <div class="card-body">
+                    <div><strong>Filename:</strong> <t t-out="approved_valuation.filename"/></div>
+                    <div><strong>Submitted:</strong> <span t-field="approved_valuation.submitted_at"/></div>
+                    <div><strong>Approved:</strong> <span t-field="valuation_approval.event_at"/></div>
+                    <a class="btn btn-sm btn-outline-primary mt-2"
+                       t-att-href="'/my/trucalc/bank/orders/%s/valuation/%s/download' % (order.order_number, approved_valuation.id)">
+                        Download Approved Valuation
+                    </a>
+                </div>
+            </div>
             <h3>Documents</h3>
             <form t-if="can_upload and order.status != 'draft'"
                   t-att-action="'/my/trucalc/bank/orders/%s/documents/upload' % order.order_number"

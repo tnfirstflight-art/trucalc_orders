@@ -111,6 +111,10 @@ class TruCalcVendorOrder(models.Model):
     can_request_delivery_change = fields.Boolean(readonly=True)
     can_decline_engagement = fields.Boolean(readonly=True)
     currency_id = fields.Many2one("res.currency", readonly=True)
+    review_indicator = fields.Selection(
+        [("revision_request", "Revision Request"), ("submitted", "Submitted")],
+        compute="_compute_review_indicator", compute_sudo=True, readonly=True,
+    )
 
     # Integer-only and system-restricted: required for the rule, but deliberately
     # provides no relational path from the public projection to Vendor records.
@@ -123,6 +127,55 @@ class TruCalcVendorOrder(models.Model):
             projection.inspection_contact_phone_display = formatter(
                 projection.inspection_contact_phone
             )
+
+    def _compute_review_indicator(self):
+        indicators = {}
+        authorizations = self.env[
+            "trucalc.order.vendor.authorization"
+        ].sudo().browse(self.ids).exists()
+        orders = authorizations.mapped("order_id").filtered(
+            lambda order: order.status == "under_review"
+        )
+        current_by_order = {}
+        if orders:
+            for valuation in self.env["trucalc.vendor.deliverable"].sudo().search([
+                ("order_id", "in", orders.ids),
+                ("artifact_type", "=", "valuation"),
+                ("is_current", "=", True),
+            ]):
+                current_by_order[valuation.order_id.id] = valuation
+        Event = self.env["trucalc.order.lifecycle.event"].sudo()
+        current_ids = [valuation.id for valuation in current_by_order.values()]
+        open_target_ids = set()
+        submitted_new_ids = set()
+        if current_ids:
+            requests = Event.search([
+                ("event_type", "=", "valuation_revision_requested"),
+                ("target_valuation_id", "in", current_ids),
+            ])
+            consumed_request_ids = set(Event.search([
+                ("event_type", "=", "valuation_revision_submitted"),
+                ("revision_request_event_id", "in", requests.ids),
+            ]).mapped("revision_request_event_id").ids)
+            open_target_ids = set(
+                requests.filtered(lambda event: event.id not in consumed_request_ids).mapped(
+                    "target_valuation_id"
+                ).ids
+            )
+            submitted_new_ids = set(Event.search([
+                ("event_type", "=", "valuation_revision_submitted"),
+                ("new_valuation_id", "in", current_ids),
+            ]).mapped("new_valuation_id").ids)
+        for authorization in authorizations:
+            valuation = current_by_order.get(authorization.order_id.id)
+            if not valuation:
+                continue
+            if valuation.id in open_target_ids:
+                indicators[authorization.id] = "revision_request"
+            elif valuation.id in submitted_new_ids:
+                indicators[authorization.id] = "submitted"
+        for projection in self:
+            projection.review_indicator = indicators.get(projection.id, False)
 
     def init(self):
         tools.drop_view_if_exists(self.env.cr, self._table)

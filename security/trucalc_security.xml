@@ -235,6 +235,35 @@
         <field name="groups" eval="[(4, ref('group_trucalc_operations'))]"/>
     </record>
 
+    <record id="rule_vendor_deliverable_reviewer_assignment" model="ir.rule">
+        <field name="name">Assigned Reviewer Valuations</field>
+        <field name="model_id" ref="model_trucalc_vendor_deliverable"/>
+        <field name="domain_force">
+            [('artifact_type', '=', 'valuation'),
+             ('order_id.reviewer_user_id', '=', user.id),
+             ('order_id.status', 'in', ('reviewer_assigned', 'under_review'))]
+        </field>
+        <field name="groups" eval="[(4, ref('group_trucalc_reviewer'))]"/>
+        <field name="perm_read" eval="True"/>
+        <field name="perm_write" eval="False"/>
+        <field name="perm_create" eval="False"/>
+        <field name="perm_unlink" eval="False"/>
+    </record>
+
+    <record id="rule_order_lifecycle_event_reviewer_assignment" model="ir.rule">
+        <field name="name">Assigned Reviewer Lifecycle Events</field>
+        <field name="model_id" ref="model_trucalc_order_lifecycle_event"/>
+        <field name="domain_force">
+            [('order_id.reviewer_user_id', '=', user.id),
+             ('order_id.status', 'in', ('reviewer_assigned', 'under_review'))]
+        </field>
+        <field name="groups" eval="[(4, ref('group_trucalc_reviewer'))]"/>
+        <field name="perm_read" eval="True"/>
+        <field name="perm_write" eval="False"/>
+        <field name="perm_create" eval="False"/>
+        <field name="perm_unlink" eval="False"/>
+    </record>
+
     <!-- These legacy ACL records must be deleted during upgrade; omitting their
          CSV rows alone would leave the already-installed database rows active. -->
     <delete id="access_trucalc_order_vendor_portal" model="ir.model.access"/>
@@ -244,9 +273,8 @@
     <delete id="access_trucalc_document_bank_view_only" model="ir.model.access"/>
     <delete id="access_trucalc_bid_vendor_portal" model="ir.model.access"/>
     <delete id="access_trucalc_document_reviewer" model="ir.model.access"/>
-    <delete id="access_trucalc_vendor_deliverable_reviewer" model="ir.model.access"/>
+    <!-- Reviewer deliverable/event access is restored narrowly above for 4D.3. -->
     <delete id="rule_reviewer_required_partners" model="ir.rule"/>
     <delete id="rule_trucalc_document_reviewer_assignment" model="ir.rule"/>
-    <delete id="rule_vendor_deliverable_reviewer_assignment" model="ir.rule"/>
 
 </odoo>

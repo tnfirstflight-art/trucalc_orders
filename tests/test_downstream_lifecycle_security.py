@@ -73,7 +73,7 @@ class TestDownstreamLifecycleSecurity(TransactionCase):
 
     def _ready_for_assignment(self, reviewer=None):
         order = self._order()
-        order.with_user(self.admin).write({
+        order.with_user(self.admin)._controlled_lifecycle_write({
             "reviewer_user_id": (reviewer or self.reviewer).id,
         })
         order.with_user(self.admin)._controlled_lifecycle_write({
@@ -150,15 +150,15 @@ class TestDownstreamLifecycleSecurity(TransactionCase):
         for invalid in (
             self.admin, self.bank_admin, self.vendor_user,
         ):
-            with self.assertRaises(ValidationError), self.cr.savepoint():
+            with self.assertRaises(AccessError), self.cr.savepoint():
                 order.with_user(self.admin).write({"reviewer_user_id": invalid.id})
         with self.assertRaises(ValidationError), self.cr.savepoint():
             self._user("reviewer-only", "group_trucalc_reviewer")
         self.reviewer.active = False
-        with self.assertRaises(ValidationError), self.cr.savepoint():
+        with self.assertRaises(AccessError), self.cr.savepoint():
             order.with_user(self.admin).write({"reviewer_user_id": self.reviewer.id})
         self.reviewer.active = True
-        order.with_user(self.admin).write({
+        order.with_user(self.admin)._controlled_lifecycle_write({
             "reviewer_user_id": self.cross_company_reviewer.id,
         })
         order.with_user(self.admin)._controlled_lifecycle_write({
@@ -375,7 +375,9 @@ class TestDownstreamLifecycleSecurity(TransactionCase):
         order = self._ready_for_assignment()
         order.with_user(self.admin).action_assign_reviewer()
         self.assertTrue(order.with_user(self.reviewer).has_access("read"))
-        order.with_user(self.admin).write({"reviewer_user_id": self.other_reviewer.id})
+        order.with_user(self.admin).action_reassign_reviewer(
+            self.other_reviewer, "Coverage transfer",
+        )
         self.assertFalse(order.with_user(self.reviewer).has_access("read"))
         self.assertTrue(order.with_user(self.other_reviewer).has_access("read"))
 
@@ -404,8 +406,9 @@ class TestDownstreamLifecycleSecurity(TransactionCase):
         ])
         self.assertTrue(event.with_user(self.admin).has_access("read"))
         self.assertTrue(event.with_user(self.ops).has_access("read"))
+        self.assertTrue(event.with_user(self.reviewer).has_access("read"))
         for user in (
-            self.reviewer, self.bank_admin, self.bank_requestor,
+            self.other_reviewer, self.bank_admin, self.bank_requestor,
             self.bank_viewer, self.vendor_user,
         ):
             self.assertFalse(event.with_user(user).has_access("read"))

@@ -207,6 +207,22 @@ class TruCalcVendorPortal(CustomerPortal):
                 raise request.not_found()
         return order, bank
 
+    def _bank_approved_valuation(self, order):
+        valuation = request.env["trucalc.vendor.deliverable"].sudo().search([
+            ("order_id", "=", order.id),
+            ("artifact_type", "=", "valuation"),
+            ("is_current", "=", True),
+            ("status", "=", "submitted"),
+        ], limit=1)
+        if not valuation:
+            return valuation, request.env["trucalc.order.lifecycle.event"].browse()
+        approval = request.env[
+            "trucalc.order.lifecycle.event"
+        ]._valuation_approval(valuation)
+        return (valuation, approval) if approval else (
+            request.env["trucalc.vendor.deliverable"].browse(), approval
+        )
+
     def _can_create_bank_draft(self):
         return (
             self._is_trucalc_bank()
@@ -426,7 +442,32 @@ class TruCalcVendorPortal(CustomerPortal):
             "saved": saved,
             "can_delete_draft_documents": order.status == "draft",
         })
+        approved_valuation, valuation_approval = self._bank_approved_valuation(order)
+        values.update({
+            "approved_valuation": approved_valuation,
+            "valuation_approval": valuation_approval,
+        })
         return request.render("trucalc_orders.portal_bank_documents", values)
+
+    @http.route(
+        "/my/trucalc/bank/orders/<string:order_number>/valuation/"
+        "<int:deliverable_id>/download",
+        type="http", auth="user", website=True, readonly=True,
+    )
+    def portal_bank_approved_valuation_download(
+        self, order_number, deliverable_id, **kwargs
+    ):
+        order, _bank = self._bank_order(order_number)
+        valuation, approval = self._bank_approved_valuation(order)
+        if (
+            not approval or len(valuation) != 1
+            or valuation.id != deliverable_id
+            or valuation.order_id != order
+            or valuation.artifact_type != "valuation"
+            or not valuation.is_current
+        ):
+            raise request.not_found()
+        return self._deliverable_response(valuation)
 
     @http.route(
         "/my/trucalc/bank/orders/<string:order_number>/documents/upload",

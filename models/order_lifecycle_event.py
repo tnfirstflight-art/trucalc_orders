@@ -23,6 +23,9 @@ class TruCalcOrderLifecycleEvent(models.Model):
             ("valuation_revision_requested", "Valuation Revision Requested"),
             ("valuation_revision_submitted", "Valuation Revision Submitted"),
             ("reviewer_assigned", "Reviewer Assigned"),
+            ("reviewer_reassigned", "Reviewer Reassigned"),
+            ("review_accepted", "Review Accepted"),
+            ("valuation_approved", "Valuation Approved"),
         ],
         required=True, readonly=True, index=True,
     )
@@ -39,6 +42,10 @@ class TruCalcOrderLifecycleEvent(models.Model):
     reviewer_user_id = fields.Many2one(
         "res.users", readonly=True, ondelete="restrict",
     )
+    prior_reviewer_user_id = fields.Many2one(
+        "res.users", readonly=True, ondelete="restrict",
+    )
+    reassignment_reason = fields.Text(readonly=True)
     deliverable_id = fields.Many2one(
         "trucalc.vendor.deliverable", readonly=True, index=True,
         ondelete="restrict",
@@ -70,11 +77,16 @@ class TruCalcOrderLifecycleEvent(models.Model):
         "WHERE event_type = 'valuation_revision_submitted'",
         "A Valuation revision request may be consumed only once.",
     )
+    _valuation_approval_unique = models.UniqueIndex(
+        "(target_valuation_id) WHERE event_type = 'valuation_approved'",
+        "A Valuation version may be approved only once.",
+    )
 
     @api.constrains(
         "event_type", "deliverable_id", "order_id", "target_valuation_id",
         "new_valuation_id", "revision_request_event_id",
-        "vendor_revision_instructions",
+        "vendor_revision_instructions", "reviewer_user_id",
+        "prior_reviewer_user_id", "reassignment_reason",
     )
     def _check_deliverable_provenance(self):
         for event in self:
@@ -113,10 +125,31 @@ class TruCalcOrderLifecycleEvent(models.Model):
                     or event.vendor_revision_instructions
                 ):
                     raise AccessError(_("Revised Valuation submission provenance is invalid."))
+            elif event.event_type == "valuation_approved":
+                target = event.target_valuation_id
+                if (
+                    not target or target.artifact_type != "valuation"
+                    or target.order_id != event.order_id
+                    or event.new_valuation_id or event.revision_request_event_id
+                    or event.vendor_revision_instructions
+                    or event.prior_reviewer_user_id or event.reassignment_reason
+                ):
+                    raise AccessError(_("Valuation approval provenance is invalid."))
+            elif event.event_type == "reviewer_reassigned":
+                if (
+                    not event.prior_reviewer_user_id or not event.reviewer_user_id
+                    or event.prior_reviewer_user_id == event.reviewer_user_id
+                    or not event.reassignment_reason
+                    or event.target_valuation_id or event.new_valuation_id
+                    or event.revision_request_event_id
+                    or event.vendor_revision_instructions
+                ):
+                    raise AccessError(_("Reviewer reassignment provenance is invalid."))
             elif (
                 event.target_valuation_id or event.new_valuation_id
                 or event.revision_request_event_id
                 or event.vendor_revision_instructions
+                or event.prior_reviewer_user_id or event.reassignment_reason
             ):
                 raise AccessError(_("This lifecycle event contains invalid revision data."))
 
@@ -159,6 +192,17 @@ class TruCalcOrderLifecycleEvent(models.Model):
             ("revision_request_event_id", "=", request.id),
         ])
         return self.browse() if consumed else request
+
+    @api.model
+    @api.private
+    def _valuation_approval(self, target):
+        target = target.sudo().exists()
+        if len(target) != 1:
+            return self.browse()
+        return self.sudo().search([
+            ("event_type", "=", "valuation_approved"),
+            ("target_valuation_id", "=", target.id),
+        ], limit=1)
 
     @api.model
     @api.private
@@ -224,6 +268,42 @@ class TruCalcOrderLifecycleEvent(models.Model):
             "target_valuation_id": prior.id,
             "new_valuation_id": new.id,
             "revision_request_event_id": request.id,
+        })
+
+    @api.model
+    @api.private
+    def _log_reviewer_reassignment(
+        self, order, prior_reviewer, new_reviewer, reason,
+        from_status, to_status, actor,
+    ):
+        return super(TruCalcOrderLifecycleEvent, self.sudo()).create({
+            "order_id": order.id,
+            "stable_order_id": order.id,
+            "company_id": order.company_id.id,
+            "event_type": "reviewer_reassigned",
+            "from_status": from_status,
+            "to_status": to_status,
+            "actor_id": actor.id,
+            "event_at": fields.Datetime.now(),
+            "prior_reviewer_user_id": prior_reviewer.id,
+            "reviewer_user_id": new_reviewer.id,
+            "reassignment_reason": reason,
+        })
+
+    @api.model
+    @api.private
+    def _log_valuation_approval(self, order, target, actor):
+        return super(TruCalcOrderLifecycleEvent, self.sudo()).create({
+            "order_id": order.id,
+            "stable_order_id": order.id,
+            "company_id": order.company_id.id,
+            "event_type": "valuation_approved",
+            "from_status": order.status,
+            "to_status": order.status,
+            "actor_id": actor.id,
+            "event_at": fields.Datetime.now(),
+            "reviewer_user_id": actor.id,
+            "target_valuation_id": target.id,
         })
 
     @api.model_create_multi
