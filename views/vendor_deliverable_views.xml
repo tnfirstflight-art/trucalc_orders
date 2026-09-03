@@ -6,6 +6,7 @@
         <field name="arch" type="xml">
             <list create="false" edit="false" delete="false" import="false" export_xlsx="false">
                 <field name="version"/>
+                <field name="is_current"/>
                 <field name="submitted_at" string="Submitted At"/>
                 <field name="filename_link" widget="html" string="Filename"/>
                 <field name="status" widget="badge"/>
@@ -21,6 +22,7 @@
                 <sheet>
                     <group>
                         <field name="version"/>
+                        <field name="is_current"/>
                         <field name="submitted_at"/>
                         <field name="filename_link" widget="html"/>
                         <field name="status"/>

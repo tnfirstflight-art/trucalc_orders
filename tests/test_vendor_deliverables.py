@@ -113,6 +113,13 @@ class TestVendorDeliverables(TransactionCase):
             authorization, actor, artifact_type, filename, data,
         )
 
+    def _request_revision(self, order, valuation, instructions="Correct the value conclusion."):
+        return self.env["trucalc.order.lifecycle.event"].with_user(
+            self.admin
+        )._request_valuation_revision(
+            order, valuation, instructions, self.admin,
+        )
+
     def test_first_valuation_is_authoritative_current_and_receives_report(self):
         order, authorization, projection = self._engaged()
         deliverable = self._submit(authorization)
@@ -234,6 +241,109 @@ class TestVendorDeliverables(TransactionCase):
         self.assertEqual(len(order.lifecycle_event_ids.filtered(
             lambda item: item.event_type == "valuation_received"
         )), 1)
+
+    def test_revision_request_is_exact_required_immutable_and_single_use(self):
+        order, authorization, _projection = self._engaged()
+        valuation = self._submit(authorization)
+        invoice = self._submit(
+            authorization, "vendor_invoice", "Revision Invoice.pdf",
+        )
+        Event = self.env["trucalc.order.lifecycle.event"].with_user(self.admin)
+        for instructions in (False, "   "):
+            with self.assertRaisesRegex(ValidationError, "instructions are required"):
+                Event._request_valuation_revision(
+                    order, valuation, instructions, self.admin,
+                )
+        with self.assertRaisesRegex(ValidationError, "no longer eligible"):
+            Event._request_valuation_revision(
+                order, invoice, "Not an invoice workflow", self.admin,
+            )
+        request = self._request_revision(order, valuation, "  Correct page 4.  ")
+        self.assertEqual(request.target_valuation_id, valuation)
+        self.assertEqual(request.vendor_revision_instructions, "Correct page 4.")
+        self.assertEqual((request.from_status, request.to_status), (
+            "report_received", "report_received",
+        ))
+        with self.assertRaisesRegex(ValidationError, "already has a revision request"):
+            self._request_revision(order, valuation)
+        with self.assertRaises(AccessError):
+            request.with_user(self.admin).write({
+                "vendor_revision_instructions": "Changed",
+            })
+        with self.assertRaises(AccessError):
+            request.with_user(self.admin).unlink()
+
+    def test_revised_valuations_are_sequential_current_and_audited(self):
+        order, authorization, _projection = self._engaged()
+        first = self._submit(authorization, filename="Version 1.pdf")
+        original = {
+            "filename": first.filename,
+            "file_data": first.file_data,
+            "submitted_at": first.submitted_at,
+            "submitted_by_id": first.submitted_by_id,
+            "vendor_id": first.vendor_id,
+            "engagement_id": first.engagement_id,
+            "authorization_id": first.authorization_id,
+        }
+        with self.assertRaisesRegex(AccessError, "open revision request"):
+            self._submit(authorization, filename="Unauthorized Version 2.pdf")
+        request_one = self._request_revision(order, first, "Revise the first report.")
+        second = self._submit(authorization, filename="Version 2.pdf")
+        first.invalidate_recordset()
+        self.assertEqual(order.status, "report_received")
+        self.assertEqual((first.is_current, second.version, second.is_current), (
+            False, 2, True,
+        ))
+        self.assertFalse(self.env[
+            "trucalc.order.lifecycle.event"
+        ]._open_valuation_revision_request(first))
+        submitted_one = order.lifecycle_event_ids.filtered(
+            lambda event: event.event_type == "valuation_revision_submitted"
+        )
+        self.assertEqual(submitted_one.revision_request_event_id, request_one)
+        self.assertEqual(submitted_one.target_valuation_id, first)
+        self.assertEqual(submitted_one.new_valuation_id, second)
+        request_two = self._request_revision(order, second, "Revise the second report.")
+        third = self._submit(authorization, filename="Version 3.pdf")
+        second.invalidate_recordset()
+        self.assertEqual((second.is_current, third.version, third.is_current), (
+            False, 3, True,
+        ))
+        current = self.env["trucalc.vendor.deliverable"].sudo().search([
+            ("order_id", "=", order.id), ("artifact_type", "=", "valuation"),
+            ("is_current", "=", True),
+        ])
+        self.assertEqual(current, third)
+        self.assertEqual(len(order.lifecycle_event_ids.filtered(
+            lambda event: event.event_type == "valuation_received"
+        )), 1)
+        self.assertEqual(len(order.lifecycle_event_ids.filtered(
+            lambda event: event.event_type == "valuation_revision_submitted"
+        )), 2)
+        latest_event = order.lifecycle_event_ids.filtered(
+            lambda event: event.revision_request_event_id == request_two
+        )
+        self.assertEqual(latest_event.new_valuation_id, third)
+        for field_name, value in original.items():
+            self.assertEqual(first[field_name], value)
+        with self.assertRaisesRegex(AccessError, "open revision request"):
+            self._submit(authorization, filename="Replay Version 3.pdf")
+
+    def test_revised_submission_preserves_vendor_and_invoice_boundaries(self):
+        order, authorization, _projection = self._engaged()
+        first = self._submit(authorization)
+        invoice = self._submit(authorization, "vendor_invoice", "Invoice.pdf")
+        self._request_revision(order, first)
+        with self.assertRaises(AccessError):
+            self._submit(
+                authorization, filename="Wrong Vendor.pdf", actor=self.other_vendor_user,
+            )
+        second = self._submit(authorization, filename="Authorized Revision.pdf")
+        self.assertEqual((invoice.version, invoice.is_current, invoice.status), (
+            0, False, "submitted",
+        ))
+        with self.assertRaises(AccessError):
+            second.with_user(self.admin).write({"is_current": False})
 
     def test_authorization_fails_closed(self):
         order, authorization, _projection = self._engaged()
@@ -542,6 +652,58 @@ class TestVendorDeliverablePortal(HttpCase):
         self.assertEqual(self.env["trucalc.order.lifecycle.event"].sudo().search_count([
             ("order_id", "=", order.id), ("event_type", "=", "valuation_received"),
         ]), 1)
+
+    def test_portal_revision_instructions_and_single_revised_upload(self):
+        order = self._engaged()
+        self._upload(
+            self.vendor_user, order, "valuation", "Initial.pdf",
+            b"%PDF-1.7\ninitial",
+        )
+        valuation = self.env["trucalc.vendor.deliverable"].sudo().search([
+            ("order_id", "=", order.id), ("artifact_type", "=", "valuation"),
+        ])
+        self.env["trucalc.order.lifecycle.event"].with_user(
+            self.admin
+        )._request_valuation_revision(
+            order, valuation, "Replace the certification page.", self.admin,
+        )
+        self._login(self.vendor_user)
+        detail = self.url_open(f"/my/trucalc/orders/{order.order_number}").text
+        self.assertIn("Revision Requested", detail)
+        self.assertIn("Replace the certification page.", detail)
+        self.assertIn("earlier submission remains preserved", detail)
+        self.assertIn("Submit Revised Valuation", detail)
+        response = self._upload(
+            self.vendor_user, order, "valuation", "Revised.pdf",
+            b"%PDF-1.7\nrevised",
+        )
+        self.assertEqual(response.status_code, 200)
+        detail = self.url_open(f"/my/trucalc/orders/{order.order_number}").text
+        self.assertIn("Revised.pdf", detail)
+        self.assertNotIn("Submit Revised Valuation", detail)
+        valuations = self.env["trucalc.vendor.deliverable"].sudo().search([
+            ("order_id", "=", order.id), ("artifact_type", "=", "valuation"),
+        ], order="version")
+        self.assertEqual(valuations.mapped("version"), [1, 2])
+        self.assertEqual(valuations.filtered("is_current").filename, "Revised.pdf")
+        revision_events = self.env["trucalc.order.lifecycle.event"].sudo().search([
+            ("order_id", "=", order.id),
+            ("event_type", "in", (
+                "valuation_revision_requested", "valuation_revision_submitted",
+            )),
+        ])
+        self.assertFalse(revision_events.with_user(self.bank).has_access("read"))
+        self._login(self.bank)
+        for valuation in valuations:
+            attachment = self.env["ir.attachment"].sudo().search([
+                ("res_model", "=", "trucalc.vendor.deliverable"),
+                ("res_id", "=", valuation.id),
+                ("res_field", "=", "file_data"),
+            ], limit=1)
+            self.assertTrue(attachment)
+            self.assertEqual(
+                self.url_open(f"/web/content/{attachment.id}").status_code, 404,
+            )
 
     def test_cross_vendor_guessed_id_and_bank_surface_fail_closed(self):
         order = self._engaged()

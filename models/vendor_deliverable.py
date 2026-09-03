@@ -159,9 +159,7 @@ class TruCalcVendorDeliverable(models.Model):
         engagement = self.env["trucalc.vendor.engagement"].sudo().browse(
             engagement_ids
         ).exists()
-        eligible_states = (
-            {"engaged"} if artifact_type == "valuation" else INVOICE_SUBMISSION_STATES
-        )
+        eligible_states = INVOICE_SUBMISSION_STATES
         if (
             len(engagement) != 1 or not engagement.active
             or engagement.response_state != "accepted"
@@ -190,11 +188,31 @@ class TruCalcVendorDeliverable(models.Model):
         )
         existing = self.sudo().search([
             ("order_id", "=", order.id), ("artifact_type", "=", artifact_type),
-        ], limit=1)
-        if existing:
+        ])
+        if artifact_type == "vendor_invoice" and existing:
             raise ValidationError(_(
                 "This Vendor deliverable has already been submitted and is immutable."
             ))
+        current = existing.filtered("is_current") if artifact_type == "valuation" else self.browse()
+        initial_valuation = artifact_type == "valuation" and not existing
+        revision_request = self.env["trucalc.order.lifecycle.event"].browse()
+        if initial_valuation and order.status != "engaged":
+            raise AccessError(_("Vendor deliverable access is not authorized."))
+        if artifact_type == "valuation" and existing:
+            if len(current) != 1:
+                raise AccessError(_("The current Valuation state is invalid."))
+            self.env.cr.execute(
+                "SELECT id FROM trucalc_vendor_deliverable WHERE id = %s FOR UPDATE",
+                (current.id,),
+            )
+            current.invalidate_recordset()
+            revision_request = self.env[
+                "trucalc.order.lifecycle.event"
+            ]._open_valuation_revision_request(current)
+            if len(revision_request) != 1:
+                raise AccessError(_(
+                    "A revised Valuation requires an open revision request."
+                ))
         values = {
             "order_id": order.id,
             "artifact_type": artifact_type,
@@ -206,15 +224,24 @@ class TruCalcVendorDeliverable(models.Model):
             "engagement_id": engagement.id,
             "authorization_id": authorization.id,
             "bidding_round": order.bidding_round,
-            "version": 1 if artifact_type == "valuation" else 0,
+            "version": (
+                current.version + 1 if current else 1
+            ) if artifact_type == "valuation" else 0,
             "is_current": artifact_type == "valuation",
             "status": "submitted",
         }
+        if current:
+            super(TruCalcVendorDeliverable, current).write({"is_current": False})
+            current.flush_recordset(["is_current"])
         deliverable = super(TruCalcVendorDeliverable, self.sudo()).create(values)
-        if artifact_type == "valuation":
+        if initial_valuation:
             order._transition_status(
                 "engaged", "report_received", "valuation_received",
                 deliverable=deliverable, actor=actor,
+            )
+        elif artifact_type == "valuation":
+            self.env["trucalc.order.lifecycle.event"]._log_valuation_revision_submission(
+                order, revision_request, current, deliverable, actor,
             )
         return deliverable
 

@@ -8,6 +8,7 @@ from odoo.tests import TransactionCase, tagged
 from odoo.addons.trucalc_orders.models.vendor_order_authorization import (
     TruCalcOrderVendorAuthorization,
 )
+from odoo.addons.trucalc_orders.models.bid_audit import TruCalcBidAudit
 
 
 @tagged("post_install", "-at_install", "trucalc_vendor_engagement")
@@ -146,6 +147,42 @@ class TestVendorEngagement(TransactionCase):
             audit.new_values["vendor_engaged_at"],
             fields.Datetime.to_string(order.vendor_engaged_at),
         )
+
+    def test_engagement_uses_one_authoritative_timestamp(self):
+        order, bid, _other = self._order_with_responses()
+        logged_events = []
+        original_log_event = TruCalcBidAudit._log_event
+
+        def capture_log_event(audit_model, action, event_order, **values):
+            logged_events.append((action, values.get("event_at")))
+            return original_log_event(audit_model, action, event_order, **values)
+
+        with patch.object(TruCalcBidAudit, "_log_event", capture_log_event):
+            bid.with_user(self.ops)._action_confirm_engagement()
+
+        audit = self.env["trucalc.bid.audit"].search([
+            ("order_id", "=", order.id), ("action", "=", "vendor_engaged"),
+        ])
+        engagement = order.sudo().engagement_ids.filtered("active")
+        authorization = engagement.assignment_authorization_id
+        self.assertEqual(logged_events, [("vendor_engaged", order.vendor_engaged_at)])
+        self.assertEqual(order.vendor_engaged_at, audit.event_at)
+        self.assertEqual(audit.event_at, engagement.engaged_at)
+        self.assertEqual(engagement.order_id, order)
+        self.assertEqual(engagement.company_id, order.company_id)
+        self.assertEqual(engagement.vendor_id, order.assigned_vendor_id)
+        self.assertEqual(engagement.round_number, order.bidding_round)
+        self.assertEqual(engagement.source_bid_id, bid)
+        self.assertEqual(bid.status, "selected")
+        self.assertEqual(authorization.order_id, order)
+        self.assertEqual(authorization.vendor_id, engagement.vendor_id)
+        self.assertEqual(authorization.company_id, engagement.company_id)
+        self.assertEqual(authorization.round_number, engagement.round_number)
+        self.assertEqual(authorization.source, "assignment")
+        self.assertEqual(audit.order_id, order)
+        self.assertEqual(audit.bid_id, bid)
+        self.assertEqual(audit.action, "vendor_engaged")
+        self.assertEqual(audit.actor_id, engagement.engaged_by_id)
 
     def test_confirmation_revalidates_deadline_and_authorization(self):
         order, bid, _other = self._order_with_responses()

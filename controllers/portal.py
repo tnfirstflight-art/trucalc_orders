@@ -107,6 +107,11 @@ class TruCalcVendorPortal(CustomerPortal):
         vendor_invoice = deliverables.filtered(
             lambda item: item.artifact_type == "vendor_invoice"
         )[:1]
+        revision_request = request.env[
+            "trucalc.order.lifecycle.event"
+        ]._open_valuation_revision_request(valuation) if valuation else request.env[
+            "trucalc.order.lifecycle.event"
+        ].browse()
         accepted_assignment = bool(
             projection.vendor_phase == "assignment"
             and projection.engagement_response_state == "accepted"
@@ -118,9 +123,17 @@ class TruCalcVendorPortal(CustomerPortal):
             "documents": documents,
             "valuation": valuation,
             "vendor_invoice": vendor_invoice,
+            "valuation_revision_request": revision_request,
             "can_submit_valuation": bool(
-                accepted_assignment and projection.order_status == "engaged"
-                and not valuation
+                accepted_assignment and (
+                    (projection.order_status == "engaged" and not valuation)
+                    or (
+                        valuation and revision_request
+                        and projection.order_status in (
+                            "report_received", "reviewer_assigned", "under_review",
+                        )
+                    )
+                )
             ),
             "can_submit_vendor_invoice": bool(
                 accepted_assignment

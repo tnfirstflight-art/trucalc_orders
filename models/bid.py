@@ -570,6 +570,7 @@ class TruCalcBid(models.Model):
         )
         engagement_audit = self.env["trucalc.bid.audit"]._log_event(
             "vendor_engaged", order, invitation=self.invitation_id, bid=self,
+            event_at=engaged_at,
             old_values={"bid_status": "submitted", **old_order_values},
             new_values={"bid_status": "selected", "order_status": "engaged",
                         "assigned_vendor_id": self.vendor_id.id,

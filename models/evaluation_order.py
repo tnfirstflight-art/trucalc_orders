@@ -426,6 +426,18 @@ class EvaluationOrder(models.Model):
         compute_sudo=True, readonly=True, string="Valuation Status",
         groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
     )
+    valuation_version = fields.Integer(
+        compute="_compute_vendor_deliverables", compute_sudo=True, readonly=True,
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+    )
+    valuation_revision_requested = fields.Boolean(
+        compute="_compute_vendor_deliverables", compute_sudo=True, readonly=True,
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+    )
+    valuation_revision_instructions = fields.Text(
+        compute="_compute_vendor_deliverables", compute_sudo=True, readonly=True,
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+    )
     vendor_invoice_submitted_at = fields.Datetime(
         compute="_compute_vendor_deliverables", compute_sudo=True, readonly=True,
         groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
@@ -462,6 +474,17 @@ class EvaluationOrder(models.Model):
             ])
             order.valuation_submitted_at = valuation.submitted_at if valuation else False
             order.valuation_deliverable_status = valuation.status if valuation else False
+            revision_request = self.env[
+                "trucalc.order.lifecycle.event"
+            ]._open_valuation_revision_request(valuation) if valuation else self.env[
+                "trucalc.order.lifecycle.event"
+            ].browse()
+            order.valuation_version = valuation.version if valuation else 0
+            order.valuation_revision_requested = bool(revision_request)
+            order.valuation_revision_instructions = (
+                revision_request.vendor_revision_instructions
+                if revision_request else False
+            )
             order.vendor_invoice_submitted_at = invoice.submitted_at if invoice else False
             order.vendor_invoice_deliverable_status = invoice.status if invoice else False
 
