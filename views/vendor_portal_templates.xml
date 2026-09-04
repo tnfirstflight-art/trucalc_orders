@@ -709,7 +709,7 @@
                 </div>
             </div>
             <h3>Documents</h3>
-            <form t-if="can_upload and order.status != 'draft'"
+            <form t-if="can_upload and order.status not in ('draft', 'completed')"
                   t-att-action="'/my/trucalc/bank/orders/%s/documents/upload' % order.order_number"
                   method="post" enctype="multipart/form-data" class="card card-body mb-3">
                 <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>

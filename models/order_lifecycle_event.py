@@ -26,6 +26,7 @@ class TruCalcOrderLifecycleEvent(models.Model):
             ("reviewer_reassigned", "Reviewer Reassigned"),
             ("review_accepted", "Review Accepted"),
             ("valuation_approved", "Valuation Approved"),
+            ("order_completed", "Order Completed"),
         ],
         required=True, readonly=True, index=True,
     )
@@ -81,6 +82,10 @@ class TruCalcOrderLifecycleEvent(models.Model):
         "(target_valuation_id) WHERE event_type = 'valuation_approved'",
         "A Valuation version may be approved only once.",
     )
+    _order_completed_unique = models.UniqueIndex(
+        "(order_id) WHERE event_type = 'order_completed'",
+        "An Order may be completed only once.",
+    )
 
     @api.constrains(
         "event_type", "deliverable_id", "order_id", "target_valuation_id",
@@ -135,6 +140,21 @@ class TruCalcOrderLifecycleEvent(models.Model):
                     or event.prior_reviewer_user_id or event.reassignment_reason
                 ):
                     raise AccessError(_("Valuation approval provenance is invalid."))
+            elif event.event_type == "order_completed":
+                target = event.target_valuation_id
+                if (
+                    not target or target.artifact_type != "valuation"
+                    or target.order_id != event.order_id
+                    or target.company_id != event.company_id
+                    or event.stable_order_id != event.order_id.id
+                    or event.company_id != event.order_id.company_id
+                    or event.from_status != "under_review" or event.to_status != "completed"
+                    or not event.reviewer_user_id
+                    or event.new_valuation_id or event.revision_request_event_id
+                    or event.vendor_revision_instructions
+                    or event.prior_reviewer_user_id or event.reassignment_reason
+                ):
+                    raise AccessError(_("Order completion provenance is invalid."))
             elif event.event_type == "reviewer_reassigned":
                 if (
                     not event.prior_reviewer_user_id or not event.reviewer_user_id
@@ -309,6 +329,18 @@ class TruCalcOrderLifecycleEvent(models.Model):
     @api.model_create_multi
     def create(self, vals_list):
         raise AccessError(_("Order lifecycle events require a trusted workflow."))
+
+    @api.model
+    @api.private
+    def _log_order_completion(self, order, target, actor):
+        return super(TruCalcOrderLifecycleEvent, self.sudo()).create({
+            "order_id": order.id, "stable_order_id": order.id,
+            "company_id": order.company_id.id, "event_type": "order_completed",
+            "from_status": "under_review", "to_status": "completed",
+            "actor_id": actor.id, "event_at": fields.Datetime.now(),
+            "reviewer_user_id": order.reviewer_user_id.id,
+            "target_valuation_id": target.id,
+        })
 
     def write(self, vals):
         raise AccessError(_("Order lifecycle events are immutable."))

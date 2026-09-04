@@ -107,6 +107,7 @@ class TrucalcDocument(models.Model):
 
     @api.model
     def _prepare_common_create(self, vals, order, actor, origin, bank=False):
+        order._check_operational_edit()
         filename = self._validate_filename_value(vals.get("filename"))
         self._validate_file_value(vals.get("attachment"))
         tag = self.env["trucalc.document.tag"].sudo().browse(vals.get("tag_id")).exists()
@@ -233,6 +234,7 @@ class TrucalcDocument(models.Model):
             or self.env.user.has_group("trucalc_orders.group_trucalc_operations")
         ):
             raise AccessError(_("Only TruCalc Administrators and Operations may manage documents."))
+        self.sudo().mapped("order_id")._check_operational_edit()
         if self.filtered(lambda document: document.order_id.status == "draft"):
             raise AccessError(_("TruCalc personnel may not modify Bank Draft documents."))
 

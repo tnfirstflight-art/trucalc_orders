@@ -957,9 +957,7 @@ class EvaluationOrder(models.Model):
         self.invalidate_recordset()
 
     def write(self, vals):
-        if "reviewer_user_id" in vals and not self.env.context.get(
-            "trucalc_controlled_reviewer_assignment"
-        ):
+        if "reviewer_user_id" in vals:
             raise AccessError(_(
                 "Reviewer assignment requires the controlled assignment action."
             ))
@@ -997,8 +995,17 @@ class EvaluationOrder(models.Model):
                     vals["inspection_contact_phone"]
                 )
             )
+        self._check_operational_edit()
         result = super().write(vals)
         return result
+
+    @api.private
+    def _check_operational_edit(self):
+        """Serialize ordinary edits with completion; no context bypass."""
+        for order in self.sudo().sorted("id"):
+            order._lock_for_bid_lifecycle()
+            if order.status == "completed":
+                raise AccessError(_("Completed Orders are closed to operational editing."))
 
     @api.private
     def _controlled_lifecycle_write(self, vals):
@@ -1075,6 +1082,7 @@ class EvaluationOrder(models.Model):
     def action_add_document(self):
         self._require_intake_manager()
         self.ensure_one()
+        self._check_operational_edit()
         if self.status == "draft":
             raise AccessError(_("TruCalc personnel may not modify a Bank Draft."))
         self.check_access("read")
@@ -1472,6 +1480,8 @@ class EvaluationOrder(models.Model):
         if not (
             user.has_group("trucalc_orders.group_trucalc_admin")
             or user.has_group("trucalc_orders.group_trucalc_operations")
+            or (user.has_group("trucalc_orders.group_trucalc_reviewer")
+                and self.status == "completed" and self.reviewer_user_id == user)
         ):
             raise AccessError(_("Valuation history access is not authorized."))
         return {
@@ -1648,7 +1658,7 @@ class EvaluationOrder(models.Model):
             raise ValidationError(_("An approved Valuation prevents Reviewer reassignment."))
         from_status = order.status
         to_status = "reviewer_assigned"
-        order.with_context(trucalc_controlled_reviewer_assignment=True)._controlled_lifecycle_write({
+        order._controlled_lifecycle_write({
             "reviewer_user_id": reviewer_user.id,
             "status": to_status,
         })
@@ -1774,6 +1784,123 @@ class EvaluationOrder(models.Model):
         if Event._valuation_approval(target):
             raise ValidationError(_("This Valuation has already been approved."))
         Event._log_valuation_approval(order, target, actor)
+        return True
+
+    @api.private
+    def _require_completion_actor(self):
+        actor = self.env.user
+        if (
+            not actor.active or actor.share or actor._trucalc_has_external_role()
+            or not (actor.has_group("trucalc_orders.group_trucalc_admin")
+                    or actor.has_group("trucalc_orders.group_trucalc_operations"))
+            or self.sudo().company_id not in actor.company_ids
+        ):
+            raise AccessError(_("Order completion is not authorized."))
+        self.check_access("read")
+        return actor
+
+    @api.private
+    def _completion_valuation(self):
+        """Called only after the Order lock, with refreshed trusted records."""
+        self.ensure_one()
+        Event = self.env["trucalc.order.lifecycle.event"].sudo()
+        if self.status != "under_review" or Event.search_count([
+            ("order_id", "=", self.id), ("event_type", "=", "order_completed"),
+        ]):
+            raise ValidationError(_("Only an uncompleted Order Under Review may be completed."))
+        valuation = self.env["trucalc.vendor.deliverable"].sudo().search([
+            ("order_id", "=", self.id), ("artifact_type", "=", "valuation"),
+            ("is_current", "=", True),
+        ])
+        if len(valuation) != 1:
+            raise ValidationError(_("Completion requires one current Valuation."))
+        self.env.cr.execute(
+            "SELECT id FROM trucalc_vendor_deliverable WHERE id = %s FOR UPDATE",
+            (valuation.id,),
+        )
+        valuation.invalidate_recordset()
+        self.invalidate_recordset()
+        if (valuation.status != "submitted" or not valuation.is_current
+                or valuation != self.current_valuation_id
+                or valuation.company_id != self.company_id):
+            raise ValidationError(_("The current submitted Valuation is no longer valid."))
+        approval = Event._valuation_approval(valuation)
+        if (
+            not approval or approval.order_id != self
+            or approval.stable_order_id != self.id
+            or approval.company_id != self.company_id
+            or not self.reviewer_user_id
+            or approval.reviewer_user_id != self.reviewer_user_id
+            or approval.actor_id != self.reviewer_user_id
+            or approval.from_status != "under_review" or approval.to_status != "under_review"
+        ):
+            raise ValidationError(_("Completion requires the exact current Reviewer approval."))
+        if Event._open_valuation_revision_request(valuation):
+            raise ValidationError(_("An open Valuation revision prevents completion."))
+        assignment = Event.search([
+            ("order_id", "=", self.id),
+            ("event_type", "in", ("reviewer_assigned", "reviewer_reassigned")),
+        ], order="id desc", limit=1)
+        acceptance = Event.search([
+            ("order_id", "=", self.id), ("event_type", "=", "review_accepted"),
+        ], order="id desc", limit=1)
+        if (
+            not assignment or not acceptance
+            or not assignment.id < acceptance.id < approval.id
+            or not assignment.event_at <= acceptance.event_at <= approval.event_at
+            or assignment.reviewer_user_id != self.reviewer_user_id
+            or acceptance.reviewer_user_id != self.reviewer_user_id
+            or acceptance.actor_id != self.reviewer_user_id
+            or acceptance.company_id != self.company_id
+            or assignment.company_id != self.company_id
+            or acceptance.stable_order_id != self.id or assignment.stable_order_id != self.id
+            or acceptance.from_status != "reviewer_assigned"
+            or acceptance.to_status != "under_review"
+        ):
+            raise ValidationError(_("Completion requires acceptance and approval in the current review cycle."))
+        invoice = self.env["trucalc.vendor.deliverable"].sudo().search([
+            ("order_id", "=", self.id), ("artifact_type", "=", "vendor_invoice"),
+        ])
+        engagement = valuation.engagement_id
+        authorization = valuation.authorization_id
+        if (
+            len(invoice) != 1 or invoice.status != "submitted"
+            or invoice.version != 0 or invoice.is_current
+            or invoice.company_id != self.company_id
+            or invoice.vendor_id != self.assigned_vendor_id
+            or invoice.vendor_id != valuation.vendor_id
+            or invoice.engagement_id != engagement or invoice.authorization_id != authorization
+            or invoice.bidding_round != self.bidding_round
+            or valuation.bidding_round != self.bidding_round
+            or not engagement.active or engagement.response_state != "accepted"
+            or engagement.order_id != self or engagement.company_id != self.company_id
+            or engagement.vendor_id != self.assigned_vendor_id
+            or engagement.round_number != self.bidding_round
+            or engagement.assignment_authorization_id != authorization
+            or not authorization.active or authorization.source != "assignment"
+            or authorization.order_id != self or authorization.company_id != self.company_id
+            or authorization.vendor_id != self.assigned_vendor_id
+            or authorization.round_number != self.bidding_round
+        ):
+            raise ValidationError(_("Completion requires a submitted Vendor Invoice from this Order's accepted engagement."))
+        return valuation
+
+    def action_complete_order(self):
+        self.ensure_one()
+        actor = self._require_completion_actor()
+        # A savepoint also guarantees rollback when a trusted caller catches an error.
+        with self.env.cr.savepoint():
+            order = self.sudo()
+            order._lock_for_bid_lifecycle()
+            order.invalidate_recordset()
+            self._require_completion_actor()
+            valuation = order._completion_valuation()
+            order.with_context(tracking_disable=True)._controlled_lifecycle_write({
+                "status": "completed",
+            })
+            self.env["trucalc.order.lifecycle.event"]._log_order_completion(
+                order, valuation, actor,
+            )
         return True
 
     def action_complete_review(self):

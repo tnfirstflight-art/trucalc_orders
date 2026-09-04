@@ -481,6 +481,8 @@ class TruCalcVendorPortal(CustomerPortal):
     )
     def portal_bank_document_upload(self, order_number, **post):
         order, _bank = self._bank_order(order_number)
+        if order.status == "completed":
+            raise request.not_found()
         upload = request.httprequest.files.get("document_file")
         draft_values = dict(post)
         draft_values.pop("csrf_token", None)

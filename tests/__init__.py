@@ -18,3 +18,4 @@ from . import test_service_area
 from . import test_bank_request_submission
 from . import test_vendor_deliverables
 from . import test_review_workflow
+from . import test_order_completion

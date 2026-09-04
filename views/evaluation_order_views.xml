@@ -121,6 +121,12 @@
                             groups="trucalc_orders.group_trucalc_reviewer"
                             invisible="status != 'under_review' or reviewer_user_id != uid or not current_valuation_id or valuation_approved or valuation_revision_requested"/>
 
+                    <button name="action_complete_order" string="Complete Order"
+                            type="object" class="btn-primary"
+                            groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                            invisible="status != 'under_review' or not current_valuation_id or not valuation_approved or valuation_revision_requested or not vendor_invoice_id"
+                            confirm="Complete this Order? Completion releases the approved Valuation to the Bank and closes the Order to further operational editing."/>
+
                     <field
                         name="status"
                         widget="statusbar"
@@ -151,19 +157,19 @@
 
                         <group string="Borrower Information">
 
-                            <field name="borrower"/>
-                            <field name="loan_number"/>
-                            <field name="service_type"/>
+                            <field name="borrower" readonly="status == 'completed'"/>
+                            <field name="loan_number" readonly="status == 'completed'"/>
+                            <field name="service_type" readonly="status == 'completed'"/>
 
                         </group>
 
                         <group string="Property Information">
-                            <field name="property_address"/>
-                            <field name="city"/>
-                            <field name="state"/>
-                            <field name="county"/>
-                            <field name="zip_code"/>
-                            <field name="property_type"/>
+                            <field name="property_address" readonly="status == 'completed'"/>
+                            <field name="city" readonly="status == 'completed'"/>
+                            <field name="state" readonly="status == 'completed'"/>
+                            <field name="county" readonly="status == 'completed'"/>
+                            <field name="zip_code" readonly="status == 'completed'"/>
+                            <field name="property_type" readonly="status == 'completed'"/>
                         </group>
 
                     </group>
@@ -177,13 +183,13 @@
                             <field name="company_id" readonly="create_date"/>
                             <field name="order_date_display" string="Order Date"/>
 
-                            <field name="assigned_vendor_id" readonly="status in ('new', 'accepted', 'declined')"/>
+                            <field name="assigned_vendor_id" readonly="(status in ('new', 'accepted', 'declined')) or status == 'completed'"/>
                             <field name="currency_id" invisible="1"/>
                             <field name="vendor_fee" readonly="1" widget="monetary"
                                    options="{'currency_field': 'currency_id'}"/>
 
                             <field name="due_date" required="1"
-                                   options="{'numeric': True}"/>
+                                   options="{'numeric': True}" readonly="status == 'completed'"/>
                             <field name="vendor_delivery_date" readonly="1"
                                    options="{'numeric': True}"/>
                             <field name="vendor_engaged_at" readonly="1"/>
@@ -203,7 +209,7 @@
                                    groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
                                    invisible="engagement_response_state != 'declined'"/>
 
-                            <field name="fee_override" readonly="status in ('new', 'accepted', 'declined')"/>
+                            <field name="fee_override" readonly="(status in ('new', 'accepted', 'declined')) or status == 'completed'"/>
 
                             <field name="reviewer_user_id"
                                    groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer"
@@ -283,17 +289,17 @@
                     </div>
 
                     <group string="Inspection Contact">
-                        <field name="inspection_contact_name"/>
+                        <field name="inspection_contact_name" readonly="status == 'completed'"/>
                         <field name="inspection_contact_phone_display"
-                               widget="inspection_phone_blur"/>
-                        <field name="inspection_contact_email" widget="email"/>
+                               widget="inspection_phone_blur" readonly="status == 'completed'"/>
+                        <field name="inspection_contact_email" widget="email" readonly="status == 'completed'"/>
                     </group>
 
                     <notebook>
 
                         <page string="Notes">
 
-                            <field name="notes"/>
+                            <field name="notes" readonly="status == 'completed'"/>
 
                         </page>
 
@@ -303,25 +309,25 @@
                                     string="Add Document" icon="fa-plus"
                                     class="btn-primary mb-2"
                                     groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
-                                    invisible="not id"/>
+                                    invisible="(not id) or status == 'completed'"/>
 
-                            <field name="document_ids">
+                            <field name="document_ids" readonly="status == 'completed'">
 
                                 <list create="false" delete="false" editable="bottom"
                                       open_form_view="false" limit="10000">
-                                    <field name="active" column_invisible="True"/>
+                                    <field name="active" column_invisible="True" readonly="parent.status == 'completed'"/>
                                     <field name="filename" string="Document Name" readonly="1"/>
                                     <field name="tag_id" widget="many2one_autosave"
                                            domain="[('active', '=', True)]"
-                                           options="{'no_create': True, 'no_create_edit': True, 'no_open': True}"/>
+                                           options="{'no_create': True, 'no_create_edit': True, 'no_open': True}" readonly="parent.status == 'completed'"/>
                                     <field name="visible_before_engagement" widget="boolean_toggle"
-                                           options="{'autosave': True}"/>
+                                           options="{'autosave': True}" readonly="parent.status == 'completed'"/>
                                     <field name="visible_after_engagement" widget="boolean_toggle"
-                                           options="{'autosave': True}"/>
+                                           options="{'autosave': True}" readonly="parent.status == 'completed'"/>
                                     <button name="action_download" type="object" icon="fa-download"
                                             title="Download" invisible="not active"/>
                                     <button name="action_controlled_delete" type="object" icon="fa-trash"
-                                            title="Delete" invisible="not active"
+                                            title="Delete" invisible="not active or parent.status == 'completed'"
                                             groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
                                             confirm-title="Delete Document?" confirm-label="Delete"
                                             confirm="Are you sure you want to delete this document? This action cannot be undone."/>

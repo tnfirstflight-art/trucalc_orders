@@ -55,6 +55,7 @@ class TruCalcVendorOrder(models.Model):
             ("report_received", "Report Received"),
             ("reviewer_assigned", "Reviewer Assigned"),
             ("under_review", "Under Review"),
+            ("completed", "Completed"),
             ("declined", "Declined"),
         ],
         readonly=True,
@@ -211,7 +212,7 @@ class TruCalcVendorOrder(models.Model):
                     CASE WHEN a.active IS NOT TRUE THEN 'declined'
                          WHEN a.source = 'invitation' THEN 'open_for_bid'
                          WHEN o.status IN ('assigned', 'engaged', 'report_received',
-                              'reviewer_assigned', 'under_review') THEN o.status
+                              'reviewer_assigned', 'under_review', 'completed') THEN o.status
                          ELSE NULL END AS vendor_status,
                     o.status AS order_status,
                     CASE WHEN a.source = 'invitation' THEN a.expires_at END
@@ -325,7 +326,7 @@ class TruCalcVendorOrder(models.Model):
                   AND a.source IN ('invitation', 'assignment')
                   AND (a.source = 'invitation'
                        OR o.status IN ('assigned', 'engaged', 'report_received',
-                           'reviewer_assigned', 'under_review'))
+                           'reviewer_assigned', 'under_review', 'completed'))
                 ORDER BY a.vendor_id, a.order_id,
                     CASE WHEN a.active IS TRUE AND a.source = 'assignment' THEN 0
                          WHEN a.active IS TRUE THEN 1 ELSE 2 END,

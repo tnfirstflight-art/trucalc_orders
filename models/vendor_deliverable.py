@@ -14,6 +14,9 @@ INVOICE_SUBMISSION_STATES = frozenset({
 })
 
 
+VENDOR_DOWNLOAD_STATES = INVOICE_SUBMISSION_STATES | {"completed"}
+
+
 class TruCalcVendorDeliverable(models.Model):
     _name = "trucalc.vendor.deliverable"
     _description = "Immutable Vendor Deliverable"
@@ -266,7 +269,7 @@ class TruCalcVendorDeliverable(models.Model):
             or engagement.round_number != authorization.round_number
             or authorization.round_number != order.bidding_round
             or order.assigned_vendor_id != vendor
-            or order.status not in INVOICE_SUBMISSION_STATES
+            or order.status not in VENDOR_DOWNLOAD_STATES
         ):
             return self.browse()
         return self.sudo().search([
@@ -294,7 +297,7 @@ class TruCalcVendorDeliverable(models.Model):
                 deliverable.artifact_type == "valuation"
                 and deliverable.order_id.reviewer_user_id == actor
                 and deliverable.order_id.status in (
-                    "reviewer_assigned", "under_review",
+                    "reviewer_assigned", "under_review", "completed",
                 )
             ):
                 deliverable.with_user(actor).check_access("read")
