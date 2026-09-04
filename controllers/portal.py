@@ -208,6 +208,12 @@ class TruCalcVendorPortal(CustomerPortal):
         return order, bank
 
     def _bank_approved_valuation(self, order):
+        """Bank release boundary; future controlled closeout owns completion."""
+        if order.status != "completed":
+            return (
+                request.env["trucalc.vendor.deliverable"].browse(),
+                request.env["trucalc.order.lifecycle.event"].browse(),
+            )
         valuation = request.env["trucalc.vendor.deliverable"].sudo().search([
             ("order_id", "=", order.id),
             ("artifact_type", "=", "valuation"),

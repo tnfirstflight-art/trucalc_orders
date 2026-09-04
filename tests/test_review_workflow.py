@@ -226,12 +226,24 @@ class TestControlledValuationReview(TransactionCase):
         self.assertEqual(order.message_ids, before_stale_messages)
         with self.assertRaises(ValidationError):
             order.with_user(self.reviewer).action_approve_valuation(first)
+        before_approval_events = order.lifecycle_event_ids
         order.with_user(self.reviewer).action_approve_valuation(second)
         self.assertEqual(order.status, "under_review")
         approval = order.lifecycle_event_ids.filtered(
             lambda event: event.event_type == "valuation_approved"
         )
         self.assertEqual(approval.target_valuation_id, second)
+        self.assertEqual(order.lifecycle_event_ids - before_approval_events, approval)
+        self.assertEqual(len(approval), 1)
+        self.assertEqual(approval.actor_id, self.reviewer)
+        self.assertEqual(approval.reviewer_user_id, self.reviewer)
+        self.assertTrue(approval.event_at)
+        self.assertEqual((approval.from_status, approval.to_status),
+                         ("under_review", "under_review"))
+        with self.assertRaises(AccessError):
+            approval.with_user(self.admin).write({"event_at": fields.Datetime.now()})
+        with self.assertRaises(AccessError):
+            approval.with_user(self.admin).unlink()
         before_approved_messages = order.message_ids
         with self.assertRaises(ValidationError):
             order.with_user(self.reviewer).action_request_valuation_revision(

@@ -735,7 +735,7 @@ class TestVendorDeliverablePortal(HttpCase):
             f"/trucalc/deliverables/{deliverable.id}/download"
         ).status_code, 404)
 
-    def test_bank_release_requires_exact_current_approval(self):
+    def _bank_release_fixture(self):
         order = self._engaged()
         self._upload(
             self.vendor_user, order, "valuation", "Approved Valuation.pdf",
@@ -744,20 +744,124 @@ class TestVendorDeliverablePortal(HttpCase):
         valuation = self.env["trucalc.vendor.deliverable"].sudo().search([
             ("order_id", "=", order.id), ("artifact_type", "=", "valuation"),
         ])
-        bank_url = (
+        order.with_user(self.admin).action_assign_reviewer(self.reviewer)
+        order.with_user(self.reviewer).action_start_review()
+        return order, valuation
+
+    def _bank_valuation_url(self, order, valuation):
+        return (
             f"/my/trucalc/bank/orders/{order.order_number}/valuation/"
             f"{valuation.id}/download"
         )
-        self._login(self.bank)
-        self.assertEqual(self.url_open(bank_url).status_code, 404)
-        order.with_user(self.admin).action_assign_reviewer(self.reviewer)
-        order.with_user(self.reviewer).action_start_review()
-        order.with_user(self.reviewer).action_approve_valuation(valuation)
-        self._login(self.bank)
+
+    def _assert_bank_valuation_hidden(self, order, valuation):
+        self.assertEqual(self.url_open(
+            self._bank_valuation_url(order, valuation)
+        ).status_code, 404)
         page = self.url_open(
             f"/my/trucalc/bank/orders/{order.order_number}/documents"
         ).text
-        self.assertIn("Approved Valuation.pdf", page)
-        response = self.url_open(bank_url)
+        self.assertNotIn("Approved Valuation", page)
+        self.assertNotIn(valuation.filename, page)
+        self.assertNotIn(self._bank_valuation_url(order, valuation), page)
+        tree = etree.HTML(page)
+        self.assertFalse(tree.xpath(
+            "//*[@data-oe-model='trucalc.vendor.deliverable' or "
+            "@data-oe-model='trucalc.order.lifecycle.event']"
+        ))
+        self.assertNotIn("<strong>Submitted:</strong>", page)
+        self.assertNotIn("<strong>Approved:</strong>", page)
+
+    def _assert_bank_generic_download_denied(self, deliverable):
+        attachment = self.env["ir.attachment"].sudo().search([
+            ("res_model", "=", deliverable._name),
+            ("res_id", "=", deliverable.id), ("res_field", "=", "file_data"),
+        ])
+        self.assertEqual(len(attachment), 1)
+        for url in (
+            f"/web/content/{attachment.id}",
+            f"/web/content?model={deliverable._name}&id={deliverable.id}&field=file_data",
+        ):
+            self.assertEqual(self.url_open(url).status_code, 404)
+
+    def test_bank_release_requires_completion_after_approval(self):
+        order, valuation = self._bank_release_fixture()
+        self._login(self.bank)
+        self._assert_bank_valuation_hidden(order, valuation)
+        order.with_user(self.reviewer).action_approve_valuation(valuation)
+        self.assertEqual(order.status, "under_review")
+        self._assert_bank_valuation_hidden(order, valuation)
+        self._assert_bank_generic_download_denied(valuation)
+
+    def test_bank_completed_release_gate_compatibility(self):
+        """Disposable status fixture tests release eligibility, not closeout."""
+        order, first = self._bank_release_fixture()
+        order.with_user(self.reviewer).action_request_valuation_revision(
+            first, "Correct the certification page.",
+        )
+        self._upload(self.vendor_user, order, "valuation", "Current Valuation.pdf",
+                     b"%PDF-1.7\napproved")
+        valuation = self.env["trucalc.vendor.deliverable"].sudo().search([
+            ("order_id", "=", order.id), ("artifact_type", "=", "valuation"),
+            ("is_current", "=", True),
+        ])
+        # Reuse the trusted submission setup from the deliverable model tests;
+        # this fixture tests Bank isolation, not the Vendor HTTP upload route.
+        # The initial deliverable already holds the validated assignment context.
+        authorization = first.authorization_id
+        self.assertEqual(len(authorization), 1)
+        invoice = self.env["trucalc.vendor.deliverable"].with_user(
+            self.vendor_user
+        )._submit(
+            authorization, self.vendor_user, "vendor_invoice", "Private Invoice.pdf", PDF,
+        )
+        self.assertEqual(len(invoice), 1)
+        order.with_user(self.reviewer).action_approve_valuation(valuation)
+        # An approved prior version is unreachable through the preserved workflow.
+        # Seed that historical event only in this isolated adversarial fixture.
+        self.env["trucalc.order.lifecycle.event"]._log_valuation_approval(
+            order, first, self.reviewer,
+        )
+        self._login(self.bank)
+        self._assert_bank_valuation_hidden(order, valuation)
+        for item in (first, invoice):
+            self._assert_bank_valuation_hidden(order, item)
+            self._assert_bank_generic_download_denied(item)
+
+        order.with_user(self.admin)._controlled_lifecycle_write({"status": "completed"})
+        page = self.url_open(
+            f"/my/trucalc/bank/orders/{order.order_number}/documents"
+        ).text
+        self.assertIn("Approved Valuation", page)
+        self.assertIn(valuation.filename, page)
+        self.assertIn(self._bank_valuation_url(order, valuation), page)
+        self.assertNotIn(first.filename, page)
+        self.assertNotIn(invoice.filename, page)
+        response = self.url_open(self._bank_valuation_url(order, valuation))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.content, b"%PDF-1.7\napproved")
+        for item in (first, invoice):
+            self.assertEqual(self.url_open(
+                self._bank_valuation_url(order, item)
+            ).status_code, 404)
+        self._assert_bank_generic_download_denied(valuation)
+        self.assertEqual(self.url_open(
+            f"/my/trucalc/bank/orders/{order.order_number}/valuation/0/download"
+        ).status_code, 404)
+        other_company = self.env["res.company"].create({"name": "4D3A Other Bank"})
+        other_bank = self._user("4d3a-other-bank", "group_bank_admin", bank=other_company)
+        self._login(other_bank)
+        self.assertEqual(self.url_open(
+            self._bank_valuation_url(order, valuation)
+        ).status_code, 404)
+        self.assertEqual(self.url_open(
+            f"/my/trucalc/bank/orders/{order.order_number}/documents"
+        ).status_code, 404)
+
+    def test_bank_completed_without_approval_is_denied(self):
+        """Test-only completed fixture does not implement a completion action."""
+        order, valuation = self._bank_release_fixture()
+        order.with_user(self.admin)._controlled_lifecycle_write({"status": "completed"})
+        self._login(self.bank)
+        self._assert_bank_valuation_hidden(order, valuation)
+        self._assert_bank_generic_download_denied(valuation)
