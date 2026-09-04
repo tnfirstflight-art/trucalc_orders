@@ -15,6 +15,7 @@ from . import test_engagement_documents
 from . import test_bank_order_portal
 from . import test_downstream_lifecycle_security
 from . import test_service_area
+from . import test_pricing_architecture
 from . import test_bank_request_submission
 from . import test_vendor_deliverables
 from . import test_review_workflow

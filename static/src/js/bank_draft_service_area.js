@@ -29,6 +29,7 @@ function initializeServiceAreaForm(form) {
     const countySelect = form.querySelector("select[name='service_county']");
     const serviceSelect = form.querySelector("select[name='service_type']");
     const areaInput = form.querySelector("input[name='service_area_id']");
+    const feeDisplay = form.querySelector("[data-service-fee]");
     if (!stateSelect || !countySelect || !serviceSelect || !areaInput) {
         return;
     }
@@ -47,6 +48,15 @@ function initializeServiceAreaForm(form) {
     const resetSelect = (select, label) => {
         select.replaceChildren();
         addOption(select, "", label, "");
+    };
+
+    const displayFee = (area) => {
+        if (!feeDisplay) {
+            return;
+        }
+        feeDisplay.textContent = area && area.service_fee !== false
+            ? `$${area.service_fee}`
+            : "Not configured";
     };
 
     const populateServices = (stateId, county, selected = "") => {
@@ -70,6 +80,7 @@ function initializeServiceAreaForm(form) {
         if (selectedMatch) {
             areaInput.value = String(selectedMatch.id);
         }
+        displayFee(selectedMatch);
     };
 
     const populateCounties = (stateId, selected = "", service = "") => {
@@ -112,6 +123,7 @@ function initializeServiceAreaForm(form) {
                 && area.service_type === serviceSelect.value
         );
         areaInput.value = match ? String(match.id) : "";
+        displayFee(match);
     });
 }
 

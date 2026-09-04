@@ -52,14 +52,25 @@ class TestServiceArea(TransactionCase):
             "Shelby County", "shelby county",
         ))
         self.assertTrue(area.active)
+        self.assertEqual(area.currency_id, self.env.ref("base.USD"))
+        self.assertFalse(area.base_fee)
+        area.base_fee = 425
+        self.assertEqual(area.base_fee, 425)
+        with self.assertRaises(ValidationError):
+            area.base_fee = -1
         area.write({"county": "Davidson County"})
         area.active = False
         self.assertFalse(area.active)
         with self.assertRaises(AccessError):
             area.unlink()
 
-    def test_acl_is_administrator_only(self):
-        for user in (self.ops, self.reviewer, self.bank, self.vendor_user):
+    def test_acl_is_admin_maintained_and_internal_read_only(self):
+        for user in (self.ops, self.reviewer):
+            model = self.env["trucalc.service.area"].with_user(user)
+            self.assertTrue(model.has_access("read"))
+            for operation in ("create", "write", "unlink"):
+                self.assertFalse(model.has_access(operation))
+        for user in (self.bank, self.vendor_user):
             model = self.env["trucalc.service.area"].with_user(user)
             for operation in ("read", "create", "write", "unlink"):
                 self.assertFalse(model.has_access(operation))
@@ -103,7 +114,7 @@ class TestServiceArea(TransactionCase):
         self.assertEqual(list_node.get("editable"), "bottom")
         self.assertEqual(
             list_arch.xpath("//list/field/@name"),
-            ["state_id", "county", "service_type", "active"],
+            ["state_id", "county", "service_type", "currency_id", "base_fee", "active"],
         )
         for field_name in ("state_id", "county", "service_type"):
             self.assertEqual(
@@ -128,7 +139,7 @@ class TestServiceArea(TransactionCase):
         form_arch = etree.fromstring(form_view.arch.encode())
         self.assertEqual(
             form_arch.xpath("//form//field/@name"),
-            ["state_id", "county", "service_type"],
+            ["state_id", "county", "service_type", "currency_id", "base_fee"],
         )
         action = self.env.ref(
             "trucalc_orders.action_trucalc_service_area_new"

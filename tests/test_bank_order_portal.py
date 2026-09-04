@@ -40,7 +40,7 @@ class TestBankOrderPortal(HttpCase):
         })
         cls.service_area = cls.env["trucalc.service.area"].with_user(cls.admin).create({
             "state_id": cls.service_state.id, "county": "Portal County",
-            "service_type": "evaluation",
+            "service_type": "evaluation", "base_fee": 500,
         })
         cls.inactive_service_area = cls.env[
             "trucalc.service.area"
@@ -192,8 +192,24 @@ class TestBankOrderPortal(HttpCase):
             self._login(user)
             listing = self.url_open("/my/trucalc/bank/orders").text
             self.assertIn("New Request", listing)
+            snapshot_count = self.env["trucalc.order"].sudo().search_count([
+                ("fee_locked_at", "!=", False),
+            ])
+            event_count = self.env[
+                "trucalc.order.lifecycle.event"
+            ].sudo().search_count([])
             form = self.url_open("/my/trucalc/bank/orders/new")
             self.assertEqual(form.status_code, 200)
+            self.assertEqual(
+                self.env["trucalc.order"].sudo().search_count([
+                    ("fee_locked_at", "!=", False),
+                ]),
+                snapshot_count,
+            )
+            self.assertEqual(
+                self.env["trucalc.order.lifecycle.event"].sudo().search_count([]),
+                event_count,
+            )
             self.assertIn("o_trucalc_bank_portal", form.text)
             self.assertIn("Inspection Contact Person", form.text)
             self.assertIn("Loan Number", form.text)
@@ -210,6 +226,7 @@ class TestBankOrderPortal(HttpCase):
                 "county": self.service_area.county,
                 "service_type": "evaluation",
                 "service_label": "Evaluation",
+                "service_fee": "500.00",
             }
             self.assertIn(expected_area, matrix)
             self.assertNotIn(self.inactive_service_area.id, {

@@ -16,6 +16,10 @@ BANK_REQUEST_FIELDS = frozenset({
 BANK_ORDER_CREATE_FIELDS = BANK_REQUEST_FIELDS - {
     "service_state_id", "service_county",
 }
+FEE_SNAPSHOT_FIELDS = frozenset({
+    "agreed_fee", "fee_source", "negotiated_fee_id", "fee_locked_at",
+    "fee_currency_id",
+})
 
 
 
@@ -49,13 +53,11 @@ class EvaluationOrder(models.Model):
 
     borrower = fields.Char(
         string="Borrower",
-        required=True,
         tracking=True,
     )
 
     property_address = fields.Char(
         string="Property Address",
-        required=True,
         tracking=True,
     )
 
@@ -79,21 +81,68 @@ class EvaluationOrder(models.Model):
     service_area_id = fields.Many2one(
         "trucalc.service.area",
         string="Service Area",
-        readonly=True,
         copy=False,
         index=True,
         ondelete="restrict",
+    )
+    pricing_state_id = fields.Many2one(
+        "res.country.state", string="Pricing State", copy=False,
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+    )
+    pricing_county_area_id = fields.Many2one(
+        "trucalc.service.area", string="Pricing County", copy=False,
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+    )
+    available_pricing_state_ids = fields.Many2many(
+        "res.country.state", compute="_compute_pricing_selector_options",
+        compute_sudo=True,
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+    )
+    available_pricing_county_area_ids = fields.Many2many(
+        "trucalc.service.area", compute="_compute_pricing_selector_options",
+        compute_sudo=True,
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+    )
+    available_pricing_service_area_ids = fields.Many2many(
+        "trucalc.service.area", compute="_compute_pricing_selector_options",
+        compute_sudo=True,
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+    )
+    available_internal_bank_ids = fields.Many2many(
+        "res.company", compute="_compute_available_internal_banks",
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+    )
+    is_internal_draft = fields.Boolean(
+        compute="_compute_is_internal_draft", compute_sudo=True,
     )
 
     company_id = fields.Many2one(
         "res.company",
         string="Company",
-        required=True,
         default=lambda self: self.env.company,
         tracking=True,
     )
     currency_id = fields.Many2one(
         "res.currency", related="company_id.currency_id", readonly=True,
+    )
+    agreed_fee = fields.Monetary(
+        string="Agreed Fee", currency_field="fee_currency_id", readonly=True,
+        copy=False, tracking=True,
+    )
+    fee_source = fields.Selection(
+        [("base", "Base"), ("negotiated", "Negotiated")],
+        string="Fee Source", readonly=True, copy=False, tracking=True,
+    )
+    negotiated_fee_id = fields.Many2one(
+        "trucalc.negotiated.fee", string="Negotiated Fee Source",
+        readonly=True, copy=False, ondelete="restrict",
+    )
+    fee_locked_at = fields.Datetime(
+        string="Fee Locked At", readonly=True, copy=False,
+    )
+    fee_currency_id = fields.Many2one(
+        "res.currency", string="Fee Currency", readonly=True, copy=False,
+        ondelete="restrict",
     )
 
     requestor_company_id = fields.Many2one(
@@ -121,6 +170,90 @@ class EvaluationOrder(models.Model):
         string="Service Type",
         tracking=True,
     )
+
+    @api.depends("pricing_state_id", "pricing_county_area_id")
+    def _compute_pricing_selector_options(self):
+        Area = self.env["trucalc.service.area"].sudo()
+        active_areas = Area.search([("active", "=", True)])
+        states = active_areas.mapped("state_id")
+        for order in self:
+            state_areas = active_areas.filtered(
+                lambda area: area.state_id == order.pricing_state_id
+            )
+            county_representatives = Area.browse()
+            seen = set()
+            for area in state_areas.sorted(
+                key=lambda item: (item.county_normalized, item.id)
+            ):
+                if area.county_normalized not in seen:
+                    county_representatives |= area
+                    seen.add(area.county_normalized)
+            service_areas = state_areas.filtered(
+                lambda area: order.pricing_county_area_id
+                and area.county_normalized
+                == order.pricing_county_area_id.county_normalized
+            )
+            order.available_pricing_state_ids = states
+            order.available_pricing_county_area_ids = county_representatives
+            order.available_pricing_service_area_ids = service_areas
+
+    @api.depends("requestor_company_id")
+    def _compute_available_internal_banks(self):
+        allowed = self.env.user.company_ids
+        for order in self:
+            order.available_internal_bank_ids = allowed - order.requestor_company_id
+
+    @api.depends("status", "requestor_id")
+    def _compute_is_internal_draft(self):
+        for order in self:
+            order.is_internal_draft = bool(
+                order.status == "draft"
+                and order.requestor_id
+                and not order.requestor_id.sudo().share
+            )
+
+    @api.onchange("pricing_state_id")
+    def _onchange_pricing_state(self):
+        for order in self:
+            order.pricing_county_area_id = False
+            order.service_area_id = False
+            order.service_type = False
+            order.state = False
+            order.county = False
+
+    @api.onchange("pricing_county_area_id")
+    def _onchange_pricing_county(self):
+        for order in self:
+            order.service_area_id = False
+            order.service_type = False
+            order.state = (
+                order.pricing_state_id.code or order.pricing_state_id.name
+                if order.pricing_state_id else False
+            )
+            order.county = (
+                order.pricing_county_area_id.county
+                if order.pricing_county_area_id else False
+            )
+
+    @api.onchange("service_area_id")
+    def _onchange_service_area(self):
+        for order in self:
+            if order.service_area_id and not order.fee_locked_at:
+                area = order.service_area_id
+                if order.pricing_state_id != area.state_id:
+                    order.pricing_state_id = area.state_id
+                if (
+                    not order.pricing_county_area_id
+                    or order.pricing_county_area_id.county_normalized
+                    != area.county_normalized
+                ):
+                    order.pricing_county_area_id = area
+                order.service_type = area.service_type
+                order.state = (
+                    area.state_id.code
+                    or area.state_id.name
+                )
+                order.county = area.county
 
     property_type = fields.Selection(
         [
@@ -619,8 +752,18 @@ class EvaluationOrder(models.Model):
         bank_company = False
         if user._trucalc_has_bank_role():
             bank_company = user._trucalc_bank_identity()
+        internal_draft = bool(
+            self.env.context.get("trucalc_internal_draft_intake")
+            and not user._trucalc_has_external_role()
+            and (
+                user.has_group("trucalc_orders.group_trucalc_admin")
+                or user.has_group("trucalc_orders.group_trucalc_operations")
+            )
+        )
         authoritative_order_date = fields.Date.context_today(self)
         for vals in vals_list:
+            if FEE_SNAPSHOT_FIELDS.intersection(vals):
+                raise AccessError(_("Order fee snapshots are server-controlled."))
             if "vendor_authorization_ids" in vals:
                 raise AccessError(_("Vendor Order authorization is server-maintained."))
             if "order_date" in vals:
@@ -644,11 +787,33 @@ class EvaluationOrder(models.Model):
                     "county": service_area.county,
                     "service_area_id": service_area.id,
                 })
-            if not vals.get("due_date"):
-                raise ValidationError(_("Client Due Date is required."))
-            vals["order_date"] = authoritative_order_date
+            if not internal_draft:
+                if not vals.get("borrower"):
+                    raise ValidationError(_("Borrower is required."))
+                if not vals.get("property_address"):
+                    raise ValidationError(_("Property Address is required."))
+                if not vals.get("due_date"):
+                    raise ValidationError(_("Client Due Date is required."))
+            vals["order_date"] = False if internal_draft else authoritative_order_date
+            if internal_draft:
+                company = self.env["res.company"].browse(
+                    vals.get("company_id")
+                ).exists()
+                if company and (
+                    company == self.env.company
+                    or company not in user.company_ids
+                ):
+                    raise ValidationError(_(
+                        "Select an authorized customer Bank other than TruCalc."
+                    ))
+                vals.update({
+                    "company_id": company.id or False,
+                    "requestor_company_id": self.env.company.id,
+                    "requestor_id": user.id,
+                    "status": "draft",
+                })
             if (
-                vals.get("status", "new") != "new"
+                vals.get("status", "new") != ("draft" if internal_draft else "new")
                 or vals.get("bidding_round", 0) != 0
                 or vals.get("assigned_vendor_id")
                 or vals.get("vendor_fee")
@@ -697,6 +862,18 @@ class EvaluationOrder(models.Model):
             trusted_model = self.with_context(trusted_context)
             orders = super(EvaluationOrder, trusted_model).create(vals_list)
         for order in orders:
+            if internal_draft:
+                order.sudo().message_post(body=Markup(_(
+                    "<p><strong>Internal Draft Created</strong></p>"
+                    "<ul><li>Created By: %(actor)s</li>"
+                    "<li>Created At: %(created_at)s</li></ul>"
+                )) % {
+                    "actor": escape(user.name),
+                    "created_at": tools.format_datetime(
+                        order.env, order.create_date, tz=user.tz, dt_format="medium"
+                    ),
+                })
+                continue
             order.sudo().message_post(body=Markup(_(
                 "<p><strong>Order Created</strong></p>"
                 "<ul>"
@@ -710,6 +887,92 @@ class EvaluationOrder(models.Model):
                 ),
             })
         return orders
+
+    @api.model
+    @api.private
+    def _resolve_bank_fee(self, bank, service_area):
+        bank = bank.sudo().exists()
+        service_area = service_area.sudo().exists()
+        if len(bank) != 1 or bank._name != "res.company":
+            raise ValidationError(_("A valid Bank is required to resolve pricing."))
+        if len(service_area) != 1 or not service_area.active:
+            raise ValidationError(_(
+                "An active Service Area is required to resolve pricing."
+            ))
+        if bank.currency_id != service_area.currency_id:
+            raise ValidationError(_(
+                "The Bank and Service Area currencies do not match."
+            ))
+        schedules = self.env["trucalc.negotiated.fee"].sudo().search([
+            ("bank_id", "=", bank.id),
+            ("service_area_id", "=", service_area.id),
+            ("active", "=", True),
+        ], limit=2)
+        if len(schedules) > 1:
+            raise ValidationError(_("Negotiated pricing is ambiguous."))
+        if schedules:
+            return {
+                "agreed_fee": schedules.negotiated_fee,
+                "fee_source": "negotiated",
+                "service_area_id": service_area.id,
+                "negotiated_fee_id": schedules.id,
+                "fee_currency_id": service_area.currency_id.id,
+            }
+        self.env.cr.execute(
+            "SELECT base_fee FROM trucalc_service_area WHERE id = %s",
+            (service_area.id,),
+        )
+        row = self.env.cr.fetchone()
+        if not row or row[0] is None:
+            raise ValidationError(_(
+                "No Bank fee is configured for the selected Service Area."
+            ))
+        return {
+            "agreed_fee": row[0],
+            "fee_source": "base",
+            "service_area_id": service_area.id,
+            "negotiated_fee_id": False,
+            "fee_currency_id": service_area.currency_id.id,
+        }
+
+    @api.model
+    @api.private
+    def _lock_pricing_key(self, bank_id, service_area_id):
+        """Serialize one logical Bank + Service Area pricing configuration."""
+        self.env.cr.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+            ("trucalc.pricing:%s:%s" % (bank_id, service_area_id),),
+        )
+
+    @api.model
+    @api.private
+    def _resolve_and_lock_bank_fee(self, bank, service_area):
+        """Resolve pricing after narrowly locking its complete configuration key."""
+        bank = bank.sudo().exists()
+        service_area = service_area.sudo().exists()
+        if len(bank) != 1 or len(service_area) != 1:
+            return self._resolve_bank_fee(bank, service_area)
+        self._lock_pricing_key(bank.id, service_area.id)
+        self.env.cr.execute(
+            "SELECT id FROM res_company WHERE id = %s FOR SHARE", (bank.id,),
+        )
+        self.env.cr.execute(
+            "SELECT id FROM trucalc_service_area WHERE id = %s FOR SHARE",
+            (service_area.id,),
+        )
+        bank.invalidate_recordset(["currency_id"])
+        service_area.invalidate_recordset(["active", "base_fee", "currency_id"])
+        pricing = self._resolve_bank_fee(bank, service_area)
+        if pricing["negotiated_fee_id"]:
+            self.env.cr.execute(
+                "SELECT id FROM trucalc_negotiated_fee WHERE id = %s FOR SHARE",
+                (pricing["negotiated_fee_id"],),
+            )
+            self.env["trucalc.negotiated.fee"].browse(
+                pricing["negotiated_fee_id"]
+            ).invalidate_recordset(["active", "negotiated_fee", "currency_id"])
+            pricing = self._resolve_bank_fee(bank, service_area)
+        return pricing
 
     @api.model
     @api.private
@@ -920,13 +1183,19 @@ class EvaluationOrder(models.Model):
     @api.model
     @api.private
     def _send_bank_draft(self, order, values, actor):
-        order, actor, _bank = self._authorize_bank_draft(order, actor)
+        order, actor, bank = self._authorize_bank_draft(order, actor)
         order._lock_bank_draft()
-        order, actor, _bank = self._authorize_bank_draft(order, actor)
+        order, actor, bank = self._authorize_bank_draft(order, actor)
         send_values = self._prepare_bank_request_values(values, actor, final=True)
+        send_values.update(self._resolve_and_lock_bank_fee(
+            bank, self.env["trucalc.service.area"].browse(
+                send_values["service_area_id"]
+            ),
+        ))
         send_values.update({
             "status": "new",
             "order_date": fields.Date.context_today(order.with_user(actor)),
+            "fee_locked_at": fields.Datetime.now(),
         })
         super(EvaluationOrder, order).write(send_values)
         self.env["trucalc.order.lifecycle.event"]._log_event(
@@ -957,16 +1226,33 @@ class EvaluationOrder(models.Model):
         self.invalidate_recordset()
 
     def write(self, vals):
+        if FEE_SNAPSHOT_FIELDS.intersection(vals):
+            raise AccessError(_("Order fee snapshots are server-controlled."))
         if "reviewer_user_id" in vals:
             raise AccessError(_(
                 "Reviewer assignment requires the controlled assignment action."
             ))
-        if "company_id" in vals and any(
-            order.company_id.id != vals["company_id"] for order in self
-        ):
-            raise AccessError(_(
-                "The Bank/Client Company is immutable after Order creation."
-            ))
+        self._check_operational_edit()
+        self.invalidate_recordset([
+            "status", "company_id", "requestor_company_id", "requestor_id",
+            "fee_locked_at", "is_internal_draft",
+        ])
+        if "company_id" in vals:
+            company = self.env["res.company"].browse(vals["company_id"]).exists()
+            for order in self:
+                if order.company_id == company:
+                    continue
+                if not order.is_internal_draft or order.fee_locked_at:
+                    raise AccessError(_(
+                        "The Bank/Client Company is immutable after Order creation."
+                    ))
+                if company and (
+                    company == order.requestor_company_id
+                    or company not in self.env.user.company_ids
+                ):
+                    raise ValidationError(_(
+                        "Select an authorized customer Bank other than TruCalc."
+                    ))
         if "vendor_authorization_ids" in vals:
             raise AccessError(_("Vendor Order authorization is server-maintained."))
         if "decline_reason" in vals:
@@ -977,8 +1263,20 @@ class EvaluationOrder(models.Model):
             raise AccessError(_(
                 "Order status may only be changed through an authorized workflow action."
             ))
-        if "due_date" in vals and not vals["due_date"]:
+        if (
+            "due_date" in vals and not vals["due_date"]
+            and any(not order.is_internal_draft for order in self)
+        ):
             raise ValidationError(_("Client Due Date is required."))
+        for field_name, label in (
+            ("borrower", "Borrower"),
+            ("property_address", "Property Address"),
+        ):
+            if (
+                field_name in vals and not vals[field_name]
+                and any(not order.is_internal_draft for order in self)
+            ):
+                raise ValidationError(_("%(label)s is required.", label=label))
         if self.env.user._trucalc_has_bank_role():
             self.env.user._trucalc_bank_identity()
             if {"company_id", "requestor_company_id", "requestor_id"} & vals.keys():
@@ -995,7 +1293,16 @@ class EvaluationOrder(models.Model):
                     vals["inspection_contact_phone"]
                 )
             )
-        self._check_operational_edit()
+        if (
+            {
+                "service_area_id", "service_type", "state", "county",
+                "pricing_state_id", "pricing_county_area_id",
+            }.intersection(vals)
+            and any(order.fee_locked_at for order in self)
+        ):
+            raise AccessError(_(
+                "Order service and area are immutable after the fee is locked."
+            ))
         result = super().write(vals)
         return result
 
@@ -1083,7 +1390,7 @@ class EvaluationOrder(models.Model):
         self._require_intake_manager()
         self.ensure_one()
         self._check_operational_edit()
-        if self.status == "draft":
+        if self.status == "draft" and not self.is_internal_draft:
             raise AccessError(_("TruCalc personnel may not modify a Bank Draft."))
         self.check_access("read")
         return {
@@ -1107,6 +1414,54 @@ class EvaluationOrder(models.Model):
         self._validate_new_intake_disposition()
         self._controlled_lifecycle_write({"status": "accepted"})
         self.message_post(body=_("Request accepted."))
+        return True
+
+    def action_submit_internal_draft(self):
+        self._require_intake_manager()
+        self.ensure_one()
+        self._lock_for_bid_lifecycle()
+        self.invalidate_recordset()
+        if not self.is_internal_draft:
+            raise ValidationError(_("Only an internal Draft may be submitted."))
+        if (
+            not self.company_id
+            or self.company_id == self.requestor_company_id
+            or self.company_id not in self.env.user.company_ids
+        ):
+            raise ValidationError(_(
+                "Select an authorized customer Bank other than TruCalc before submitting."
+            ))
+        if not self.borrower or not self.property_address or not self.due_date:
+            raise ValidationError(_(
+                "Borrower, Property Address, and Client Due Date are required before submitting."
+            ))
+        area = self.service_area_id
+        if (
+            not self.pricing_state_id
+            or not self.pricing_county_area_id
+            or not self.service_type
+            or not area or not area.active
+            or area.state_id != self.pricing_state_id
+            or area.county_normalized
+            != self.pricing_county_area_id.county_normalized
+            or area.service_type != self.service_type
+            or self.state != (area.state_id.code or area.state_id.name)
+            or self.county != area.county
+        ):
+            raise ValidationError(_(
+                "Select a valid active State, County, and Service Type before submitting."
+            ))
+        values = self._resolve_and_lock_bank_fee(self.company_id, area)
+        values.update({
+            "status": "new",
+            "order_date": fields.Date.context_today(self),
+            "fee_locked_at": fields.Datetime.now(),
+        })
+        self._controlled_lifecycle_write(values)
+        self.env["trucalc.order.lifecycle.event"]._log_event(
+            self, "internal_request_submitted", "draft", "new", self.env.user,
+        )
+        self.message_post(body=_("Internal Draft submitted as a New request."))
         return True
 
     def action_open_decline_wizard(self):

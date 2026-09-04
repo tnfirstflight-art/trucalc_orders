@@ -18,11 +18,47 @@ class TruCalcServiceArea(models.Model):
     county_normalized = fields.Char(required=True, readonly=True, index=True)
     service_type = fields.Selection(SERVICE_SELECTION, required=True)
     active = fields.Boolean(default=True, required=True, index=True)
+    currency_id = fields.Many2one(
+        "res.currency", string="Currency", required=True, readonly=True,
+        default=lambda self: self.env.ref("base.USD"), ondelete="restrict",
+    )
+    base_fee = fields.Monetary(
+        string="Base Fee", currency_field="currency_id",
+        help="Default Bank-facing fee for this serviceable area.",
+    )
 
     _state_county_service_unique = models.Constraint(
         "UNIQUE(state_id, county_normalized, service_type)",
         "A State, County, and Service Type combination may be configured only once.",
     )
+
+    @api.depends("state_id", "county", "service_type")
+    @api.depends_context("trucalc_service_area_display")
+    def _compute_display_name(self):
+        labels = dict(SERVICE_SELECTION)
+        display_mode = self.env.context.get("trucalc_service_area_display")
+        for area in self:
+            if display_mode == "county":
+                area.display_name = area.county
+                continue
+            if display_mode == "service_type":
+                area.display_name = labels.get(
+                    area.service_type, area.service_type
+                )
+                continue
+            parts = [
+                labels.get(area.service_type, area.service_type),
+                area.state_id.code or area.state_id.name,
+                area.county,
+            ]
+            area.display_name = " — ".join(part for part in parts if part)
+    @api.constrains("base_fee", "currency_id")
+    def _check_base_fee(self):
+        for area in self:
+            if area.base_fee < 0:
+                raise ValidationError(_("Base Fee cannot be negative."))
+            if area.currency_id != self.env.ref("base.USD"):
+                raise ValidationError(_("Service Area pricing must use USD."))
 
     @api.model
     def _normalize_county(self, value):
@@ -86,3 +122,15 @@ class TruCalcServiceArea(models.Model):
 
     def unlink(self):
         raise AccessError(_("Service Areas must be archived instead of deleted."))
+
+
+class ResCountryState(models.Model):
+    _inherit = "res.country.state"
+
+    @api.depends("name", "code", "country_id")
+    @api.depends_context("trucalc_state_code_only")
+    def _compute_display_name(self):
+        super()._compute_display_name()
+        if self.env.context.get("trucalc_state_code_only"):
+            for state in self:
+                state.display_name = state.code or state.name

@@ -8,6 +8,8 @@ access_trucalc_order_bank_requestor,trucalc order bank requestor,model_trucalc_o
 access_trucalc_order_bank_view_only,trucalc order bank view-only,model_trucalc_order,trucalc_orders.group_bank_view_only,1,0,0,0
 access_trucalc_vendor_order_portal,trucalc vendor order portal,model_trucalc_vendor_order,trucalc_orders.group_vendor_portal,1,0,0,0
 access_trucalc_service_area_admin,trucalc service area administrator,model_trucalc_service_area,trucalc_orders.group_trucalc_admin,1,1,1,0
+access_trucalc_service_area_operations,trucalc service area operations reader,model_trucalc_service_area,trucalc_orders.group_trucalc_operations,1,0,0,0
+access_trucalc_negotiated_fee_admin,trucalc negotiated fee administrator,model_trucalc_negotiated_fee,trucalc_orders.group_trucalc_admin,1,1,1,0
 
 access_trucalc_vendor_admin,trucalc vendor administrator,model_trucalc_vendor,trucalc_orders.group_trucalc_admin,1,1,1,0
 access_trucalc_vendor_user,trucalc vendor operations,model_trucalc_vendor,trucalc_orders.group_trucalc_operations,1,1,1,0

@@ -19,6 +19,8 @@ class TruCalcOrderLifecycleEvent(models.Model):
     event_type = fields.Selection(
         [
             ("bank_request_sent", "Bank Request Sent"),
+            ("internal_request_submitted", "Internal Request Submitted"),
+            ("pricing_locked", "Pricing Locked"),
             ("valuation_received", "Valuation Received"),
             ("valuation_revision_requested", "Valuation Revision Requested"),
             ("valuation_revision_submitted", "Valuation Revision Submitted"),
@@ -64,6 +66,23 @@ class TruCalcOrderLifecycleEvent(models.Model):
         ondelete="restrict",
     )
     vendor_revision_instructions = fields.Text(readonly=True)
+    agreed_fee = fields.Monetary(
+        string="Agreed Fee", currency_field="fee_currency_id", readonly=True,
+    )
+    fee_source = fields.Selection(
+        [("base", "Base"), ("negotiated", "Negotiated")],
+        readonly=True,
+    )
+    service_area_id = fields.Many2one(
+        "trucalc.service.area", readonly=True, ondelete="restrict",
+    )
+    negotiated_fee_id = fields.Many2one(
+        "trucalc.negotiated.fee", readonly=True, ondelete="restrict",
+    )
+    fee_currency_id = fields.Many2one(
+        "res.currency", readonly=True, ondelete="restrict",
+    )
+    fee_locked_at = fields.Datetime(readonly=True)
 
     _valuation_received_unique = models.UniqueIndex(
         "(order_id) WHERE event_type = 'valuation_received'",
@@ -86,15 +105,66 @@ class TruCalcOrderLifecycleEvent(models.Model):
         "(order_id) WHERE event_type = 'order_completed'",
         "An Order may be completed only once.",
     )
+    _pricing_locked_unique = models.UniqueIndex(
+        "(order_id) WHERE event_type = 'pricing_locked'",
+        "An Order may have only one internal pricing lock event.",
+    )
+    _internal_request_submitted_unique = models.UniqueIndex(
+        "(order_id) WHERE event_type = 'internal_request_submitted'",
+        "An Order may have only one internal submission event.",
+    )
 
     @api.constrains(
         "event_type", "deliverable_id", "order_id", "target_valuation_id",
         "new_valuation_id", "revision_request_event_id",
         "vendor_revision_instructions", "reviewer_user_id",
         "prior_reviewer_user_id", "reassignment_reason",
+        "agreed_fee", "fee_source", "service_area_id", "negotiated_fee_id",
+        "fee_currency_id", "fee_locked_at",
     )
     def _check_deliverable_provenance(self):
         for event in self:
+            has_fee_provenance = bool(
+                event.fee_source or event.service_area_id
+                or event.negotiated_fee_id or event.fee_currency_id
+                or event.fee_locked_at
+            )
+            if event.event_type in (
+                "bank_request_sent", "internal_request_submitted", "pricing_locked"
+            ) and has_fee_provenance:
+                if (
+                    not event.fee_source or not event.service_area_id
+                    or not event.fee_currency_id or not event.fee_locked_at
+                    or (
+                        event.fee_source == "negotiated"
+                        and not event.negotiated_fee_id
+                    )
+                    or (
+                        event.fee_source == "base"
+                        and event.negotiated_fee_id
+                    )
+                ):
+                    raise AccessError(_(
+                        "Bank request fee provenance is incomplete."
+                    ))
+            elif has_fee_provenance:
+                raise AccessError(_(
+                    "This lifecycle event may not contain fee provenance."
+                ))
+            if event.event_type == "pricing_locked" and (
+                not has_fee_provenance
+                or event.from_status != event.to_status
+                or event.stable_order_id != event.order_id.id
+                or event.company_id != event.order_id.company_id
+            ):
+                raise AccessError(_("Internal pricing lock provenance is invalid."))
+            if event.event_type == "internal_request_submitted" and (
+                not has_fee_provenance
+                or event.from_status != "draft" or event.to_status != "new"
+                or event.stable_order_id != event.order_id.id
+                or event.company_id != event.order_id.company_id
+            ):
+                raise AccessError(_("Internal submission provenance is invalid."))
             if event.event_type == "valuation_received" and (
                 not event.deliverable_id
                 or event.deliverable_id.artifact_type != "valuation"
@@ -181,7 +251,7 @@ class TruCalcOrderLifecycleEvent(models.Model):
     ):
         order.ensure_one()
         actor.ensure_one()
-        return super(TruCalcOrderLifecycleEvent, self.sudo()).create({
+        values = {
             "order_id": order.id,
             "stable_order_id": order.id,
             "company_id": order.company_id.id,
@@ -193,7 +263,21 @@ class TruCalcOrderLifecycleEvent(models.Model):
             "reviewer_id": order.reviewer_id.id,
             "reviewer_user_id": order.reviewer_user_id.id,
             "deliverable_id": deliverable.id if deliverable else False,
-        })
+        }
+        if event_type == "internal_request_submitted":
+            values["event_at"] = order.fee_locked_at
+        if event_type in (
+            "bank_request_sent", "internal_request_submitted"
+        ) and order.fee_locked_at:
+            values.update({
+                "agreed_fee": order.agreed_fee,
+                "fee_source": order.fee_source,
+                "service_area_id": order.service_area_id.id,
+                "negotiated_fee_id": order.negotiated_fee_id.id,
+                "fee_currency_id": order.fee_currency_id.id,
+                "fee_locked_at": order.fee_locked_at,
+            })
+        return super(TruCalcOrderLifecycleEvent, self.sudo()).create(values)
 
     @api.model
     @api.private

@@ -631,6 +631,11 @@
                     <div class="col-md-4"><label class="form-label">State</label><select name="service_state_id" class="form-select"><option value="">Select a State</option></select></div>
                     <div class="col-md-4"><label class="form-label">County</label><select name="service_county" class="form-select" disabled="disabled"><option value="">Select a County</option></select></div>
                     <div class="col-md-4"><label class="form-label">Service Type</label><select name="service_type" class="form-select" disabled="disabled"><option value="">Select a Service</option></select></div>
+                    <div class="col-md-4">
+                        <label class="form-label">Service Fee</label>
+                        <div class="form-control-plaintext" data-service-fee="">Not configured</div>
+                        <div class="form-text">Informational until the request is sent.</div>
+                    </div>
                     <div class="col-md-6"><label class="form-label">Property Type</label><select name="property_type" class="form-select"><option value="">Select a Property Type</option><option t-foreach="property_types" t-as="item" t-att-value="item[0]" t-att-selected="form_values.get('property_type') == item[0]"><t t-out="item[1]"/></option></select></div>
                     <div class="col-md-6"><label class="form-label">Client Due Date</label><input type="date" name="due_date" class="form-control" t-att-min="today" t-att-value="form_values.get('due_date', '')"/></div>
                     <div class="col-md-4"><label class="form-label">Inspection Contact Person</label><input name="inspection_contact_name" class="form-control" maxlength="255" t-att-value="form_values.get('inspection_contact_name', '')"/></div>
@@ -682,6 +687,11 @@
                         <dd class="col-sm-8"><t t-out="order.loan_number"/></dd>
                         <dt class="col-sm-4">Service Type</dt>
                         <dd class="col-sm-8"><span t-field="order.service_type"/></dd>
+                        <dt t-if="order.fee_locked_at" class="col-sm-4">Agreed Fee</dt>
+                        <dd t-if="order.fee_locked_at" class="col-sm-8">
+                            <span t-field="order.agreed_fee"
+                                  t-options="{'widget': 'monetary', 'display_currency': order.fee_currency_id}"/>
+                        </dd>
                         <dt class="col-sm-4">Client Due Date</dt>
                         <dd class="col-sm-8"><span t-if="order.due_date" t-field="order.due_date"/></dd>
                         <dt class="col-sm-4">Status</dt>

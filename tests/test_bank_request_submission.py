@@ -23,7 +23,7 @@ class TestBankRequestSubmission(TransactionCase):
         })
         cls.area = cls.env["trucalc.service.area"].with_user(cls.admin).create({
             "state_id": state.id, "county": "Submission County",
-            "service_type": "evaluation",
+            "service_type": "evaluation", "base_fee": 500,
         })
 
     @classmethod

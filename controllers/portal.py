@@ -271,16 +271,25 @@ class TruCalcVendorPortal(CustomerPortal):
                 ]._format_inspection_contact_phone(
                     form_values["inspection_contact_phone"]
                 ) or ""
-        matrix = [{
-            "id": area.id,
-            "state_id": area.state_id.id,
-            "state_name": area.state_id.name,
-            "county": area.county,
-            "service_type": area.service_type,
-            "service_label": dict(area._fields["service_type"].selection).get(
-                area.service_type, area.service_type,
-            ),
-        } for area in service_areas]
+        bank = request.env.user._trucalc_bank_identity()
+        matrix = []
+        for area in service_areas:
+            try:
+                pricing = request.env["trucalc.order"]._resolve_bank_fee(bank, area)
+                service_fee = "%.2f" % pricing["agreed_fee"]
+            except ValidationError:
+                service_fee = False
+            matrix.append({
+                "id": area.id,
+                "state_id": area.state_id.id,
+                "state_name": area.state_id.name,
+                "county": area.county,
+                "service_type": area.service_type,
+                "service_label": dict(area._fields["service_type"].selection).get(
+                    area.service_type, area.service_type,
+                ),
+                "service_fee": service_fee,
+            })
         values = self._prepare_portal_layout_values()
         values.update({
             "page_name": "trucalc_bank_order_draft" if order else "trucalc_bank_order_new",

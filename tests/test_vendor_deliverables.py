@@ -457,19 +457,18 @@ class TestVendorDeliverables(TransactionCase):
         self.assertTrue(order_view.xpath(".//field[@name='valuation_filename_link']"))
         self.assertTrue(order_view.xpath(".//field[@name='vendor_invoice_filename_link']"))
         order_information = order_view.xpath(
-            ".//group[@string='Order Information']"
+            ".//group[@string='Workflow Information']"
         )
         self.assertEqual(len(order_information), 1)
         self.assertEqual(
             [field.get("name") for field in order_information[0].xpath("./field")],
             [
-                "requestor_id", "create_date", "company_id", "order_date_display",
-                "assigned_vendor_id", "currency_id", "vendor_fee", "due_date",
+                "assigned_vendor_id", "currency_id", "vendor_fee",
                 "vendor_delivery_date", "vendor_engaged_at",
                 "current_engagement_id", "engagement_action_required",
                 "engagement_response_state", "engagement_requested_delivery_date",
                 "engagement_request_reason", "engagement_decline_reason",
-                "fee_override", "reviewer_user_id", "status", "decline_reason",
+                "fee_override", "reviewer_user_id", "decline_reason",
             ],
         )
         self.assertFalse(order_information[0].xpath(
@@ -481,7 +480,7 @@ class TestVendorDeliverables(TransactionCase):
         self.assertEqual(len(deliverables_display), 1)
         self.assertEqual(
             deliverables_display[0].getparent(),
-            order_information[0].getparent().getparent(),
+            order_information[0].getparent(),
         )
         for artifact in ("valuation", "vendor_invoice"):
             artifact_block = order_view.xpath(

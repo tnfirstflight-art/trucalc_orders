@@ -96,7 +96,6 @@ class TestOrderIntake(TransactionCase):
             order_form.order_date_display = "01/01/2000"
         order_form.borrower = "Form Intake Test"
         order_form.property_address = "2 Intake Way"
-        order_form.service_type = "evaluation"
         order_form.due_date = fields.Date.add(fields.Date.today(), days=14)
         form_order = order_form.save()
         self.assertEqual(
@@ -134,6 +133,9 @@ class TestOrderIntake(TransactionCase):
             order.write({"order_date": fields.Date.add(order.order_date, days=1)})
         with self.assertRaises(ValidationError):
             order.write({"due_date": False})
+        for field_name in ("borrower", "property_address"):
+            with self.assertRaises(ValidationError):
+                order.write({field_name: False})
         with self.assertRaises(ValidationError):
             self.env["trucalc.order"].with_user(self.admin).create({
                 "borrower": "Missing Due", "property_address": "1 Due Way",
@@ -144,15 +146,21 @@ class TestOrderIntake(TransactionCase):
         arch = html.fromstring(
             self.env.ref("trucalc_orders.view_trucalc_order_form").arch
         )
-        property_group = arch.xpath("//group[@string='Property Information']")[0]
+        property_group = arch.xpath(
+            "//group[@string='Property / Service Details']"
+        )[0]
         self.assertFalse(property_group.xpath("./group"))
         self.assertEqual(
             [field.get("name") for field in property_group.xpath("./field")],
-            ["property_address", "city", "state", "county", "zip_code", "property_type"],
+            [
+                "property_address", "city", "pricing_state_id",
+                "pricing_county_area_id", "zip_code", "service_area_id",
+                "property_type",
+            ],
         )
         self.assertTrue(arch.xpath("//field[@name='order_date_display']"))
         due_date = arch.xpath("//field[@name='due_date']")[0]
-        self.assertEqual(due_date.get("required"), "1")
+        self.assertEqual(due_date.get("required"), "not is_internal_draft")
 
     def test_company_is_set_at_creation_and_immutable_afterward(self):
         other_company = self.env["res.company"].create({
@@ -192,13 +200,19 @@ class TestOrderIntake(TransactionCase):
             self.env.ref("trucalc_orders.view_trucalc_order_form").arch
         )
         company_field = arch.xpath(
-            "//group[@string='Order Information']/field[@name='company_id']"
+            "//group[@string='Order / Request Information']/field[@name='company_id']"
         )
         self.assertEqual(len(company_field), 1)
-        self.assertEqual(company_field[0].get("readonly"), "create_date")
+        self.assertEqual(
+            company_field[0].get("readonly"),
+            "fee_locked_at or (create_date and not is_internal_draft)",
+        )
+        self.assertEqual(
+            company_field[0].get("domain"),
+            "[('id', 'in', available_internal_bank_ids)]",
+        )
         self.assertEqual(len(arch.xpath(
-            "//group[@string='Order Information']/field"
-            "[@name='create_date'][@invisible='1']"
+            "//sheet/field[@name='create_date'][@invisible='1']"
         )), 1)
 
     def _assert_no_vendor_lifecycle(self, order):

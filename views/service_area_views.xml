@@ -9,6 +9,9 @@
                     <field name="state_id" options="{'no_create': True, 'no_create_edit': True}"/>
                     <field name="county"/>
                     <field name="service_type"/>
+                    <field name="currency_id"/>
+                    <field name="base_fee" widget="monetary"
+                           options="{'currency_field': 'currency_id'}"/>
                 </group>
             </form>
         </field>
@@ -33,6 +36,9 @@
                 <field name="state_id" readonly="1"/>
                 <field name="county" readonly="1"/>
                 <field name="service_type" readonly="1"/>
+                <field name="currency_id" readonly="1"/>
+                <field name="base_fee" widget="monetary"
+                       options="{'currency_field': 'currency_id'}"/>
                 <field name="active" widget="boolean_toggle"
                        options="{'autosave': True}"/>
             </list>

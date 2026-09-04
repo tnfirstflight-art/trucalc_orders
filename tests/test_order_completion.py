@@ -26,7 +26,12 @@ class TestOrderCompletion(TestControlledValuationReview):
             with self.assertRaises(AssertionError):
                 form.company_id = self.other_company
         arch = etree.fromstring(self.env.ref(view).arch)
-        self.assertEqual(arch.xpath("//group[@string='Order Information']/field[@name='company_id']")[0].get("readonly"), "create_date")
+        self.assertEqual(
+            arch.xpath(
+                "//group[@string='Order / Request Information']/field[@name='company_id']"
+            )[0].get("readonly"),
+            "fee_locked_at or (create_date and not is_internal_draft)",
+        )
 
     def _ready(self, invoice=True, approve=True):
         order, authorization, valuation = self._valuation_order()

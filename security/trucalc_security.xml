@@ -100,7 +100,9 @@
         <field name="name">Operations Submitted Company Orders</field>
         <field name="model_id" ref="model_trucalc_order"/>
         <field name="domain_force">
-            [('company_id', 'in', user.company_ids.ids), ('status', '!=', 'draft')]
+            ['|',
+             '&amp;', ('status', '=', 'draft'), ('requestor_id.share', '=', False),
+             '&amp;', ('status', '!=', 'draft'), ('company_id', 'in', user.company_ids.ids)]
         </field>
         <field name="groups" eval="[(6, 0, [ref('group_trucalc_operations')])]"/>
     </record>
@@ -122,7 +124,9 @@
         <field name="name">Administrator Submitted Company Order Mutation</field>
         <field name="model_id" ref="model_trucalc_order"/>
         <field name="domain_force">
-            [('company_id', 'in', user.company_ids.ids), ('status', '!=', 'draft')]
+            ['|',
+             '&amp;', ('status', '=', 'draft'), ('requestor_id.share', '=', False),
+             '&amp;', ('status', '!=', 'draft'), ('company_id', 'in', user.company_ids.ids)]
         </field>
         <field name="groups" eval="[(4, ref('group_trucalc_admin'))]"/>
         <field name="perm_read" eval="False"/>
@@ -149,7 +153,8 @@
         <field name="name">Bank Administrator Company Orders and Drafts</field>
         <field name="model_id" ref="model_trucalc_order"/>
         <field name="domain_force">
-            [('company_id', '=', user.trucalc_bank_company_id.id or 0)]
+            [('company_id', '=', user.trucalc_bank_company_id.id or 0),
+             '|', ('status', '!=', 'draft'), ('requestor_id.share', '=', True)]
         </field>
         <field name="groups" eval="[(6, 0, [ref('group_bank_admin')])]"/>
     </record>
@@ -159,7 +164,8 @@
         <field name="model_id" ref="model_trucalc_order"/>
         <field name="domain_force">
             [('company_id', '=', user.trucalc_bank_company_id.id or 0),
-             '|', ('status', '!=', 'draft'), ('requestor_id', '=', user.id)]
+             '|', ('status', '!=', 'draft'),
+             '&amp;', ('requestor_id.share', '=', True), ('requestor_id', '=', user.id)]
         </field>
         <field name="groups" eval="[(4, ref('group_bank_requestor'))]"/>
     </record>

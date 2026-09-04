@@ -38,6 +38,24 @@
 
                 <header>
 
+                    <field name="is_internal_draft" invisible="1"/>
+
+                    <button
+                        string="Save Draft"
+                        special="save"
+                        class="btn-secondary"
+                        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                        invisible="not is_internal_draft"/>
+
+                    <button
+                        name="action_submit_internal_draft"
+                        string="Submit"
+                        type="object"
+                        class="btn-primary"
+                        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                        invisible="not id or not is_internal_draft"
+                        confirm="Submit this Draft as a New request and lock its current pricing?"/>
+
                     <button
                         name="action_accept_request"
                         string="Accept"
@@ -153,74 +171,115 @@
                         <strong><field name="engagement_action_required_reason"/></strong>
                     </div>
 
+                    <!-- Technical selector state stays on the form so onchange values are
+                         persisted, but users work only with the three controlled widgets below. -->
+                    <field name="available_pricing_state_ids" invisible="1"/>
+                    <field name="available_pricing_county_area_ids" invisible="1"/>
+                    <field name="available_pricing_service_area_ids" invisible="1"/>
+                    <field name="available_internal_bank_ids" invisible="1"/>
+                    <field name="state" invisible="1"/>
+                    <field name="county" invisible="1"/>
+                    <field name="service_type" invisible="1"/>
+                    <field name="create_date" invisible="1"/>
+
                     <group>
-
-                        <group string="Borrower Information">
-
-                            <field name="borrower" readonly="status == 'completed'"/>
-                            <field name="loan_number" readonly="status == 'completed'"/>
-                            <field name="service_type" readonly="status == 'completed'"/>
-
+                        <group string="Order / Request Information">
+                            <field name="company_id" string="Bank"
+                                   domain="[('id', 'in', available_internal_bank_ids)]"
+                                   options="{'no_create': True, 'no_create_edit': True}"
+                                   readonly="fee_locked_at or (create_date and not is_internal_draft)"/>
+                            <field name="requestor_id" string="Requester" readonly="1"/>
+                            <field name="order_date_display" string="Order Date"/>
+                            <field name="loan_number" string="Loan Number"
+                                   readonly="status == 'completed'"/>
+                            <field name="borrower" string="Borrower"
+                                   required="not is_internal_draft"
+                                   readonly="status == 'completed'"/>
+                            <field name="due_date" string="Due Date"
+                                   required="not is_internal_draft"
+                                   options="{'numeric': True}" readonly="status == 'completed'"/>
+                            <field name="status" string="Status" readonly="1"/>
                         </group>
 
-                        <group string="Property Information">
-                            <field name="property_address" readonly="status == 'completed'"/>
+                        <group string="Property / Service Details">
+                            <field name="property_address" required="not is_internal_draft"
+                                   readonly="status == 'completed'"/>
                             <field name="city" readonly="status == 'completed'"/>
-                            <field name="state" readonly="status == 'completed'"/>
-                            <field name="county" readonly="status == 'completed'"/>
+                            <field name="pricing_state_id" string="State"
+                                   groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                                   context="{'trucalc_state_code_only': True}"
+                                   required="0"
+                                   domain="[('id', 'in', available_pricing_state_ids)]"
+                                   readonly="fee_locked_at or status in ('declined', 'cancelled', 'completed') or (status == 'draft' and not is_internal_draft)"
+                                   options="{'no_create': True, 'no_create_edit': True}"/>
+                            <field name="pricing_county_area_id" string="County"
+                                   groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                                   context="{'trucalc_service_area_display': 'county'}"
+                                   required="0"
+                                   domain="[('id', 'in', available_pricing_county_area_ids)]"
+                                   readonly="fee_locked_at or not pricing_state_id or status in ('declined', 'cancelled', 'completed') or (status == 'draft' and not is_internal_draft)"
+                                   options="{'no_create': True, 'no_create_edit': True}"/>
                             <field name="zip_code" readonly="status == 'completed'"/>
+                            <field name="service_area_id" string="Service Type"
+                                   groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                                   context="{'trucalc_service_area_display': 'service_type'}"
+                                   required="0"
+                                   domain="[('id', 'in', available_pricing_service_area_ids)]"
+                                   readonly="fee_locked_at or not pricing_county_area_id or status in ('declined', 'cancelled', 'completed') or (status == 'draft' and not is_internal_draft)"
+                                   options="{'no_create': True, 'no_create_edit': True, 'no_open': True}"/>
                             <field name="property_type" readonly="status == 'completed'"/>
                         </group>
-
                     </group>
 
-                    <group>
+                    <group string="Inspection Contact">
+                        <field name="inspection_contact_name" string="Name"
+                               readonly="status == 'completed'"/>
+                        <field name="inspection_contact_phone_display" string="Phone"
+                               widget="inspection_phone_blur" readonly="status == 'completed'"/>
+                        <field name="inspection_contact_email" string="Email"
+                               widget="email" readonly="status == 'completed'"/>
+                    </group>
 
-                        <group string="Order Information">
+                    <group string="Pricing Summary"
+                           groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                           invisible="not fee_locked_at">
+                        <field name="fee_currency_id" invisible="1"/>
+                        <field name="agreed_fee" readonly="1" widget="monetary"
+                               options="{'currency_field': 'fee_currency_id'}"/>
+                        <field name="fee_source" readonly="1"/>
+                        <field name="negotiated_fee_id" readonly="1"
+                               invisible="fee_source != 'negotiated'"/>
+                        <field name="fee_locked_at" readonly="1"/>
+                    </group>
 
-                            <field name="requestor_id" readonly="1"/>
-                            <field name="create_date" invisible="1"/>
-                            <field name="company_id" readonly="create_date"/>
-                            <field name="order_date_display" string="Order Date"/>
-
-                            <field name="assigned_vendor_id" readonly="(status in ('new', 'accepted', 'declined')) or status == 'completed'"/>
-                            <field name="currency_id" invisible="1"/>
-                            <field name="vendor_fee" readonly="1" widget="monetary"
-                                   options="{'currency_field': 'currency_id'}"/>
-
-                            <field name="due_date" required="1"
-                                   options="{'numeric': True}" readonly="status == 'completed'"/>
-                            <field name="vendor_delivery_date" readonly="1"
-                                   options="{'numeric': True}"/>
-                            <field name="vendor_engaged_at" readonly="1"/>
-                            <field name="current_engagement_id" invisible="1"/>
-                            <field name="engagement_action_required" invisible="1"
-                                   groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
-                            <field name="engagement_response_state" readonly="1"
-                                   groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
-                            <field name="engagement_requested_delivery_date" readonly="1"
-                                   options="{'numeric': True}"
-                                   groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
-                                   invisible="engagement_response_state != 'delivery_change_requested'"/>
-                            <field name="engagement_request_reason" readonly="1"
-                                   groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
-                                   invisible="engagement_response_state != 'delivery_change_requested'"/>
-                            <field name="engagement_decline_reason" readonly="1"
-                                   groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
-                                   invisible="engagement_response_state != 'declined'"/>
-
-                            <field name="fee_override" readonly="(status in ('new', 'accepted', 'declined')) or status == 'completed'"/>
-
-                            <field name="reviewer_user_id"
-                                   groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer"
-                                   readonly="1"/>
-
-                            <field name="status" readonly="1"/>
-
-                            <field name="decline_reason" invisible="status != 'declined'" readonly="1"/>
-
-                        </group>
-
+                    <group string="Workflow Information">
+                        <field name="assigned_vendor_id" readonly="(status in ('new', 'accepted', 'declined')) or status == 'completed'"/>
+                        <field name="currency_id" invisible="1"/>
+                        <field name="vendor_fee" readonly="1" widget="monetary"
+                               options="{'currency_field': 'currency_id'}"/>
+                        <field name="vendor_delivery_date" readonly="1"
+                               options="{'numeric': True}"/>
+                        <field name="vendor_engaged_at" readonly="1"/>
+                        <field name="current_engagement_id" invisible="1"/>
+                        <field name="engagement_action_required" invisible="1"
+                               groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
+                        <field name="engagement_response_state" readonly="1"
+                               groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
+                        <field name="engagement_requested_delivery_date" readonly="1"
+                               options="{'numeric': True}"
+                               groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                               invisible="engagement_response_state != 'delivery_change_requested'"/>
+                        <field name="engagement_request_reason" readonly="1"
+                               groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                               invisible="engagement_response_state != 'delivery_change_requested'"/>
+                        <field name="engagement_decline_reason" readonly="1"
+                               groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                               invisible="engagement_response_state != 'declined'"/>
+                        <field name="fee_override" readonly="(status in ('new', 'accepted', 'declined')) or status == 'completed'"/>
+                        <field name="reviewer_user_id"
+                               groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer"
+                               readonly="1"/>
+                        <field name="decline_reason" invisible="status != 'declined'" readonly="1"/>
                     </group>
 
                     <div name="deliverables_display" class="mb-3">
@@ -287,13 +346,6 @@
                             </div>
                         </div>
                     </div>
-
-                    <group string="Inspection Contact">
-                        <field name="inspection_contact_name" readonly="status == 'completed'"/>
-                        <field name="inspection_contact_phone_display"
-                               widget="inspection_phone_blur" readonly="status == 'completed'"/>
-                        <field name="inspection_contact_email" widget="email" readonly="status == 'completed'"/>
-                    </group>
 
                     <notebook>
 
@@ -424,7 +476,8 @@
             Command.create({'sequence': 1, 'view_mode': 'list', 'view_id': ref('view_trucalc_order_list')}),
             Command.create({'sequence': 2, 'view_mode': 'form', 'view_id': ref('view_trucalc_order_form')}),
         ]"/>
-        <field name="domain">[('status', '!=', 'draft')]</field>
+        <field name="domain">['|', ('status', '!=', 'draft'), ('requestor_id.share', '=', False)]</field>
+        <field name="context">{'default_status': 'draft', 'default_company_id': False, 'trucalc_internal_draft_intake': True}</field>
     </record>
 
     <record id="view_trucalc_draft_support_list" model="ir.ui.view">
@@ -481,7 +534,7 @@
             Command.create({'sequence': 1, 'view_mode': 'list', 'view_id': ref('view_trucalc_draft_support_list')}),
             Command.create({'sequence': 2, 'view_mode': 'form', 'view_id': ref('view_trucalc_draft_support_form')}),
         ]"/>
-        <field name="domain">[('status', '=', 'draft')]</field>
+        <field name="domain">[('status', '=', 'draft'), ('requestor_id.share', '=', True)]</field>
     </record>
 
     <!-- MENUS -->

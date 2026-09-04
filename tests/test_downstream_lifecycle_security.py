@@ -468,9 +468,15 @@ class TestDownstreamLifecycleSecurity(TransactionCase):
         with self.assertRaises(AccessError):
             draft.with_user(self.admin).action_add_document()
         orders_action = self.env.ref("trucalc_orders.action_trucalc_orders")
-        self.assertEqual(orders_action.domain, "[('status', '!=', 'draft')]")
+        self.assertEqual(
+            orders_action.domain,
+            "['|', ('status', '!=', 'draft'), ('requestor_id.share', '=', False)]",
+        )
         support_action = self.env.ref("trucalc_orders.action_trucalc_draft_support")
-        self.assertEqual(support_action.domain, "[('status', '=', 'draft')]")
+        self.assertEqual(
+            support_action.domain,
+            "[('status', '=', 'draft'), ('requestor_id.share', '=', True)]",
+        )
 
     def test_order_actions_resolve_to_their_explicit_form_architectures(self):
         order_list = self.env.ref("trucalc_orders.view_trucalc_order_list")
