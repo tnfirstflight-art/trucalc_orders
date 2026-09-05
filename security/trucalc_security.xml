@@ -283,4 +283,10 @@
     <delete id="rule_reviewer_required_partners" model="ir.rule"/>
     <delete id="rule_trucalc_document_reviewer_assignment" model="ir.rule"/>
 
+    <record id="rule_fee_change_internal_company" model="ir.rule">
+        <field name="name">Fee Requests in Authorized Banks</field>
+        <field name="model_id" ref="model_trucalc_fee_change_request"/>
+        <field name="domain_force">[('company_id', 'in', user.company_ids.ids)]</field>
+        <field name="groups" eval="[(4, ref('group_trucalc_admin')), (4, ref('group_trucalc_operations'))]"/>
+    </record>
 </odoo>

@@ -1,3 +1,4 @@
+import math
 import re
 
 from odoo import api, fields, models, tools, _
@@ -16,6 +17,10 @@ BANK_REQUEST_FIELDS = frozenset({
 BANK_ORDER_CREATE_FIELDS = BANK_REQUEST_FIELDS - {
     "service_state_id", "service_county",
 }
+CURRENT_FEE_FIELDS = frozenset({
+    "current_agreed_fee", "current_fee_change_request_id",
+    "fee_workflow_revision", "fee_change_request_ids",
+})
 FEE_SNAPSHOT_FIELDS = frozenset({
     "agreed_fee", "fee_source", "negotiated_fee_id", "fee_locked_at",
     "fee_currency_id",
@@ -144,6 +149,121 @@ class EvaluationOrder(models.Model):
         "res.currency", string="Fee Currency", readonly=True, copy=False,
         ondelete="restrict",
     )
+
+    current_agreed_fee = fields.Monetary(
+        string="Current Fee", currency_field="fee_currency_id", readonly=True, copy=False,
+    )
+    current_fee_change_request_id = fields.Many2one(
+        "trucalc.fee.change.request", readonly=True, copy=False, ondelete="restrict",
+    )
+    fee_workflow_revision = fields.Integer(readonly=True, copy=False, default=0)
+    fee_change_request_ids = fields.One2many(
+        "trucalc.fee.change.request", "order_id", readonly=True, copy=False,
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+    )
+    fee_change_pending = fields.Boolean(compute="_compute_fee_change_controls")
+    can_request_fee_change = fields.Boolean(compute="_compute_fee_change_controls")
+
+    @api.depends("status", "fee_locked_at", "fee_workflow_revision")
+    @api.depends_context("uid")
+    def _compute_fee_change_controls(self):
+        Request = self.env["trucalc.fee.change.request"]
+        for order in self:
+            order.fee_change_pending = bool(Request.sudo().search_count([
+                ("order_id", "=", order.id), ("state", "=", "pending"),
+            ])) if order.id else False
+            order.can_request_fee_change = False
+            if order.id and order.fee_locked_at and not order.fee_change_pending:
+                try:
+                    order._require_fee_request_actor()
+                    order._validate_fee_change_eligibility()
+                    order.can_request_fee_change = True
+                except (AccessError, ValidationError):
+                    pass
+
+    @api.private
+    def _require_fee_request_actor(self):
+        self.ensure_one()
+        actor = self.env.user
+        self.with_user(actor).check_access("read")
+        if (not actor.active or actor.share or actor._trucalc_has_external_role()
+                or not (actor.has_group("trucalc_orders.group_trucalc_admin")
+                        or actor.has_group("trucalc_orders.group_trucalc_operations"))
+                or self.sudo().company_id not in actor.company_ids):
+            raise AccessError(_("Fee requests require authorized TruCalc Administrator or Operations access."))
+        return actor
+
+    @api.private
+    def _validate_fee_change_eligibility(self):
+        self.ensure_one()
+        if self.status not in (
+            "accepted", "bid_requested", "assigned", "engaged", "report_received",
+            "reviewer_assigned", "under_review",
+        ):
+            raise ValidationError(_("Fee changes require an Accepted, active Order before completion."))
+        return self._get_current_effective_fee()
+
+    @api.private
+    def _get_current_effective_fee(self):
+        """4E.2 callers must authorize, lock the Order, then snapshot this contract."""
+        self.ensure_one()
+        order = self.sudo()
+        # Monetary ORM values coerce SQL NULL to zero: inspect presence explicitly.
+        order.flush_recordset(["agreed_fee", "current_agreed_fee"])
+        self.env.cr.execute(
+            "SELECT agreed_fee, current_agreed_fee FROM trucalc_order WHERE id = %s",
+            (order.id,),
+        )
+        amounts = self.env.cr.fetchone()
+        if (not amounts or any(value is None for value in amounts)
+                or not order.fee_locked_at or not order.company_id
+                or not order.fee_currency_id or not order.service_area_id
+                or order.fee_source not in ("base", "negotiated")
+                or bool(order.negotiated_fee_id) != (order.fee_source == "negotiated")):
+            raise ValidationError(_("This Order has no complete original fee agreement."))
+        if any(not math.isfinite(value) or value < 0 for value in amounts):
+            raise ValidationError(_("The Order fee state is inconsistent."))
+        approved = order.current_fee_change_request_id
+        if approved and (approved.state != "approved" or approved.order_id != order
+                         or approved.company_id != order.company_id
+                         or approved.currency_id != order.fee_currency_id):
+            raise ValidationError(_("The current approved fee provenance is inconsistent."))
+        latest = self.env["trucalc.fee.change.request"].sudo().search([
+            ("order_id", "=", order.id), ("state", "=", "approved"),
+        ], order="id desc", limit=1)
+        if approved != latest:
+            raise ValidationError(_("The current fee does not reference the latest approval."))
+        expected = approved.proposed_fee if approved else order.agreed_fee
+        if order.current_agreed_fee != expected:
+            raise ValidationError(_("The current fee does not match its agreement."))
+        pending = self.env["trucalc.fee.change.request"].sudo().search_count([
+            ("order_id", "=", order.id), ("state", "=", "pending"),
+        ])
+        return {
+            "order_id": order.id, "company_id": order.company_id.id,
+            "amount": order.current_agreed_fee, "currency_id": order.fee_currency_id.id,
+            "original_agreed_fee": order.agreed_fee,
+            "current_fee_change_request_id": approved.id or False,
+            "fee_workflow_revision": order.fee_workflow_revision,
+            "has_pending_request": bool(pending), "fee_locked_at": order.fee_locked_at,
+            "fee_source": order.fee_source, "service_area_id": order.service_area_id.id,
+            "negotiated_fee_id": order.negotiated_fee_id.id or False,
+        }
+
+    def action_open_fee_change_wizard(self):
+        self._require_fee_request_actor()
+        self._validate_fee_change_eligibility()
+        if self.fee_change_pending:
+            raise ValidationError(_("A fee request is already pending."))
+        return {
+            "type": "ir.actions.act_window", "name": _("Request Fee Change"),
+            "res_model": "trucalc.fee.change.request.wizard", "view_mode": "form",
+            "target": "new", "context": {"default_order_id": self.id},
+        }
+
+    def action_request_fee_change(self, proposed_fee, reason):
+        self._require_fee_request_actor()
+        return self.env["trucalc.fee.change.request"]._request(self, proposed_fee, reason).id
 
     requestor_company_id = fields.Many2one(
         "res.company",
@@ -762,7 +882,7 @@ class EvaluationOrder(models.Model):
         )
         authoritative_order_date = fields.Date.context_today(self)
         for vals in vals_list:
-            if FEE_SNAPSHOT_FIELDS.intersection(vals):
+            if (FEE_SNAPSHOT_FIELDS | CURRENT_FEE_FIELDS).intersection(vals):
                 raise AccessError(_("Order fee snapshots are server-controlled."))
             if "vendor_authorization_ids" in vals:
                 raise AccessError(_("Vendor Order authorization is server-maintained."))
@@ -1193,6 +1313,8 @@ class EvaluationOrder(models.Model):
             ),
         ))
         send_values.update({
+            "current_agreed_fee": send_values["agreed_fee"],
+            "current_fee_change_request_id": False, "fee_workflow_revision": 0,
             "status": "new",
             "order_date": fields.Date.context_today(order.with_user(actor)),
             "fee_locked_at": fields.Datetime.now(),
@@ -1226,7 +1348,7 @@ class EvaluationOrder(models.Model):
         self.invalidate_recordset()
 
     def write(self, vals):
-        if FEE_SNAPSHOT_FIELDS.intersection(vals):
+        if (FEE_SNAPSHOT_FIELDS | CURRENT_FEE_FIELDS).intersection(vals):
             raise AccessError(_("Order fee snapshots are server-controlled."))
         if "reviewer_user_id" in vals:
             raise AccessError(_(
@@ -1453,6 +1575,8 @@ class EvaluationOrder(models.Model):
             ))
         values = self._resolve_and_lock_bank_fee(self.company_id, area)
         values.update({
+            "current_agreed_fee": values["agreed_fee"],
+            "current_fee_change_request_id": False, "fee_workflow_revision": 0,
             "status": "new",
             "order_date": fields.Date.context_today(self),
             "fee_locked_at": fields.Datetime.now(),
@@ -2159,6 +2283,10 @@ class EvaluationOrder(models.Model):
         """Called only after the Order lock, with refreshed trusted records."""
         self.ensure_one()
         Event = self.env["trucalc.order.lifecycle.event"].sudo()
+        if self.env["trucalc.fee.change.request"].sudo().search_count([
+            ("order_id", "=", self.id), ("state", "=", "pending"),
+        ]):
+            raise ValidationError(_("A pending fee change request prevents completion."))
         if self.status != "under_review" or Event.search_count([
             ("order_id", "=", self.id), ("event_type", "=", "order_completed"),
         ]):

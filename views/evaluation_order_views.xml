@@ -37,6 +37,11 @@
             <form string="Evaluation Order">
 
                 <header>
+                    <field name="can_request_fee_change" invisible="1"/>
+                    <button name="action_open_fee_change_wizard" type="object" string="Request Fee Change"
+                            groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                            invisible="not can_request_fee_change"/>
+
 
                     <field name="is_internal_draft" invisible="1"/>
 
@@ -244,8 +249,18 @@
                            groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
                            invisible="not fee_locked_at">
                         <field name="fee_currency_id" invisible="1"/>
-                        <field name="agreed_fee" readonly="1" widget="monetary"
+                        <field name="agreed_fee" string="Original Agreed Fee" readonly="1" widget="monetary"
                                options="{'currency_field': 'fee_currency_id'}"/>
+                        <field name="current_agreed_fee" readonly="1"/>
+                        <field name="fee_change_pending" string="Fee Request Pending" readonly="1"/>
+                        <field name="fee_change_request_ids" readonly="1">
+                            <list create="0" edit="0" delete="0">
+                                <field name="requested_at"/><field name="currency_id" column_invisible="True"/>
+                                <field name="prior_fee"/><field name="proposed_fee"/>
+                                <field name="state"/><field name="reason"/>
+                                <field name="decision_at"/><field name="decline_reason"/>
+                            </list>
+                        </field>
                         <field name="fee_source" readonly="1"/>
                         <field name="negotiated_fee_id" readonly="1"
                                invisible="fee_source != 'negotiated'"/>

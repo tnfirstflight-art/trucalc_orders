@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_fee_change_request_wizard" model="ir.ui.view">
+        <field name="name">trucalc.fee.change.request.wizard.form</field>
+        <field name="model">trucalc.fee.change.request.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Request Fee Change">
+                <group>
+                    <field name="order_id" invisible="1"/>
+                    <field name="currency_id" readonly="1"/>
+                    <field name="current_fee" readonly="1"/>
+                    <field name="proposed_fee"/>
+                    <field name="reason" placeholder="Explain the scope change to the Bank."/>
+                </group>
+                <footer>
+                    <button name="action_request" type="object" string="Request Fee Change" class="btn-primary"/>
+                    <button string="Cancel" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+    <record id="view_fee_change_request_form" model="ir.ui.view">
+        <field name="name">trucalc.fee.change.request.form</field>
+        <field name="model">trucalc.fee.change.request</field>
+        <field name="arch" type="xml">
+            <form string="Fee Change Request" create="0" edit="0" delete="0">
+                <group>
+                    <field name="order_id"/><field name="company_id"/><field name="currency_id"/>
+                    <field name="requester_id"/><field name="requested_at"/>
+                    <field name="prior_fee"/><field name="prior_approved_request_id"/>
+                    <field name="proposed_fee"/><field name="reason"/><field name="state"/>
+                    <field name="decision_actor_id"/><field name="decision_at"/><field name="decline_reason"/>
+                </group>
+            </form>
+        </field>
+    </record>
+</odoo>

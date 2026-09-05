@@ -207,6 +207,23 @@ class TruCalcVendorPortal(CustomerPortal):
                 raise request.not_found()
         return order, bank
 
+    @http.route(
+        "/my/trucalc/bank/orders/<string:order_number>/fee/<int:fee_request_id>/<string:decision>",
+        type="http", auth="user", website=True, methods=["POST"], csrf=True,
+    )
+    def portal_bank_fee_decision(self, order_number, fee_request_id, decision, **post):
+        order, _bank = self._bank_order(order_number)
+        fee_request = request.env["trucalc.fee.change.request"].browse(fee_request_id)
+        if set(post) - {"csrf_token", "decline_reason"}:
+            raise request.not_found()
+        try:
+            fee_request._decide(order, decision, post.get("decline_reason"))
+        except AccessError:
+            raise request.not_found()
+        except ValidationError as error:
+            return self.portal_bank_orders(fee_error=error.args[0])
+        return request.redirect("/my/trucalc/bank/orders")
+
     def _bank_approved_valuation(self, order):
         """Bank release boundary; future controlled closeout owns completion."""
         if order.status != "completed":
@@ -396,7 +413,7 @@ class TruCalcVendorPortal(CustomerPortal):
         ["/my/trucalc/bank/orders", "/my/trucalc/bank/orders/page/<int:page>"],
         type="http", auth="user", website=True, readonly=True,
     )
-    def portal_bank_orders(self, page=1, **kwargs):
+    def portal_bank_orders(self, page=1, fee_error=False, **kwargs):
         if not self._is_trucalc_bank():
             raise request.not_found()
         bank = request.env.user._trucalc_bank_identity()
@@ -420,6 +437,22 @@ class TruCalcVendorPortal(CustomerPortal):
                                    limit=self._items_per_page, offset=pager["offset"]),
             "pager": pager,
             "can_submit": self._can_create_bank_draft(),
+        })
+        # Presentation-only projection, restricted to the authorized page of Orders.
+        pending = request.env["trucalc.fee.change.request"].sudo().search([
+            ("order_id", "in", values["orders"].ids),
+            ("company_id", "=", bank.id), ("state", "=", "pending"),
+        ])
+        values.update({
+            "pending_fees": {item.order_id.id: {
+                "id": item.id, "current_fee": item.order_id.current_agreed_fee,
+                "requested_fee": item.proposed_fee, "reason": item.reason,
+                "requested_at": item.requested_at,
+            } for item in pending},
+            "can_decide_fee": request.env.user.active and request.env.user.has_group(
+                "trucalc_orders.group_bank_admin"
+            ),
+            "fee_error": fee_error,
         })
         return request.render("trucalc_orders.portal_bank_orders", values)
 
@@ -452,6 +485,7 @@ class TruCalcVendorPortal(CustomerPortal):
             "page_name": "trucalc_bank_documents", "order": order,
             "documents": documents, "tags": tags, "can_upload": can_upload,
             "upload_error": upload_error,
+            "fee_requests": request.env["trucalc.fee.change.request"]._portal_values(order),
             "submitted": submitted,
             "created": created,
             "saved": saved,

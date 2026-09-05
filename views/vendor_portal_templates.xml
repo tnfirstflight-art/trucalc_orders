@@ -555,6 +555,7 @@
             <t t-call="portal.portal_searchbar">
                 <t t-set="title">My TruCalc Requests</t>
             </t>
+            <div t-if="fee_error" class="alert alert-danger" role="alert"><t t-out="fee_error"/></div>
             <div t-if="can_submit" class="d-flex justify-content-end mb-3">
                 <a href="/my/trucalc/bank/orders/new" class="btn btn-primary">New Request</a>
             </div>
@@ -573,7 +574,8 @@
                     </tr>
                 </thead>
                 <tbody>
-                    <tr t-foreach="orders" t-as="order">
+                    <tr t-foreach="orders" t-as="order" t-att-data-order-id="order.id"
+                        t-att-class="'o_trucalc_fee_pending' if order.id in pending_fees else ''">
                         <td>
                             <a t-att-href="'/my/trucalc/bank/orders/%s/documents' % order.order_number">
                                 <t t-out="order.order_number"/>
@@ -584,9 +586,59 @@
                         <td><t t-out="order.property_address"/></td>
                         <td><span t-field="order.service_type"/></td>
                         <td><span t-if="order.due_date" t-field="order.due_date"/></td>
-                        <td><span t-field="order.status"/></td>
+                        <td>
+                            <div><span t-field="order.status"/></div>
+                            <div t-if="order.id in pending_fees" class="mt-1">
+                            <button t-if="can_decide_fee"
+                                    type="button" class="btn btn-sm btn-primary text-nowrap"
+                                    data-bs-toggle="modal" t-att-data-bs-target="'#fee-change-%s' % order.id">
+                                Fee Change
+                            </button>
+                            <span t-else="" class="small text-nowrap">Pending Fee Change</span>
+                            </div>
+                        </td>
                     </tr>
                 </tbody>
+            </t>
+            <t t-if="can_decide_fee" t-foreach="orders" t-as="order">
+                <t t-if="order.id in pending_fees">
+                    <t t-set="fee" t-value="pending_fees[order.id]"/>
+                    <div t-att-id="'fee-change-%s' % order.id" class="modal fade" tabindex="-1"
+                         t-att-aria-labelledby="'fee-change-title-%s' % order.id" aria-hidden="true">
+                        <div class="modal-dialog"><div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title" t-att-id="'fee-change-title-%s' % order.id">Fee Change — <t t-out="order.order_number"/></h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"/>
+                            </div>
+                            <div class="modal-body">
+                                <dl class="row">
+                                    <dt class="col-5">Current Fee</dt><dd class="col-7"><span t-out="fee['current_fee']" t-options="{'widget': 'monetary', 'display_currency': order.fee_currency_id}"/></dd>
+                                    <dt class="col-5">Requested Fee</dt><dd class="col-7"><span t-out="fee['requested_fee']" t-options="{'widget': 'monetary', 'display_currency': order.fee_currency_id}"/></dd>
+                                    <dt class="col-5">Reason</dt><dd class="col-7 text-break" style="white-space: pre-wrap"><t t-out="fee['reason']"/></dd>
+                                    <dt class="col-5">Requested Date</dt><dd class="col-7"><span t-out="fee['requested_at']" t-options="{'widget': 'datetime'}"/></dd>
+                                </dl>
+                                <div class="d-flex gap-2">
+                                    <form method="post" t-att-action="'/my/trucalc/bank/orders/%s/fee/%s/approved' % (order.order_number, fee['id'])">
+                                        <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
+                                        <button class="btn btn-primary" type="submit">Approve</button>
+                                    </form>
+                                    <button type="button" class="btn btn-outline-danger" data-bs-toggle="collapse"
+                                            t-att-data-bs-target="'#fee-decline-%s' % order.id" aria-expanded="false"
+                                            t-att-aria-controls="'fee-decline-%s' % order.id">Decline</button>
+                                </div>
+                                <form method="post" class="collapse mt-3" t-att-id="'fee-decline-%s' % order.id"
+                                      t-att-action="'/my/trucalc/bank/orders/%s/fee/%s/declined' % (order.order_number, fee['id'])">
+                                    <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
+                                    <label class="form-label" t-att-for="'fee-decline-reason-%s' % order.id">Decline Reason</label>
+                                    <textarea name="decline_reason" t-att-id="'fee-decline-reason-%s' % order.id"
+                                              class="form-control mb-2" rows="3" required="required" maxlength="5000"/>
+                                    <button class="btn btn-outline-danger" type="submit">Confirm Decline</button>
+                                </form>
+                            </div>
+                            <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button></div>
+                        </div></div>
+                    </div>
+                </t>
             </t>
             <div t-if="pager" class="d-flex justify-content-center mt-3">
                 <t t-call="portal.pager"/>
@@ -687,10 +739,14 @@
                         <dd class="col-sm-8"><t t-out="order.loan_number"/></dd>
                         <dt class="col-sm-4">Service Type</dt>
                         <dd class="col-sm-8"><span t-field="order.service_type"/></dd>
-                        <dt t-if="order.fee_locked_at" class="col-sm-4">Agreed Fee</dt>
+                        <dt t-if="order.fee_locked_at" class="col-sm-4">Original Agreed Fee</dt>
                         <dd t-if="order.fee_locked_at" class="col-sm-8">
                             <span t-field="order.agreed_fee"
                                   t-options="{'widget': 'monetary', 'display_currency': order.fee_currency_id}"/>
+                        </dd>
+                        <dt t-if="order.fee_locked_at" class="col-sm-4">Current Fee</dt>
+                        <dd t-if="order.fee_locked_at" class="col-sm-8">
+                            <span t-field="order.current_agreed_fee" t-options="{'widget': 'monetary', 'display_currency': order.fee_currency_id}"/>
                         </dd>
                         <dt class="col-sm-4">Client Due Date</dt>
                         <dd class="col-sm-8"><span t-if="order.due_date" t-field="order.due_date"/></dd>
@@ -784,6 +840,26 @@
                     </tbody>
                 </table>
             </div>
+            <section t-if="fee_requests" id="fee-changes" class="o_trucalc_fee_history mt-4">
+                <h3 class="h5">Fee Changes</h3>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead><tr><th>Status</th><th>Previous Fee</th><th>Requested Fee</th><th>Reason</th><th>Requested</th><th>Decision</th><th>Decided By</th><th>Decline Reason</th></tr></thead>
+                        <tbody>
+                            <tr t-foreach="fee_requests" t-as="fee" t-att-data-fee-request-id="fee['id']">
+                                <td><t t-out="fee['state'].title()"/></td>
+                                <td class="text-nowrap"><span t-out="fee['prior_fee']" t-options="{'widget': 'monetary', 'display_currency': order.fee_currency_id}"/></td>
+                                <td class="text-nowrap"><span t-out="fee['proposed_fee']" t-options="{'widget': 'monetary', 'display_currency': order.fee_currency_id}"/></td>
+                                <td class="o_trucalc_fee_reason" t-att-title="fee['reason']"><t t-out="fee['reason']"/></td>
+                                <td class="text-nowrap"><span t-out="fee['requested_at']" t-options="{'widget': 'datetime'}"/></td>
+                                <td class="text-nowrap"><t t-if="fee['decision_at']"><t t-out="fee['state'].title()"/> <span t-out="fee['decision_at']" t-options="{'widget': 'datetime'}"/></t><t t-else="">—</t></td>
+                                <td><t t-out="fee['decision_actor'] or '—'"/></td>
+                                <td class="o_trucalc_fee_reason" t-att-title="fee['decline_reason']"><t t-out="fee['decline_reason'] or '—'"/></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
             </div>
         </t>
     </template>

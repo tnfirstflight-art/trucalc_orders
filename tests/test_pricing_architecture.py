@@ -409,6 +409,7 @@ class TestPricingArchitecture(TransactionCase):
             [(button.get("name"), button.get("string"))
             for button in arch.xpath("//header/button")],
             [
+                ("action_open_fee_change_wizard", "Request Fee Change"),
                 (None, "Save Draft"),
                 ("action_submit_internal_draft", "Submit"),
                 ("action_accept_request", "Accept"),
@@ -426,6 +427,15 @@ class TestPricingArchitecture(TransactionCase):
                 ("action_complete_order", "Complete Order"),
             ],
         )
+        fee_buttons = arch.xpath("//header/button[@name='action_open_fee_change_wizard']")
+        self.assertEqual(len(fee_buttons), 1)
+        self.assertEqual(fee_buttons[0].get("string"), "Request Fee Change")
+        self.assertEqual(fee_buttons[0].get("type"), "object")
+        self.assertEqual(fee_buttons[0].get("groups"),
+                         "trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations")
+        self.assertEqual(fee_buttons[0].get("invisible"), "not can_request_fee_change")
+        # Lifecycle eligibility and Reviewer-only denial are exercised by the
+        # focused fee-change tests; preserve their server-authoritative guard.
         save_draft = arch.xpath("//header/button[@string='Save Draft']")[0]
         self.assertEqual(save_draft.get("special"), "save")
         self.assertFalse(save_draft.get("name"))

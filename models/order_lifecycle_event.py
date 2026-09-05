@@ -18,6 +18,9 @@ class TruCalcOrderLifecycleEvent(models.Model):
     )
     event_type = fields.Selection(
         [
+            ("fee_change_requested", "Fee Change Requested"),
+            ("fee_change_approved", "Fee Change Approved"),
+            ("fee_change_declined", "Fee Change Declined"),
             ("bank_request_sent", "Bank Request Sent"),
             ("internal_request_submitted", "Internal Request Submitted"),
             ("pricing_locked", "Pricing Locked"),
@@ -83,6 +86,51 @@ class TruCalcOrderLifecycleEvent(models.Model):
         "res.currency", readonly=True, ondelete="restrict",
     )
     fee_locked_at = fields.Datetime(readonly=True)
+
+    fee_change_request_id = fields.Many2one(
+        "trucalc.fee.change.request", readonly=True, index=True, ondelete="restrict",
+    )
+    _fee_requested_unique = models.UniqueIndex(
+        "(fee_change_request_id) WHERE event_type = 'fee_change_requested'",
+        "A fee request may have only one creation event.",
+    )
+    _fee_decision_unique = models.UniqueIndex(
+        "(fee_change_request_id) WHERE event_type IN ('fee_change_approved', 'fee_change_declined')",
+        "A fee request may have only one decision event.",
+    )
+
+    @api.constrains("fee_change_request_id", "event_type", "order_id", "company_id",
+                    "actor_id", "event_at", "from_status", "to_status", "stable_order_id")
+    def _check_fee_change_event(self):
+        for event in self:
+            request = event.fee_change_request_id
+            if not event.event_type.startswith("fee_change_"):
+                if request:
+                    raise ValidationError(_("Only fee events may reference a fee request."))
+                continue
+            creation = event.event_type == "fee_change_requested"
+            if (not request or event.order_id != request.order_id
+                    or event.company_id != request.company_id
+                    or event.stable_order_id != request.order_id.id
+                    or event.from_status != event.to_status
+                    or event.actor_id != (request.requester_id if creation else request.decision_actor_id)
+                    or event.event_at != (request.requested_at if creation else request.decision_at)
+                    or (not creation and event.event_type != "fee_change_" + request.state)):
+                raise ValidationError(_("Fee change event provenance is invalid."))
+
+    @api.model
+    @api.private
+    def _log_fee_change(self, request, event_type):
+        creation = event_type == "fee_change_requested"
+        order = request.order_id
+        return super(TruCalcOrderLifecycleEvent, self.sudo()).create({
+            "order_id": order.id, "stable_order_id": order.id,
+            "company_id": order.company_id.id, "event_type": event_type,
+            "from_status": order.status, "to_status": order.status,
+            "actor_id": (request.requester_id if creation else request.decision_actor_id).id,
+            "event_at": request.requested_at if creation else request.decision_at,
+            "fee_change_request_id": request.id,
+        })
 
     _valuation_received_unique = models.UniqueIndex(
         "(order_id) WHERE event_type = 'valuation_received'",

@@ -82,3 +82,24 @@ $trucalc-black: #000000;
 .o_portal_docs > .o_trucalc_bank_portal {
     display: contents;
 }
+
+.o_trucalc_bank_portal {
+    .table > tbody > tr.o_trucalc_fee_pending > td {
+        background-color: #ebc034;
+        color: #2c3e50;
+        --table-accent-bg: transparent;
+        --bs-table-accent-bg: transparent;
+        box-shadow: none;
+    }
+
+    .o_trucalc_fee_history {
+        font-size: 0.8125rem;
+
+        .o_trucalc_fee_reason {
+            max-width: 16rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+    }
+}
