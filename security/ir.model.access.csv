@@ -1,4 +1,8 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_bank_invoice_admin,Bank invoice administrator,model_trucalc_bank_invoice,trucalc_orders.group_trucalc_admin,1,0,0,0
+access_bank_invoice_ops,Bank invoice operations,model_trucalc_bank_invoice,trucalc_orders.group_trucalc_operations,1,0,0,0
+access_bank_invoice_wizard_admin,Bank invoice status administrator,model_trucalc_bank_invoice_status_wizard,trucalc_orders.group_trucalc_admin,1,1,1,1
+access_bank_invoice_wizard_ops,Bank invoice status operations,model_trucalc_bank_invoice_status_wizard,trucalc_orders.group_trucalc_operations,1,1,1,1
 
 access_trucalc_admin,trucalc order administrator,model_trucalc_order,trucalc_orders.group_trucalc_admin,1,1,1,0
 access_trucalc_user,trucalc order operations,model_trucalc_order,trucalc_orders.group_trucalc_operations,1,1,1,0

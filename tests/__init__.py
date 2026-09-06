@@ -21,3 +21,4 @@ from . import test_vendor_deliverables
 from . import test_review_workflow
 from . import test_order_completion
 from . import test_fee_change_request
+from . import test_bank_invoice

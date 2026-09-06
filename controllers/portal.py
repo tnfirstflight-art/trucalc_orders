@@ -10,6 +10,34 @@ from odoo.addons.portal.controllers.portal import CustomerPortal, pager as porta
 
 
 class TruCalcVendorPortal(CustomerPortal):
+    def _bank_invoice_response(self, invoice):
+        if not invoice or not invoice.pdf_data:
+            raise request.not_found()
+        return request.make_response(base64.b64decode(invoice.pdf_data), headers=[
+            ("Content-Type", "application/pdf"),
+            ("Content-Disposition", content_disposition(invoice.pdf_filename)),
+            ("Cache-Control", "private, no-store"), ("X-Content-Type-Options", "nosniff"),
+        ])
+
+    @http.route("/trucalc/bank-invoices/<int:invoice_id>/download", type="http", auth="user", methods=["GET"], readonly=True)
+    def internal_bank_invoice_download(self, invoice_id, **kwargs):
+        invoice = request.env["trucalc.bank.invoice"].browse(invoice_id)
+        try:
+            invoice._authorize()
+        except (AccessError, ValidationError):
+            raise request.not_found()
+        return self._bank_invoice_response(invoice.sudo())
+
+    @http.route("/my/trucalc/bank/orders/<string:order_number>/invoice/<int:invoice_id>/download",
+                type="http", auth="user", methods=["GET"], website=True, readonly=True)
+    def portal_bank_invoice_download(self, order_number, invoice_id, **kwargs):
+        order, _bank = self._bank_order(order_number)
+        try:
+            invoice = request.env["trucalc.bank.invoice"]._bank_invoice(order, invoice_id)
+        except (AccessError, ValidationError):
+            raise request.not_found()
+        return self._bank_invoice_response(invoice)
+
     def _deliverable_response(self, deliverable):
         deliverable.ensure_one()
         attachment = request.env["ir.attachment"].sudo().search([
@@ -495,6 +523,7 @@ class TruCalcVendorPortal(CustomerPortal):
         values.update({
             "approved_valuation": approved_valuation,
             "valuation_approval": valuation_approval,
+            "bank_invoice": request.env["trucalc.bank.invoice"]._portal_values(order),
         })
         return request.render("trucalc_orders.portal_bank_documents", values)
 

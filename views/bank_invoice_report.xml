@@ -1,0 +1,60 @@
+<odoo>
+    <record id="bank_invoice_paperformat" model="report.paperformat">
+        <field name="name">TruCalc Bank Invoice Letter</field>
+        <field name="format">Letter</field><field name="orientation">Portrait</field>
+        <field name="margin_top">15</field><field name="margin_bottom">15</field>
+        <field name="margin_left">18</field><field name="margin_right">18</field>
+        <field name="dpi">96</field>
+    </record>
+    <record id="action_bank_invoice_report" model="ir.actions.report">
+        <field name="name">TruCalc Bank Invoice</field>
+        <field name="model">trucalc.bank.invoice</field>
+        <field name="report_type">qweb-pdf</field>
+        <field name="report_name">trucalc_orders.bank_invoice_pdf</field>
+        <field name="paperformat_id" ref="bank_invoice_paperformat"/>
+        <field name="group_ids" eval="[(6, 0, [ref('group_trucalc_admin'), ref('group_trucalc_operations')])]"/>
+    </record>
+    <template id="bank_invoice_pdf">
+        <html><head><meta charset="utf-8"/>
+            <style>
+                body { font-family: Arial, sans-serif; color: #182b3d; font-size: 12px; line-height: 1.45; }
+                h1 { font-size: 28px; margin: 0; } h2 { font-size: 14px; margin: 0 0 8px; }
+                .header { border-bottom: 3px solid #234a65; padding-bottom: 18px; margin-bottom: 24px; }
+                .logo { max-width: 190px; max-height: 65px; margin-bottom: 8px; }
+                table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+                td { padding: 7px 0; vertical-align: top; overflow-wrap: break-word; }
+                .label { width: 30%; color: #526573; } .section { margin: 24px 0; }
+                .amount { border-top: 1px solid #b5c6d2; border-bottom: 1px solid #b5c6d2; padding: 16px 0; font-size: 19px; }
+                .remit { margin-top: 32px; padding: 16px; background: #f0f4f6; }
+            </style>
+        </head><body>
+            <div class="header">
+                <img t-if="invoice['issuer_logo']" class="logo" t-att-src="'data:image/png;base64,' + invoice['issuer_logo']"/>
+                <h2 t-out="invoice['issuer_name']"/><h1>INVOICE</h1>
+            </div>
+            <table>
+                <tr><td class="label">Invoice Number</td><td t-out="invoice['invoice_number']"/></tr>
+                <tr><td class="label">Invoice Date</td><td t-out="invoice['invoice_date']"/></tr>
+                <tr><td class="label">Due Date (Net 30)</td><td t-out="invoice['due_date']"/></tr>
+                <tr><td class="label">Bill To</td><td t-out="invoice['bank_name']"/></tr>
+            </table>
+            <div class="section"><h2>Order Details</h2>
+                <table>
+                    <tr><td class="label">Order Number</td><td t-out="invoice['invoice_number']"/></tr>
+                    <tr t-if="invoice['loan_number']"><td class="label">Loan Number</td><td t-out="invoice['loan_number']"/></tr>
+                    <tr><td class="label">Borrower</td><td t-out="invoice['borrower']"/></tr>
+                    <tr><td class="label">Property Address</td><td t-out="invoice['property_address']"/></tr>
+                    <tr><td class="label">Service Type</td><td t-out="invoice['service_type']"/></tr>
+                </table>
+            </div>
+            <div class="amount"><strong>Invoice Amount: </strong><span t-out="invoice['amount_display']"/> <span t-out="invoice['currency']"/></div>
+            <div class="remit"><h2>Remit Payment To:</h2>
+                <strong t-out="invoice['issuer_name']"/>
+                <div t-foreach="invoice['issuer_address']" t-as="line" t-out="line"/>
+                <div t-if="invoice['issuer_phone']" t-out="invoice['issuer_phone']"/>
+                <div t-if="invoice['issuer_email']" t-out="invoice['issuer_email']"/>
+                <p>Please include payment reference: <strong t-out="invoice['invoice_number']"/></p>
+            </div>
+        </body></html>
+    </template>
+</odoo>

@@ -1,6 +1,6 @@
 {
     'name': 'TruCalc Orders',
-    'version': '1.22',
+    'version': '1.23',
     'author': 'TruCalc',
     'license': 'LGPL-3',
     'category': 'Services',
@@ -19,6 +19,8 @@
         'views/vendor_portal_provision_views.xml',
         'views/order_decline_wizard_views.xml',
         'views/fee_change_request_views.xml',
+        'views/bank_invoice_views.xml',
+        'views/bank_invoice_report.xml',
         'views/reviewer_assignment_wizard_views.xml',
         'views/valuation_revision_wizard_views.xml',
         'views/bid_request_wizard_views.xml',

@@ -1,0 +1,77 @@
+<odoo>
+    <record id="view_unpaid_bank_invoice_list" model="ir.ui.view">
+        <field name="name">trucalc.bank.invoice.unpaid.list</field>
+        <field name="model">trucalc.bank.invoice</field>
+        <field name="arch" type="xml">
+            <list string="Unpaid Invoices" create="0" edit="0" delete="0" duplicate="0">
+                <field name="invoice_number" string="Order / Invoice #"/>
+                <field name="company_id" string="Bank"/>
+                <field name="borrower"/>
+                <field name="property_address"/>
+                <field name="invoice_date"/>
+                <field name="due_date"/>
+                <field name="currency_id" column_invisible="True"/>
+                <field name="amount" string="Invoice Amount"/>
+                <field name="status"/>
+                <button name="action_mark_paid" type="object" string="Pay"
+                        invisible="status != 'issued'"
+                        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
+            </list>
+        </field>
+    </record>
+    <record id="action_unpaid_bank_invoices" model="ir.actions.act_window">
+        <field name="name">Unpaid Invoices</field>
+        <field name="res_model">trucalc.bank.invoice</field>
+        <field name="view_mode">list,form</field>
+        <field name="view_id" ref="view_unpaid_bank_invoice_list"/>
+        <field name="domain">[('status', '=', 'issued')]</field>
+        <field name="group_ids" eval="[(4, ref('group_trucalc_admin')), (4, ref('group_trucalc_operations'))]"/>
+    </record>
+    <record id="view_bank_invoice_form" model="ir.ui.view">
+        <field name="name">trucalc.bank.invoice.form</field>
+        <field name="model">trucalc.bank.invoice</field>
+        <field name="arch" type="xml">
+            <form string="Bank Invoice" create="0" edit="0" delete="0" duplicate="0">
+                <header>
+                    <button name="action_mark_paid" type="object" string="Mark Paid" invisible="status != 'issued'" class="oe_highlight"/>
+                    <button name="action_void" type="object" string="Void Invoice" invisible="status != 'issued'"/>
+                    <button name="action_download" type="object" string="Download Invoice"/>
+                    <field name="status" widget="statusbar" statusbar_visible="issued,paid,void"/>
+                </header>
+                <sheet>
+                    <h1><field name="invoice_number"/></h1>
+                    <group>
+                        <group><field name="order_id"/><field name="company_id"/><field name="invoice_date"/><field name="due_date"/></group>
+                        <group><field name="currency_id"/><field name="amount"/><field name="issued_by"/><field name="issued_at"/></group>
+                    </group>
+                    <group string="Payment Acknowledgment" invisible="status != 'paid'">
+                        <field name="paid_date"/><field name="payment_reference"/><field name="paid_by"/><field name="paid_at"/>
+                    </group>
+                    <group string="Void Evidence" invisible="status != 'void'">
+                        <field name="void_reason"/><field name="voided_by"/><field name="voided_at"/>
+                    </group>
+                    <group string="Fee Snapshot Provenance">
+                        <field name="original_agreed_fee"/><field name="current_fee_change_request_id"/>
+                        <field name="fee_workflow_revision"/><field name="issuer_company_id"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="view_bank_invoice_status_wizard" model="ir.ui.view">
+        <field name="name">trucalc.bank.invoice.status.wizard.form</field>
+        <field name="model">trucalc.bank.invoice.status.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Bank Invoice Status">
+                <group>
+                    <field name="invoice_id" options="{'no_open': True, 'no_create': True}"/>
+                    <field name="transition" invisible="1"/>
+                    <field name="payment_date" invisible="transition != 'paid'" required="transition == 'paid'"/>
+                    <field name="payment_reference" invisible="transition != 'paid'"/>
+                    <field name="reason" invisible="transition != 'void'" required="transition == 'void'"/>
+                </group>
+                <footer><button name="action_confirm" type="object" string="Confirm" class="btn-primary"/><button string="Cancel" special="cancel"/></footer>
+            </form>
+        </field>
+    </record>
+</odoo>

@@ -774,6 +774,18 @@
                     </a>
                 </div>
             </div>
+            <div t-if="bank_invoice" class="card mb-3">
+                <div class="card-header"><strong>Bank Invoice</strong></div>
+                <div class="card-body">
+                    <div><strong>Invoice Number:</strong> <t t-out="bank_invoice['number']"/></div>
+                    <div><strong>Invoice Date:</strong> <t t-out="bank_invoice['invoice_date']"/></div>
+                    <div><strong>Due Date:</strong> <t t-out="bank_invoice['due_date']"/></div>
+                    <div><strong>Invoice Amount:</strong> <t t-out="bank_invoice['amount']"/> <t t-out="bank_invoice['currency']"/></div>
+                    <div><strong>Status:</strong> <t t-out="bank_invoice['status']"/></div>
+                    <a class="btn btn-sm btn-outline-primary mt-2"
+                       t-att-href="'/my/trucalc/bank/orders/%s/invoice/%s/download' % (order.order_number, bank_invoice['id'])">Download Invoice</a>
+                </div>
+            </div>
             <h3>Documents</h3>
             <form t-if="can_upload and order.status not in ('draft', 'completed')"
                   t-att-action="'/my/trucalc/bank/orders/%s/documents/upload' % order.order_number"

@@ -33,6 +33,11 @@ class EvaluationOrder(models.Model):
     _description = "TruCalc Order"
     _inherit = ["mail.thread", "mail.activity.mixin"]
 
+    bank_invoice_ids = fields.One2many(
+        "trucalc.bank.invoice", "order_id", readonly=True, copy=False,
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+    )
+
     def _mail_get_operation_for_mail_message_operation(self, message_operation):
         operations = super()._mail_get_operation_for_mail_message_operation(
             message_operation
@@ -2378,11 +2383,14 @@ class EvaluationOrder(models.Model):
             order.invalidate_recordset()
             self._require_completion_actor()
             valuation = order._completion_valuation()
+            # Invoice, PDF, both audit events and completion share this savepoint.
+            issued_at = fields.Datetime.now()
+            self.env["trucalc.bank.invoice"]._issue_for_completion(order, issued_at)
             order.with_context(tracking_disable=True)._controlled_lifecycle_write({
                 "status": "completed",
             })
             self.env["trucalc.order.lifecycle.event"]._log_order_completion(
-                order, valuation, actor,
+                order, valuation, actor, event_at=issued_at,
             )
         return True
 

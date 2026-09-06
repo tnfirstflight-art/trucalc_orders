@@ -18,6 +18,9 @@ class TruCalcOrderLifecycleEvent(models.Model):
     )
     event_type = fields.Selection(
         [
+            ("bank_invoice_issued", "Bank Invoice Issued"),
+            ("bank_invoice_marked_paid", "Bank Invoice Marked Paid"),
+            ("bank_invoice_voided", "Bank Invoice Voided"),
             ("fee_change_requested", "Fee Change Requested"),
             ("fee_change_approved", "Fee Change Approved"),
             ("fee_change_declined", "Fee Change Declined"),
@@ -90,6 +93,53 @@ class TruCalcOrderLifecycleEvent(models.Model):
     fee_change_request_id = fields.Many2one(
         "trucalc.fee.change.request", readonly=True, index=True, ondelete="restrict",
     )
+    bank_invoice_id = fields.Many2one(
+        "trucalc.bank.invoice", readonly=True, index=True, ondelete="restrict",
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+    )
+    _bank_invoice_issue_unique = models.UniqueIndex(
+        "(bank_invoice_id) WHERE event_type = 'bank_invoice_issued'",
+        "An invoice may have only one issue event.",
+    )
+    _bank_invoice_terminal_unique = models.UniqueIndex(
+        "(bank_invoice_id) WHERE event_type IN ('bank_invoice_marked_paid', 'bank_invoice_voided')",
+        "An invoice may have only one terminal event.",
+    )
+
+    @api.constrains("bank_invoice_id", "event_type", "order_id", "company_id",
+                    "actor_id", "event_at", "from_status", "to_status", "stable_order_id")
+    def _check_bank_invoice_event(self):
+        for event in self.sudo():
+            invoice = event.bank_invoice_id
+            if not event.event_type.startswith("bank_invoice_"):
+                if invoice:
+                    raise ValidationError(_("Only Bank Invoice events may reference an invoice."))
+                continue
+            evidence = {"bank_invoice_issued": (invoice.issued_by, invoice.issued_at),
+                        "bank_invoice_marked_paid": (invoice.paid_by, invoice.paid_at),
+                        "bank_invoice_voided": (invoice.voided_by, invoice.voided_at)}
+            actor, timestamp = evidence[event.event_type]
+            if (not invoice or event.order_id != invoice.order_id
+                    or event.company_id != invoice.company_id or event.stable_order_id != invoice.order_id.id
+                    or event.from_status != "completed" or event.to_status != "completed"
+                    or event.actor_id != actor or event.event_at != timestamp
+                    or (event.event_type == "bank_invoice_marked_paid" and invoice.status != "paid")
+                    or (event.event_type == "bank_invoice_voided" and invoice.status != "void")):
+                raise ValidationError(_("Bank Invoice event provenance is invalid."))
+
+    @api.model
+    @api.private
+    def _log_bank_invoice(self, invoice, event_type):
+        evidence = {"bank_invoice_issued": (invoice.issued_by, invoice.issued_at),
+                    "bank_invoice_marked_paid": (invoice.paid_by, invoice.paid_at),
+                    "bank_invoice_voided": (invoice.voided_by, invoice.voided_at)}
+        actor, timestamp = evidence[event_type]
+        return super(TruCalcOrderLifecycleEvent, self.sudo()).create({
+            "order_id": invoice.order_id.id, "stable_order_id": invoice.order_id.id,
+            "company_id": invoice.company_id.id, "bank_invoice_id": invoice.id,
+            "event_type": event_type, "from_status": "completed", "to_status": "completed",
+            "actor_id": actor.id, "event_at": timestamp,
+        })
     _fee_requested_unique = models.UniqueIndex(
         "(fee_change_request_id) WHERE event_type = 'fee_change_requested'",
         "A fee request may have only one creation event.",
@@ -464,12 +514,12 @@ class TruCalcOrderLifecycleEvent(models.Model):
 
     @api.model
     @api.private
-    def _log_order_completion(self, order, target, actor):
+    def _log_order_completion(self, order, target, actor, event_at=None):
         return super(TruCalcOrderLifecycleEvent, self.sudo()).create({
             "order_id": order.id, "stable_order_id": order.id,
             "company_id": order.company_id.id, "event_type": "order_completed",
             "from_status": "under_review", "to_status": "completed",
-            "actor_id": actor.id, "event_at": fields.Datetime.now(),
+            "actor_id": actor.id, "event_at": event_at or fields.Datetime.now(),
             "reviewer_user_id": order.reviewer_user_id.id,
             "target_valuation_id": target.id,
         })

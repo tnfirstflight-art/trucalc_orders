@@ -1,7 +1,7 @@
 from unittest.mock import patch
 from lxml import etree
 
-from odoo import fields
+from odoo import Command, fields
 from odoo.exceptions import AccessError, ValidationError
 from odoo.tests import Form, tagged
 
@@ -11,6 +11,29 @@ from .test_vendor_deliverables import TestVendorDeliverablePortal
 
 @tagged("post_install", "-at_install", "trucalc_order_completion")
 class TestOrderCompletion(TestControlledValuationReview):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        # Completion now issues a Bank invoice: use a distinct customer Bank.
+        cls.company = cls.env['res.company'].create({'name': 'Completion Customer Bank'})
+        for actor in (cls.admin, cls.ops):
+            actor.write({'company_ids': [Command.link(cls.company.id)]})
+
+    def _valuation_order(self):
+        order, authorization, valuation = super()._valuation_order()
+        area = self.env['trucalc.service.area'].with_user(self.admin).create({
+            'state_id': self.env.ref('base.state_us_37').id,
+            'county': 'Completion fixture %s' % order.id,
+            'service_type': 'evaluation', 'base_fee': 500,
+        })
+        # Isolated historical fixture; never changes persistent historical pricing.
+        order._controlled_lifecycle_write({
+            'service_area_id': area.id, 'fee_currency_id': area.currency_id.id,
+            'agreed_fee': 500, 'current_agreed_fee': 500,
+            'fee_source': 'base', 'fee_locked_at': fields.Datetime.now(),
+        })
+        return order, authorization, valuation
+
     def test_order_date_and_company_view_contracts(self):
         view = "trucalc_orders.view_trucalc_order_form"
         new_form = Form(self.env["trucalc.order"].with_user(self.admin), view=view)
@@ -226,7 +249,9 @@ class TestOrderCompletion(TestControlledValuationReview):
         self.assertTrue(order.with_user(self.reviewer).has_access("read"))
         self.assertEqual(valuation.with_user(self.reviewer)._authorize_download(self.reviewer), valuation)
         self.assertFalse(invoice.with_user(self.reviewer).has_access("read"))
-        self.assertTrue(order.lifecycle_event_ids.with_user(self.reviewer).has_access("read"))
+        history = order.lifecycle_event_ids
+        self.assertTrue(history.filtered(lambda e:not e.event_type.startswith('bank_invoice_')).with_user(self.reviewer).has_access("read"))
+        self.assertFalse(history.filtered(lambda e:e.event_type.startswith('bank_invoice_')).with_user(self.reviewer).has_access("read"))
         self.assertEqual(order.with_user(self.reviewer).action_view_previous_valuations()["res_model"], valuation._name)
         for operation in (
             lambda: order.with_user(self.reviewer).action_start_review(),
@@ -248,7 +273,20 @@ class TestOrderCompletion(TestControlledValuationReview):
 @tagged("post_install", "-at_install", "trucalc_order_completion_portal")
 class TestOrderCompletionPortal(TestVendorDeliverablePortal):
     def test_real_completion_releases_only_valuation_and_freezes_uploads(self):
+        customer = self.env['res.company'].create({'name':'Completion Portal Customer'})
+        for actor in (self.admin,self.reviewer,self.vendor_user):
+            actor.write({'company_ids':[Command.link(customer.id)]})
+        self.bank = self._user('completion-portal-bank','group_bank_admin',bank=customer)
+        self.env.ref('trucalc_orders.seq_trucalc_order').write({'company_id':False})
+        self.env = self.env(context=dict(self.env.context,allowed_company_ids=[customer.id]))
         order, valuation = self._bank_release_fixture()
+        area = self.env['trucalc.service.area'].with_user(self.admin).create({
+            'state_id': self.env.ref('base.state_us_37').id,
+            'county': 'Portal completion fixture %s' % order.id,
+            'service_type': 'evaluation', 'base_fee': 500,
+        })
+        order._controlled_lifecycle_write({'service_area_id':area.id, 'fee_currency_id':area.currency_id.id,
+            'agreed_fee':500,'current_agreed_fee':500,'fee_source':'base','fee_locked_at':fields.Datetime.now()})
         invoice = self.env["trucalc.vendor.deliverable"].with_user(self.vendor_user)._submit(
             valuation.authorization_id, self.vendor_user, "vendor_invoice", "Closeout Invoice.pdf", PDF,
         )

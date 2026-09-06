@@ -267,6 +267,18 @@
                         <field name="fee_locked_at" readonly="1"/>
                     </group>
 
+                    <group string="Bank Invoice" invisible="not bank_invoice_ids"
+                           groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations">
+
+                        <field name="bank_invoice_ids" nolabel="1" readonly="1">
+                            <list create="0" edit="0" delete="0">
+                                <field name="invoice_number"/><field name="invoice_date"/><field name="due_date"/>
+                                <field name="currency_id" column_invisible="True"/><field name="amount"/><field name="status"/>
+                                <button name="action_download" type="object" string="Download Invoice"/>
+                            </list>
+                        </field>
+                    </group>
+
                     <group string="Workflow Information">
                         <field name="assigned_vendor_id" readonly="(status in ('new', 'accepted', 'declined')) or status == 'completed'"/>
                         <field name="currency_id" invisible="1"/>
@@ -572,5 +584,9 @@
         parent="menu_trucalc_root"
         action="action_trucalc_vendors"
         sequence="20"/>
+
+    <menuitem id="menu_unpaid_bank_invoices" name="Unpaid Invoices"
+        parent="menu_trucalc_root" action="action_unpaid_bank_invoices" sequence="15"
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
 
 </odoo>

@@ -226,6 +226,12 @@
         <field name="domain_force">[('company_id', 'in', user.company_ids.ids)]</field>
         <field name="groups" eval="[(4, ref('group_trucalc_admin')), (4, ref('group_trucalc_operations'))]"/>
     </record>
+    <record id="rule_bank_invoice_company" model="ir.rule">
+        <field name="name">Bank Invoice Authorized Internal Companies</field>
+        <field name="model_id" ref="model_trucalc_bank_invoice"/>
+        <field name="domain_force">[('company_id', 'in', user.company_ids.ids)]</field>
+        <field name="groups" eval="[(6, 0, [ref('group_trucalc_admin'), ref('group_trucalc_operations')])]"/>
+    </record>
 
     <record id="rule_vendor_deliverable_admin_company" model="ir.rule">
         <field name="name">Administrator Vendor Deliverables by Company</field>
@@ -260,7 +266,8 @@
         <field name="name">Assigned Reviewer Lifecycle Events</field>
         <field name="model_id" ref="model_trucalc_order_lifecycle_event"/>
         <field name="domain_force">
-            [('order_id.reviewer_user_id', '=', user.id),
+            [('event_type', 'not in', ('bank_invoice_issued', 'bank_invoice_marked_paid', 'bank_invoice_voided')),
+             ('order_id.reviewer_user_id', '=', user.id),
              ('order_id.status', 'in', ('reviewer_assigned', 'under_review', 'completed'))]
         </field>
         <field name="groups" eval="[(4, ref('group_trucalc_reviewer'))]"/>
