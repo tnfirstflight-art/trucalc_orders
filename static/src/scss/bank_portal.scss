@@ -1,85 +1,87 @@
-$trucalc-blue: #2456a6;
-$trucalc-dark: #2c3e50;
-$trucalc-light: #f2f2f2;
-$trucalc-white: #ffffff;
-$trucalc-black: #000000;
-
 .o_trucalc_bank_portal {
-    color: $trucalc-dark;
+    color: var(--trucalc-text);
 
-    h1,
-    h2,
-    h3,
-    h4,
-    h5,
-    h6 {
-        color: $trucalc-dark;
-    }
-
-    a:not(.btn) {
-        color: $trucalc-dark;
-        text-decoration-color: $trucalc-blue;
-        text-decoration-thickness: 0.125rem;
-        text-underline-offset: 0.15em;
-    }
-
-    .btn-primary {
-        --btn-color: #{$trucalc-white};
-        --btn-bg: #{$trucalc-blue};
-        --btn-border-color: #{$trucalc-blue};
-        --btn-hover-color: #{$trucalc-white};
-        --btn-hover-bg: #{$trucalc-dark};
-        --btn-hover-border-color: #{$trucalc-dark};
-        --btn-active-color: #{$trucalc-white};
-        --btn-active-bg: #{$trucalc-dark};
-        --btn-active-border-color: #{$trucalc-dark};
-        --btn-disabled-color: #{$trucalc-white};
-        --btn-disabled-bg: #{$trucalc-blue};
-        --btn-disabled-border-color: #{$trucalc-blue};
-        font-weight: 600;
-    }
-
-    .btn-outline-primary {
-        --btn-color: #{$trucalc-dark};
-        --btn-border-color: #{$trucalc-dark};
-        --btn-hover-color: #{$trucalc-white};
-        --btn-hover-bg: #{$trucalc-blue};
-        --btn-hover-border-color: #{$trucalc-blue};
-        --btn-active-color: #{$trucalc-white};
-        --btn-active-bg: #{$trucalc-blue};
-        --btn-active-border-color: #{$trucalc-blue};
+    h1, h2, h3, h4, h5, h6 {
+        color: var(--trucalc-text);
     }
 
     .card {
-        border-color: rgba($trucalc-dark, 0.2);
-        box-shadow: 0 0.25rem 0.75rem rgba($trucalc-black, 0.06);
+        border-color: var(--trucalc-border);
+        box-shadow: 0 0.25rem 0.75rem rgba(2, 47, 91, 0.06);
     }
 
     .card-header,
     .table thead {
-        color: $trucalc-white;
-        background-color: $trucalc-dark;
+        color: var(--trucalc-surface);
+        background-color: var(--trucalc-primary);
     }
 
-    .form-control:focus,
-    .form-select:focus {
-        border-color: $trucalc-blue;
-        box-shadow: 0 0 0 0.2rem rgba($trucalc-blue, 0.3);
+    .card-header :is(h1, h2, h3, h4, h5, h6) {
+        color: inherit;
     }
 
     .alert-info {
-        color: $trucalc-dark;
-        background-color: $trucalc-light;
-        border-color: $trucalc-blue;
+        color: var(--trucalc-text);
+        background-color: var(--trucalc-light-background);
+        border-color: var(--trucalc-primary);
     }
 
     .badge.text-bg-secondary {
-        color: $trucalc-white !important;
-        background-color: $trucalc-dark !important;
+        color: var(--trucalc-surface) !important;
+        background-color: var(--trucalc-primary) !important;
     }
 }
 
 .o_portal_docs > .o_trucalc_bank_portal {
+    display: contents;
+}
+
+.o_trucalc_bank_shell {
+    > .o_trucalc_bank_header {
+        position: sticky;
+        top: 0;
+        z-index: 1020;
+        background-color: var(--trucalc-light-background);
+        border-bottom: 1px solid var(--trucalc-border);
+
+        > .navbar {
+            background-color: var(--trucalc-light-background) !important;
+
+            > .container {
+                flex-wrap: wrap;
+                gap: 0.5rem;
+            }
+        }
+
+        .navbar-brand.logo {
+            max-width: 75%;
+            width: 18rem;
+        }
+
+        .text-primary-emphasis {
+            color: var(--trucalc-primary) !important;
+        }
+
+        .dropdown-menu {
+            --dropdown-link-color: var(--trucalc-primary);
+            --dropdown-link-hover-color: var(--trucalc-primary);
+            --dropdown-link-hover-bg: var(--trucalc-subtle-accent);
+            --dropdown-link-active-color: var(--trucalc-primary);
+            --dropdown-link-active-bg: var(--trucalc-subtle-accent);
+        }
+    }
+
+    > footer.o_footer {
+        background-color: var(--trucalc-light-background) !important;
+        border-top: 1px solid var(--trucalc-border);
+
+        .text-muted {
+            color: var(--trucalc-text) !important;
+        }
+    }
+}
+
+.o_trucalc_bank_portal {
     display: contents;
 }
 

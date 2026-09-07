@@ -36,12 +36,15 @@
         'views/negotiated_fee_views.xml',
         'views/bid_views.xml',
         'views/vendor_portal_templates.xml',
+        'views/bank_branding_templates.xml',
     ],
     'assets': {
         'web.assets_frontend': [
             'trucalc_orders/static/src/js/inspection_phone_format.js',
             'trucalc_orders/static/src/js/bank_draft_service_area.js',
+            'trucalc_orders/static/src/scss/trucalc_tokens.scss',
             'trucalc_orders/static/src/scss/bank_portal.scss',
+            'trucalc_orders/static/src/scss/trucalc_login.scss',
         ],
         'web.assets_backend': [
             'trucalc_orders/static/src/js/inspection_phone_format.js',

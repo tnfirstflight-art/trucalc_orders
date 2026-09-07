@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <template id="login_branding" inherit_id="web.login" name="TruCalc Login Branding">
+        <xpath expr="//t[@t-call='web.login_layout']" position="inside">
+            <t t-set="trucalc_login" t-value="True"/>
+            <t t-set="disable_footer" t-value="True"/>
+        </xpath>
+    </template>
+
+    <template id="login_branding_layout" inherit_id="web.login_layout" name="TruCalc Login Card">
+        <xpath expr="//div[contains(@t-attf-class, 'o_database_list')]" position="attributes">
+            <attribute name="t-attf-class" add="#{'o_trucalc_login' if trucalc_login else ''}" separator=" "/>
+        </xpath>
+    </template>
+
+    <template id="bank_portal_layout" name="TruCalc Bank Shell">
+        <t t-call="portal.portal_layout">
+            <t t-set="trucalc_bank_shell" t-value="True"/>
+            <!-- Same configured identity as Bank invoice issuer; never switch company. -->
+            <t t-set="trucalc_company_name" t-value="request.env.ref('base.main_company').sudo().name"/>
+            <t t-out="0"/>
+        </t>
+    </template>
+
+    <template id="bank_shell_branding" inherit_id="portal.frontend_layout" name="Scoped TruCalc Bank Branding">
+        <xpath expr="//div[@id='wrapwrap']" position="attributes">
+            <attribute name="t-attf-class" add="#{'o_trucalc_bank_shell' if trucalc_bank_shell else ''}" separator=" "/>
+        </xpath>
+        <xpath expr="//div[@id='wrapwrap']/header" position="attributes">
+            <attribute name="t-attf-class" add="#{'o_trucalc_bank_header' if trucalc_bank_shell else ''}" separator=" "/>
+        </xpath>
+        <xpath expr="//span[hasclass('o_footer_copyright_name')]/span[@t-field='res_company.name']" position="replace">
+            <t t-if="trucalc_bank_shell"><span t-out="trucalc_company_name" itemprop="name"/></t>
+            <span t-else="" t-field="res_company.name" itemprop="name"/>
+        </xpath>
+        <xpath expr="//t[@t-call='web.brand_promotion']" position="attributes">
+            <attribute name="t-if">not trucalc_bank_shell</attribute>
+        </xpath>
+    </template>
+</odoo>

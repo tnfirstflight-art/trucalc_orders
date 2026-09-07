@@ -549,7 +549,7 @@
     </template>
 
     <template id="portal_bank_orders" name="Bank TruCalc Orders">
-        <t t-call="portal.portal_layout">
+        <t t-call="trucalc_orders.bank_portal_layout">
             <div class="o_trucalc_bank_portal">
             <t t-set="breadcrumbs_searchbar" t-value="True"/>
             <t t-call="portal.portal_searchbar">
@@ -648,7 +648,7 @@
     </template>
 
     <template id="portal_bank_order_new" name="New Bank TruCalc Request">
-        <t t-call="portal.portal_layout">
+        <t t-call="trucalc_orders.bank_portal_layout">
             <div class="o_trucalc_bank_portal">
             <h2>Create TruCalc Draft</h2>
             <div t-if="submission_error" class="alert alert-danger" role="alert">
@@ -708,7 +708,7 @@
     </template>
 
     <template id="portal_bank_documents" name="Bank TruCalc Documents">
-        <t t-call="portal.portal_layout">
+        <t t-call="trucalc_orders.bank_portal_layout">
             <div class="o_trucalc_bank_portal">
             <div class="d-flex justify-content-between align-items-center mb-3">
                 <h2><t t-if="order.status == 'draft'">TruCalc Draft</t><t t-else="">TruCalc Request</t> <t t-out="order.order_number"/></h2>

@@ -1,0 +1,29 @@
+.o_trucalc_login {
+    color: var(--trucalc-text);
+
+    .text-primary,
+    .text-primary-emphasis {
+        color: var(--trucalc-primary) !important;
+    }
+
+    .list-group {
+        --list-group-color: var(--trucalc-text);
+        --list-group-action-color: var(--trucalc-primary);
+        --list-group-action-hover-color: var(--trucalc-primary);
+        --list-group-action-hover-bg: var(--trucalc-subtle-accent);
+        --list-group-action-active-color: var(--trucalc-primary);
+        --list-group-action-active-bg: var(--trucalc-subtle-accent);
+        --list-group-active-color: var(--trucalc-surface);
+        --list-group-active-bg: var(--trucalc-primary);
+        --list-group-active-border-color: var(--trucalc-primary);
+    }
+
+    .passkey_login_link {
+        color: var(--trucalc-primary);
+
+        &:hover, &:focus {
+            color: var(--trucalc-primary);
+            background-color: var(--trucalc-subtle-accent);
+        }
+    }
+}

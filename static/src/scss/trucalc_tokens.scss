@@ -1,0 +1,89 @@
+// Reusable token definitions. A future backend pass can include this mixin
+// under explicit TruCalc view roots; this asset is frontend-only today.
+@mixin trucalc-tokens {
+    --trucalc-primary: #022f5b;
+    --trucalc-primary-hover: #526680;
+    --trucalc-text: #022f5b;
+    --trucalc-muted-text: #526680;
+    --trucalc-surface: #ffffff;
+    --trucalc-light-background: #d7e0ea;
+    --trucalc-secondary-background: #cbd7df;
+    --trucalc-subtle-accent: #cfddee;
+    --trucalc-border: #b9c9db;
+    --trucalc-accent: #9cafc6;
+    --trucalc-control-border: #526680;
+    --trucalc-focus: #022f5b;
+}
+
+.o_trucalc_bank_portal,
+.o_trucalc_bank_shell,
+.o_trucalc_login {
+    @include trucalc-tokens;
+
+    a:not(.btn):not(.alert-link),
+    .btn-link {
+        color: var(--trucalc-primary);
+        --btn-color: var(--trucalc-primary);
+        --btn-hover-color: var(--trucalc-primary);
+        --btn-active-color: var(--trucalc-primary);
+        text-decoration-color: currentColor;
+        text-decoration-thickness: 0.125rem;
+        text-underline-offset: 0.15em;
+
+        &:hover {
+            text-decoration-line: underline;
+        }
+    }
+
+    .btn-primary {
+        --btn-color: var(--trucalc-surface);
+        --btn-bg: var(--trucalc-primary);
+        --btn-border-color: var(--trucalc-primary);
+        --btn-hover-color: var(--trucalc-surface);
+        --btn-hover-bg: var(--trucalc-primary-hover);
+        --btn-hover-border-color: var(--trucalc-primary-hover);
+        --btn-active-color: var(--trucalc-surface);
+        --btn-active-bg: var(--trucalc-primary-hover);
+        --btn-active-border-color: var(--trucalc-primary-hover);
+        --btn-disabled-color: var(--trucalc-surface);
+        --btn-disabled-bg: var(--trucalc-primary);
+        --btn-disabled-border-color: var(--trucalc-primary);
+        font-weight: 600;
+    }
+
+    .btn-outline-primary {
+        --btn-color: var(--trucalc-primary);
+        --btn-border-color: var(--trucalc-primary);
+        --btn-hover-color: var(--trucalc-surface);
+        --btn-hover-bg: var(--trucalc-primary);
+        --btn-hover-border-color: var(--trucalc-primary);
+        --btn-active-color: var(--trucalc-surface);
+        --btn-active-bg: var(--trucalc-primary);
+        --btn-active-border-color: var(--trucalc-primary);
+    }
+
+    .btn-primary,
+    .btn-outline-primary,
+    .btn-link {
+        --btn-focus-shadow-rgb: 2, 47, 91;
+    }
+
+    a:focus-visible,
+    button:focus-visible,
+    input:focus-visible,
+    select:focus-visible,
+    textarea:focus-visible {
+        outline: 2px solid var(--trucalc-focus);
+        outline-offset: 2px;
+    }
+
+    .form-control,
+    .form-select {
+        border-color: var(--trucalc-control-border);
+
+        &:focus {
+            border-color: var(--trucalc-focus);
+            box-shadow: 0 0 0 0.2rem rgba(2, 47, 91, 0.25);
+        }
+    }
+}
