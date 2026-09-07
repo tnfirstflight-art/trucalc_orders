@@ -61,7 +61,7 @@ class TestBankUX(TestBankOrderPortal):
             self.assertNotIn('Location', response.headers)
             self.assertEqual(self.url_open('/my/home', allow_redirects=False).status_code, 200)
 
-    def test_bank_shell_identity_and_pass_b_unchanged(self):
+    def test_bank_shell_identity(self):
         self._login(self.bank_admin)
         issuer = self.env.ref('base.main_company').name
         for path in ('/my/trucalc/bank/orders', '/my/trucalc/bank/orders/new',
@@ -80,10 +80,7 @@ class TestBankUX(TestBankOrderPortal):
             self.assertNotIn(self.bank_a.name, footer.text_content())
             self.assertFalse(footer.xpath('.//*[contains(@class,"o_brand_promotion")]'))
             self.assertNotIn('Powered by', footer.text_content())
-            self.assertTrue(tree.xpath('//ol[contains(@class,"breadcrumb")]'))
-            self.assertFalse(tree.xpath('//a[contains(@href,"filterby=")]'))
             if path.endswith('/documents'):
-                self.assertTrue(tree.xpath('//h2[contains(.,"TruCalc Request")]'))
                 self.assertTrue(tree.xpath('//a[normalize-space()="Back to My TruCalc Requests"]'))
 
     def test_vendor_shell_and_home_isolation(self):
@@ -100,6 +97,7 @@ class TestBankUX(TestBankOrderPortal):
             self.assertNotIn('o_trucalc_bank_shell', response.text)
             self.assertNotIn('o_trucalc_bank_header', response.text)
             self.assertNotIn('o_trucalc_bank_portal', response.text)
+            self.assertNotIn('Bank Orders filters', response.text)
             self.assertIn('o_brand_promotion', response.text)
 
     def test_asset_scope_contract(self):
@@ -147,6 +145,11 @@ class TestBankUX(TestBankOrderPortal):
                 const s = getComputedStyle(header);
                 if (s.position !== 'sticky' || s.top !== '0px' || Number(s.zIndex) >= 1050) throw Error('Sticky contract');
                 if (getComputedStyle(header.querySelector('nav')).backgroundColor !== 'rgb(215, 224, 234)') throw Error('Header palette');
+                const filters = [...header.querySelectorAll('.o_trucalc_bank_filters a')];
+                if (filters.length !== 4) throw Error('Filter controls missing');
+                if (filters.filter(a => a.getAttribute('aria-current') === 'page').length !== 1) throw Error('Filter selection unclear');
+                filters[0].focus();
+                if (document.activeElement !== filters[0]) throw Error('Filter keyboard focus');
                 // Ensure scrolling even on a small fixture page, without changing its layout rules.
                 document.querySelector('#wrap').style.minHeight = '200vh';
                 window.scrollTo(0, 300); await wait();
@@ -166,6 +169,11 @@ class TestBankUX(TestBankOrderPortal):
                 if (document.querySelector('.modal.show, .modal-backdrop')) throw Error('Modal did not close');
                 document.documentElement.style.zoom = '2'; await wait();
                 if (document.documentElement.scrollWidth > document.documentElement.clientWidth + 1) throw Error('Zoom page overflow');
+                for (const filter of filters) {
+                    const r = filter.getBoundingClientRect();
+                    if (r.left < -1 || r.right > innerWidth + 1) throw Error('Filter overflow');
+                }
+                if (header.getBoundingClientRect().height > innerHeight * .7) throw Error('Sticky header too tall');
                 console.log('test successful');
             })();
         """
@@ -174,6 +182,28 @@ class TestBankUX(TestBankOrderPortal):
                 self.browser_size = size
                 self.browser_js('/my/trucalc/bank/orders', code, login=self.bank_admin.login,
                                 ready="!!document.querySelector('[data-bs-toggle=\"modal\"]')", timeout=90)
+        self.browser_size = '390x844'
+        self.browser_js('/my/trucalc/bank/orders?filterby=all', """
+            (async () => {
+                const wait = () => new Promise(resolve => setTimeout(resolve, 700));
+                const header = document.querySelector('.o_trucalc_bank_header');
+                const filters = [...header.querySelectorAll('.o_trucalc_bank_filters a')];
+                if (filters.length !== 4) throw Error('Ordinary Bank filters missing');
+                const active = filters.filter(a => a.getAttribute('aria-current') === 'page');
+                if (active.length !== 1 || active[0].dataset.filterKey !== 'all') throw Error('Ordinary Bank active filter');
+                if (!document.querySelector('a[href="/my/trucalc/bank/orders/new"]')) throw Error('New Request missing');
+                document.documentElement.style.zoom = '2'; await wait();
+                for (const filter of filters) {
+                    const r = filter.getBoundingClientRect();
+                    if (r.left < -1 || r.right > innerWidth + 1) throw Error('Ordinary Bank filter overflow');
+                }
+                const toggle = header.querySelector('[data-bs-toggle="dropdown"]');
+                toggle.click(); await wait();
+                if (!header.querySelector('.dropdown-menu.show')) throw Error('Ordinary Bank dropdown unavailable');
+                console.log('test successful');
+            })();
+        """, login=self.bank_requestor.login,
+        ready="document.readyState === 'complete'", timeout=90)
 
     def test_detail_create_responsive_header(self):
         code = """
@@ -182,6 +212,8 @@ class TestBankUX(TestBankOrderPortal):
                 const header = document.querySelector('.o_trucalc_bank_header');
                 const logo = header.querySelector('.logo');
                 const toggle = header.querySelector('[data-bs-toggle="dropdown"]');
+                const filters = [...header.querySelectorAll('.o_trucalc_bank_filters a')];
+                if (filters.length !== 4) throw Error('Filter controls missing');
                 for (const zoom of ['1', '2']) {
                     document.documentElement.style.zoom = zoom;
                     document.querySelector('#wrap').style.minHeight = '200vh';
@@ -192,6 +224,10 @@ class TestBankUX(TestBankOrderPortal):
                     toggle.click(); await wait();
                     if (!header.querySelector('.dropdown-menu.show')) throw Error('Dropdown unavailable');
                     toggle.click();
+                    for (const filter of filters) {
+                        const r = filter.getBoundingClientRect();
+                        if (r.left < -1 || r.right > innerWidth + 1) throw Error('Filter overflow');
+                    }
                 }
                 console.log('test successful');
             })();

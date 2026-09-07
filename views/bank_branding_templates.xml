@@ -16,6 +16,12 @@
     <template id="bank_portal_layout" name="TruCalc Bank Shell">
         <t t-call="portal.portal_layout">
             <t t-set="trucalc_bank_shell" t-value="True"/>
+            <t t-set="trucalc_bank_filters" t-value="[
+                ('open', 'Open Orders'),
+                ('recent_completed', 'Recently Completed'),
+                ('outstanding_invoices', 'Outstanding Invoices'),
+                ('all', 'All Orders'),
+            ]"/>
             <!-- Same configured identity as Bank invoice issuer; never switch company. -->
             <t t-set="trucalc_company_name" t-value="request.env.ref('base.main_company').sudo().name"/>
             <t t-out="0"/>
@@ -28,6 +34,19 @@
         </xpath>
         <xpath expr="//div[@id='wrapwrap']/header" position="attributes">
             <attribute name="t-attf-class" add="#{'o_trucalc_bank_header' if trucalc_bank_shell else ''}" separator=" "/>
+        </xpath>
+        <xpath expr="//div[@id='wrapwrap']/header/nav" position="after">
+            <nav t-if="trucalc_bank_shell" class="o_trucalc_bank_filters" aria-label="Bank Orders filters">
+                <div class="container">
+                    <a t-foreach="trucalc_bank_filters" t-as="item"
+                       t-att-href="'/my/trucalc/bank/orders?filterby=%s' % item[0]"
+                       t-att-data-filter-key="item[0]"
+                       t-attf-class="btn btn-sm #{'btn-primary' if filterby == item[0] else 'btn-outline-primary'}"
+                       t-att-aria-current="'page' if filterby == item[0] else None">
+                        <t t-out="item[1]"/>
+                    </a>
+                </div>
+            </nav>
         </xpath>
         <xpath expr="//span[hasclass('o_footer_copyright_name')]/span[@t-field='res_company.name']" position="replace">
             <t t-if="trucalc_bank_shell"><span t-out="trucalc_company_name" itemprop="name"/></t>

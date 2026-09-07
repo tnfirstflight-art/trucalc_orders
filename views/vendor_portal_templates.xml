@@ -550,17 +550,16 @@
 
     <template id="portal_bank_orders" name="Bank TruCalc Orders">
         <t t-call="trucalc_orders.bank_portal_layout">
+            <t t-set="no_breadcrumbs" t-value="True"/>
             <div class="o_trucalc_bank_portal">
-            <t t-set="breadcrumbs_searchbar" t-value="True"/>
-            <t t-call="portal.portal_searchbar">
-                <t t-set="title">My TruCalc Requests</t>
-            </t>
+            <h1 class="visually-hidden">My TruCalc Requests</h1>
             <div t-if="fee_error" class="alert alert-danger" role="alert"><t t-out="fee_error"/></div>
-            <div t-if="can_submit" class="d-flex justify-content-end mb-3">
-                <a href="/my/trucalc/bank/orders/new" class="btn btn-primary">New Request</a>
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                <span t-if="filterby == 'open'" class="small text-muted">Includes authorized drafts</span>
+                <a t-if="can_submit" href="/my/trucalc/bank/orders/new" class="btn btn-primary">New Request</a>
             </div>
             <div t-if="not orders" class="alert alert-info" role="status">
-                You currently have no authorized TruCalc requests.
+                <t t-out="empty_message"/>
             </div>
             <t t-if="orders" t-call="portal.portal_table">
                 <thead>
@@ -674,6 +673,9 @@
                   t-att-data-selected-area="form_values.get('service_area_id', '')">
                 <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
                 <input type="hidden" name="service_area_id" t-att-value="form_values.get('service_area_id', '')"/>
+                <div t-if="order" class="mb-3">
+                    <strong>Order Number:</strong> <t t-out="order.order_number"/>
+                </div>
                 <div class="row g-3">
                     <div class="col-md-6"><label class="form-label">Borrower</label><input name="borrower" class="form-control" required="required" maxlength="255" t-att-value="form_values.get('borrower', '')"/></div>
                     <div class="col-md-6"><label class="form-label">Loan Number</label><input name="loan_number" class="form-control" maxlength="255" t-att-value="form_values.get('loan_number', '')"/></div>
@@ -709,9 +711,10 @@
 
     <template id="portal_bank_documents" name="Bank TruCalc Documents">
         <t t-call="trucalc_orders.bank_portal_layout">
+            <t t-set="no_breadcrumbs" t-value="True"/>
             <div class="o_trucalc_bank_portal">
-            <div class="d-flex justify-content-between align-items-center mb-3">
-                <h2><t t-if="order.status == 'draft'">TruCalc Draft</t><t t-else="">TruCalc Request</t> <t t-out="order.order_number"/></h2>
+            <h1 class="visually-hidden"><t t-if="order.status == 'draft'">TruCalc Draft</t><t t-else="">TruCalc Request</t> <t t-out="order.order_number"/></h1>
+            <div class="mb-3">
                 <a href="/my/trucalc/bank/orders" class="btn btn-outline-secondary">Back to My TruCalc Requests</a>
             </div>
             <div t-if="submitted" class="alert alert-success" role="status">

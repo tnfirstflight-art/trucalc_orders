@@ -1,5 +1,6 @@
 import base64
 import json
+from datetime import timedelta
 
 from odoo import fields, http
 from odoo.exceptions import AccessError, ValidationError
@@ -10,6 +11,10 @@ from odoo.addons.portal.controllers.portal import CustomerPortal, pager as porta
 
 
 class TruCalcVendorPortal(CustomerPortal):
+    _bank_order_filter_keys = frozenset({
+        "open", "recent_completed", "outstanding_invoices", "all",
+    })
+
     @http.route()
     def home(self, **kw):
         if request.httprequest.path == "/my" and self._is_trucalc_bank():
@@ -221,6 +226,38 @@ class TruCalcVendorPortal(CustomerPortal):
     def _is_trucalc_bank(self):
         return request.env.user._trucalc_has_bank_role()
 
+    def _bank_filter_now(self):
+        return fields.Datetime.now()
+
+    def _bank_order_filter_domain(self, filterby, bank):
+        if filterby == "open":
+            return [("status", "not in", ("cancelled", "declined", "completed"))]
+        if filterby == "all":
+            return [("status", "!=", "draft")]
+        if filterby == "recent_completed":
+            now = self._bank_filter_now()
+            cutoff = now - timedelta(days=30)
+            events = request.env["trucalc.order.lifecycle.event"].sudo().search([
+                ("company_id", "=", bank.id),
+                ("event_type", "=", "order_completed"),
+                ("event_at", ">=", cutoff),
+                ("event_at", "<=", now),
+            ])
+            return [
+                ("status", "=", "completed"),
+                ("id", "in", events.mapped("order_id").ids),
+            ]
+        invoices = request.env["trucalc.bank.invoice"].sudo().search([
+            ("company_id", "=", bank.id),
+            ("order_id.company_id", "=", bank.id),
+            ("order_id.status", "=", "completed"),
+            ("status", "=", "issued"),
+        ])
+        return [
+            ("status", "=", "completed"),
+            ("id", "in", invoices.mapped("order_id").ids),
+        ]
+
     def _bank_order(self, order_number):
         if not self._is_trucalc_bank():
             raise request.not_found()
@@ -358,6 +395,7 @@ class TruCalcVendorPortal(CustomerPortal):
             ].selection,
             "form_values": form_values or {},
             "submission_error": submission_error,
+            "filterby": False,
             "today": fields.Date.to_string(fields.Date.context_today(
                 request.env["trucalc.order"]
             )),
@@ -453,11 +491,13 @@ class TruCalcVendorPortal(CustomerPortal):
         ["/my/trucalc/bank/orders", "/my/trucalc/bank/orders/page/<int:page>"],
         type="http", auth="user", website=True, readonly=True,
     )
-    def portal_bank_orders(self, page=1, fee_error=False, **kwargs):
+    def portal_bank_orders(self, page=1, fee_error=False, filterby="open", **kwargs):
         if not self._is_trucalc_bank():
             raise request.not_found()
         bank = request.env.user._trucalc_bank_identity()
+        filterby = filterby if filterby in self._bank_order_filter_keys else "open"
         model = request.env["trucalc.order"].sudo()
+        # Authorization is established first; filters only narrow this domain.
         domain = [("company_id", "=", bank.id)]
         if request.env.user.has_group("trucalc_orders.group_bank_view_only"):
             domain.append(("status", "!=", "draft"))
@@ -466,9 +506,11 @@ class TruCalcVendorPortal(CustomerPortal):
                 "|", ("status", "!=", "draft"),
                 ("requestor_id", "=", request.env.user.id),
             ]
+        domain += self._bank_order_filter_domain(filterby, bank)
         pager = portal_pager(
             url="/my/trucalc/bank/orders", total=model.search_count(domain),
             page=page, step=self._items_per_page,
+            url_args={"filterby": filterby},
         )
         values = self._prepare_portal_layout_values()
         values.update({
@@ -477,6 +519,13 @@ class TruCalcVendorPortal(CustomerPortal):
                                    limit=self._items_per_page, offset=pager["offset"]),
             "pager": pager,
             "can_submit": self._can_create_bank_draft(),
+            "filterby": filterby,
+            "empty_message": {
+                "open": "No open TruCalc requests.",
+                "recent_completed": "No requests were completed in the last 30 days.",
+                "outstanding_invoices": "No outstanding invoices.",
+                "all": "No TruCalc requests found.",
+            }[filterby],
         })
         # Presentation-only projection, restricted to the authorized page of Orders.
         pending = request.env["trucalc.fee.change.request"].sudo().search([
