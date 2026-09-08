@@ -17,14 +17,21 @@ class TruCalcVendorPortal(CustomerPortal):
 
     @http.route()
     def home(self, **kw):
-        if request.httprequest.path == "/my" and self._is_trucalc_bank():
-            if not request.env.user.active:
-                raise request.not_found()
-            try:
-                request.env.user._trucalc_bank_identity()
-            except AccessError:
-                raise request.not_found()
-            return request.redirect("/my/trucalc/bank/orders")
+        if request.httprequest.path == "/my":
+            if self._is_trucalc_bank():
+                if not request.env.user.active:
+                    raise request.not_found()
+                try:
+                    request.env.user._trucalc_bank_identity()
+                except AccessError:
+                    raise request.not_found()
+                return request.redirect("/my/trucalc/bank/orders")
+            if self._is_trucalc_vendor():
+                try:
+                    request.env.user._trucalc_vendor_identity()
+                except AccessError:
+                    raise request.not_found()
+                return request.redirect("/my/trucalc/orders")
         return super().home(**kw)
 
     def _bank_invoice_response(self, invoice):

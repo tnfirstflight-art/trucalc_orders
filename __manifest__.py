@@ -44,6 +44,7 @@
             'trucalc_orders/static/src/js/bank_draft_service_area.js',
             'trucalc_orders/static/src/scss/trucalc_tokens.scss',
             'trucalc_orders/static/src/scss/bank_portal.scss',
+            'trucalc_orders/static/src/scss/vendor_portal.scss',
             'trucalc_orders/static/src/scss/trucalc_login.scss',
         ],
         'web.assets_backend': [

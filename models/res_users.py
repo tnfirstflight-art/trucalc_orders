@@ -220,6 +220,29 @@ class ResUsers(models.Model):
         return user.trucalc_bank_company_id
 
     @api.private
+    def _trucalc_vendor_identity(self):
+        self.ensure_one()
+        membership = self._trucalc_persona_membership()
+        user = self.sudo()
+        effective_groups = user.all_group_ids
+        vendor = user.trucalc_vendor_id
+        if (
+            not user.active
+            or len(membership["vendor"]) != 1
+            or membership["internal"]
+            or membership["reviewer"]
+            or membership["bank"]
+            or not vendor
+            or not vendor.active
+            or user.trucalc_bank_company_id
+            or self.env.ref("base.group_user") in effective_groups
+            or self.env.ref("base.group_portal") not in effective_groups
+            or not user.share
+        ):
+            raise AccessError(_("TruCalc vendor authorization is not configured."))
+        return vendor
+
+    @api.private
     def _trucalc_reviewer_identity(self):
         self.ensure_one()
         membership = self._trucalc_persona_membership()

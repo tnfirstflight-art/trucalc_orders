@@ -28,12 +28,21 @@
         </t>
     </template>
 
+    <template id="vendor_portal_layout" name="TruCalc Vendor Shell">
+        <t t-call="portal.portal_layout">
+            <t t-set="trucalc_vendor_shell" t-value="True"/>
+            <!-- Same configured identity as Bank shell/invoice issuer; never switch company. -->
+            <t t-set="trucalc_company_name" t-value="request.env.ref('base.main_company').sudo().name"/>
+            <t t-out="0"/>
+        </t>
+    </template>
+
     <template id="bank_shell_branding" inherit_id="portal.frontend_layout" name="Scoped TruCalc Bank Branding">
         <xpath expr="//div[@id='wrapwrap']" position="attributes">
-            <attribute name="t-attf-class" add="#{'o_trucalc_bank_shell' if trucalc_bank_shell else ''}" separator=" "/>
+            <attribute name="t-attf-class" add="#{'o_trucalc_bank_shell' if trucalc_bank_shell else ''} #{'o_trucalc_vendor_shell' if trucalc_vendor_shell else ''}" separator=" "/>
         </xpath>
         <xpath expr="//div[@id='wrapwrap']/header" position="attributes">
-            <attribute name="t-attf-class" add="#{'o_trucalc_bank_header' if trucalc_bank_shell else ''}" separator=" "/>
+            <attribute name="t-attf-class" add="#{'o_trucalc_bank_header' if trucalc_bank_shell else ''} #{'o_trucalc_vendor_header' if trucalc_vendor_shell else ''}" separator=" "/>
         </xpath>
         <xpath expr="//div[@id='wrapwrap']/header/nav" position="after">
             <nav t-if="trucalc_bank_shell" class="o_trucalc_bank_filters" aria-label="Bank Orders filters">
@@ -49,11 +58,11 @@
             </nav>
         </xpath>
         <xpath expr="//span[hasclass('o_footer_copyright_name')]/span[@t-field='res_company.name']" position="replace">
-            <t t-if="trucalc_bank_shell"><span t-out="trucalc_company_name" itemprop="name"/></t>
+            <t t-if="trucalc_bank_shell or trucalc_vendor_shell"><span t-out="trucalc_company_name" itemprop="name"/></t>
             <span t-else="" t-field="res_company.name" itemprop="name"/>
         </xpath>
         <xpath expr="//t[@t-call='web.brand_promotion']" position="attributes">
-            <attribute name="t-if">not trucalc_bank_shell</attribute>
+            <attribute name="t-if">not trucalc_bank_shell and not trucalc_vendor_shell</attribute>
         </xpath>
     </template>
 </odoo>

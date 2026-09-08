@@ -59,8 +59,9 @@
     </template>
 
     <template id="portal_my_trucalc_orders" name="My TruCalc Orders">
-        <t t-call="portal.portal_layout">
-            <t t-set="breadcrumbs_searchbar" t-value="True"/>
+        <t t-call="trucalc_orders.vendor_portal_layout">
+            <t t-set="no_breadcrumbs" t-value="True"/>
+            <div class="o_trucalc_vendor_portal">
             <t t-call="portal.portal_searchbar">
                 <t t-set="title">My TruCalc Orders</t>
             </t>
@@ -120,11 +121,14 @@
             <div t-if="pager" class="d-flex justify-content-center mt-3">
                 <t t-call="portal.pager"/>
             </div>
+            </div>
         </t>
     </template>
 
     <template id="portal_my_trucalc_order" name="TruCalc Order">
-        <t t-call="portal.portal_layout">
+        <t t-call="trucalc_orders.vendor_portal_layout">
+            <t t-set="no_breadcrumbs" t-value="True"/>
+            <div class="o_trucalc_vendor_portal">
             <div class="d-flex justify-content-between align-items-center mb-3">
                 <h2 class="mb-0">
                     TruCalc Order <t t-out="projection.order_number"/>
@@ -544,6 +548,7 @@
                         </div>
                     </form>
                 </div></div>
+            </div>
             </div>
         </t>
     </template>

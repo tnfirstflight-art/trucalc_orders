@@ -91,14 +91,24 @@ class TestBankUX(TestBankOrderPortal):
             'trucalc_vendor_id': vendor.id,
         })
         self._login(user)
-        for path in ('/my', '/my/home', '/my/trucalc/orders'):
-            response = self.url_open(path, allow_redirects=False)
-            self.assertEqual(response.status_code, 200)
-            self.assertNotIn('o_trucalc_bank_shell', response.text)
-            self.assertNotIn('o_trucalc_bank_header', response.text)
-            self.assertNotIn('o_trucalc_bank_portal', response.text)
-            self.assertNotIn('Bank Orders filters', response.text)
-            self.assertIn('o_brand_promotion', response.text)
+        landing = self.url_open('/my', allow_redirects=False)
+        self.assertEqual(landing.status_code, 303)
+        self.assertEqual(landing.headers['Location'], '/my/trucalc/orders')
+        account = self.url_open('/my/home', allow_redirects=False)
+        self.assertEqual(account.status_code, 200)
+        self.assertNotIn('o_trucalc_vendor_shell', account.text)
+        self.assertIn('o_brand_promotion', account.text)
+        response = self.url_open('/my/trucalc/orders', allow_redirects=False)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('o_trucalc_vendor_shell', response.text)
+        self.assertIn('o_trucalc_vendor_header', response.text)
+        self.assertIn('o_trucalc_vendor_portal', response.text)
+        self.assertNotIn('o_brand_promotion', response.text)
+        for page in (account, response):
+            self.assertNotIn('o_trucalc_bank_shell', page.text)
+            self.assertNotIn('o_trucalc_bank_header', page.text)
+            self.assertNotIn('o_trucalc_bank_portal', page.text)
+            self.assertNotIn('Bank Orders filters', page.text)
 
     def test_asset_scope_contract(self):
         root = Path(__file__).resolve().parents[1]
