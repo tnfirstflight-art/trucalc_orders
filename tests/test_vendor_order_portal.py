@@ -169,7 +169,9 @@ class TestVendorOrderPortal(HttpCase):
             "&allowed_company_ids=%s"
             % (self.vendor_b.id, order_b.id, order_b.company_id.id)
         ).text
-        self.assertIn("no authorized TruCalc orders", empty)
+        self.assertIn(
+            "No active TruCalc Orders require current Vendor work.", empty,
+        )
         self.assertNotIn(order_b.order_number, empty)
         self.assertNotIn("433 Vendor B Street", empty)
 
@@ -281,7 +283,9 @@ class TestVendorOrderPortal(HttpCase):
         self.assertIn("Bid Requested", row_text)
         self.assertIn("Open for Response", row_text)
 
-        detail = self.url_open(f"/my/trucalc/orders/{order.order_number}").text
+        detail = self.url_open(
+            f"/my/trucalc/orders/{order.order_number}?filterby=submitted"
+        ).text
         currency = order.company_id.currency_id
         self.assertIn(currency.symbol, detail)
         self.assertIn("500.00", detail)
@@ -328,6 +332,23 @@ class TestVendorOrderPortal(HttpCase):
         self.assertFalse(engagement.event_ids)
         self.assertEqual(engagement.agreed_vendor_fee, order.vendor_fee)
 
+        projection.action_vendor_request_delivery_change(
+            fields.Date.add(order.vendor_delivery_date, days=1),
+            "Focused action-preservation fixture",
+        )
+        projection.invalidate_recordset()
+        pending_detail = self.url_open(
+            f"/my/trucalc/orders/{order.order_number}?filterby=all"
+        ).text
+        self.assertIn(
+            "TruCalc is reviewing your conditional acceptance request.",
+            pending_detail,
+        )
+        engagement.with_user(self.admin).action_reject_delivery_change(
+            "Return to the original commitment",
+        )
+        projection.invalidate_recordset()
+
         projection.action_vendor_accept_engagement()
         self.env.flush_all()
         projection.invalidate_recordset()
@@ -336,3 +357,7 @@ class TestVendorOrderPortal(HttpCase):
         ).text
         self.assertIn("Authorized Contact", accepted_detail)
         self.assertIn("(901) 555-0166 ext. 4", accepted_detail)
+        self.assertIn('name="valuation_file"', accepted_detail)
+        self.assertIn("Submit Valuation", accepted_detail)
+        self.assertIn('name="vendor_invoice_file"', accepted_detail)
+        self.assertIn("Submit Vendor Invoice", accepted_detail)

@@ -67,7 +67,7 @@
             </t>
 
             <div t-if="not projections" class="alert alert-info" role="status">
-                You currently have no authorized TruCalc orders.
+                <t t-out="empty_message"/>
             </div>
 
             <t t-if="projections" t-call="portal.portal_table">

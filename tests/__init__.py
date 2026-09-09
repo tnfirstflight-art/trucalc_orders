@@ -25,3 +25,4 @@ from . import test_bank_invoice
 from . import test_bank_ux
 from . import test_bank_navigation
 from . import test_vendor_ux
+from . import test_vendor_navigation

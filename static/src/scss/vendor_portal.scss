@@ -48,6 +48,21 @@
             }
         }
 
+        > .o_trucalc_vendor_filters {
+            padding: 0 0 0.75rem;
+            background-color: var(--trucalc-light-background);
+
+            > .container {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 0.5rem;
+            }
+
+            .btn {
+                white-space: nowrap;
+            }
+        }
+
         .navbar-brand.logo {
             max-width: 75%;
             width: 18rem;
@@ -73,5 +88,11 @@
         .text-muted {
             color: var(--trucalc-text) !important;
         }
+    }
+}
+
+@media (max-width: 575.98px) {
+    .o_trucalc_vendor_shell > .o_trucalc_vendor_header > .o_trucalc_vendor_filters .btn {
+        flex: 1 1 calc(50% - 0.5rem);
     }
 }

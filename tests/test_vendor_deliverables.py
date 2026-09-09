@@ -615,7 +615,9 @@ class TestVendorDeliverablePortal(HttpCase):
     def test_portal_first_valuation_upload_locks_and_downloads(self):
         order = self._engaged()
         self._login(self.vendor_user)
-        detail = self.url_open(f"/my/trucalc/orders/{order.order_number}").text
+        detail = self.url_open(
+            f"/my/trucalc/orders/{order.order_number}?filterby=active"
+        ).text
         self.assertIn("Valuation and Invoice", detail)
         self.assertIn("Valuation Upload:", detail)
         self.assertIn('for="valuation_file"', detail)
@@ -675,7 +677,9 @@ class TestVendorDeliverablePortal(HttpCase):
             order, valuation, "Replace the certification page.", self.admin,
         )
         self._login(self.vendor_user)
-        detail = self.url_open(f"/my/trucalc/orders/{order.order_number}").text
+        detail = self.url_open(
+            f"/my/trucalc/orders/{order.order_number}?filterby=submitted"
+        ).text
         self.assertIn("Revision Requested", detail)
         self.assertIn("Replace the certification page.", detail)
         self.assertIn("earlier submission remains preserved", detail)

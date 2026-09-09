@@ -31,6 +31,12 @@
     <template id="vendor_portal_layout" name="TruCalc Vendor Shell">
         <t t-call="portal.portal_layout">
             <t t-set="trucalc_vendor_shell" t-value="True"/>
+            <t t-set="trucalc_vendor_filters" t-value="[
+                ('active', 'Active Orders'),
+                ('submitted', 'Submitted'),
+                ('recent_completed', 'Recently Completed'),
+                ('all', 'All Orders'),
+            ]"/>
             <!-- Same configured identity as Bank shell/invoice issuer; never switch company. -->
             <t t-set="trucalc_company_name" t-value="request.env.ref('base.main_company').sudo().name"/>
             <t t-out="0"/>
@@ -49,6 +55,18 @@
                 <div class="container">
                     <a t-foreach="trucalc_bank_filters" t-as="item"
                        t-att-href="'/my/trucalc/bank/orders?filterby=%s' % item[0]"
+                       t-att-data-filter-key="item[0]"
+                       t-attf-class="btn btn-sm #{'btn-primary' if filterby == item[0] else 'btn-outline-primary'}"
+                       t-att-aria-current="'page' if filterby == item[0] else None">
+                        <t t-out="item[1]"/>
+                    </a>
+                </div>
+            </nav>
+            <nav t-if="trucalc_vendor_shell and filterby"
+                 class="o_trucalc_vendor_filters" aria-label="Vendor Orders filters">
+                <div class="container">
+                    <a t-foreach="trucalc_vendor_filters" t-as="item"
+                       t-att-href="'/my/trucalc/orders?filterby=%s' % item[0]"
                        t-att-data-filter-key="item[0]"
                        t-attf-class="btn btn-sm #{'btn-primary' if filterby == item[0] else 'btn-outline-primary'}"
                        t-att-aria-current="'page' if filterby == item[0] else None">

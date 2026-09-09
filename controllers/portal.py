@@ -11,6 +11,9 @@ from odoo.addons.portal.controllers.portal import CustomerPortal, pager as porta
 
 
 class TruCalcVendorPortal(CustomerPortal):
+    _vendor_order_filter_keys = frozenset({
+        "active", "submitted", "recent_completed", "all",
+    })
     _bank_order_filter_keys = frozenset({
         "open", "recent_completed", "outstanding_invoices", "all",
     })
@@ -80,6 +83,49 @@ class TruCalcVendorPortal(CustomerPortal):
             "trucalc_orders.group_vendor_portal"
         )
 
+    def _vendor_filter_now(self):
+        return fields.Datetime.now()
+
+    def _vendor_order_filter_domain(self, filterby, authorized_projections):
+        if filterby == "active":
+            return [
+                ("vendor_phase", "in", ("invitation", "assignment")),
+                ("order_status", "in", ("bid_requested", "assigned", "engaged")),
+            ]
+        if filterby == "submitted":
+            return [
+                ("vendor_phase", "=", "assignment"),
+                ("order_status", "in", (
+                    "report_received", "reviewer_assigned", "under_review",
+                )),
+            ]
+        if filterby == "all":
+            return []
+
+        now = self._vendor_filter_now()
+        cutoff = now - timedelta(days=30)
+        # Authorization is established by the non-sudo projection search above.
+        # The sudo event lookup can only narrow that already-authorized Order set.
+        authorizations = request.env[
+            "trucalc.order.vendor.authorization"
+        ].sudo().browse(authorized_projections.ids).exists()
+        authorized_order_ids = authorizations.mapped("order_id").ids
+        events = request.env["trucalc.order.lifecycle.event"].sudo().search([
+            ("order_id", "in", authorized_order_ids),
+            ("event_type", "=", "order_completed"),
+            ("event_at", ">=", cutoff),
+            ("event_at", "<=", now),
+        ])
+        completed_order_ids = set(events.mapped("order_id").ids)
+        projection_ids = authorizations.filtered(
+            lambda authorization: authorization.order_id.id in completed_order_ids
+        ).ids
+        return [
+            ("id", "in", projection_ids),
+            ("vendor_phase", "=", "assignment"),
+            ("order_status", "=", "completed"),
+        ]
+
     @http.route(
         ["/my/trucalc/orders", "/my/trucalc/orders/page/<int:page>"],
         type="http",
@@ -87,21 +133,30 @@ class TruCalcVendorPortal(CustomerPortal):
         website=True,
         readonly=True,
     )
-    def portal_my_trucalc_orders(self, page=1, **kwargs):
+    def portal_my_trucalc_orders(self, page=1, filterby="active", **kwargs):
         if not self._is_trucalc_vendor():
             raise request.not_found()
 
         projection_model = request.env["trucalc.vendor.order"]
+        filterby = (
+            filterby if filterby in self._vendor_order_filter_keys else "active"
+        )
         try:
-            projection_count = projection_model.search_count([])
+            # Search without sudo first so lifecycle data can never discover access.
+            authorized_projections = projection_model.search([])
+            domain = self._vendor_order_filter_domain(
+                filterby, authorized_projections,
+            )
+            projection_count = projection_model.search_count(domain)
             pager = portal_pager(
                 url="/my/trucalc/orders",
                 total=projection_count,
                 page=page,
                 step=self._items_per_page,
+                url_args={"filterby": filterby},
             )
             projections = projection_model.search(
-                [],
+                domain,
                 order="order_number, id",
                 limit=self._items_per_page,
                 offset=pager["offset"],
@@ -114,6 +169,17 @@ class TruCalcVendorPortal(CustomerPortal):
             "page_name": "trucalc_orders",
             "projections": projections,
             "pager": pager,
+            "filterby": filterby,
+            "empty_message": {
+                "active": "No active TruCalc Orders require current Vendor work.",
+                "submitted": (
+                    "No submitted TruCalc Orders are currently awaiting completion."
+                ),
+                "recent_completed": (
+                    "No TruCalc Orders were completed in the last 30 days."
+                ),
+                "all": "No TruCalc Orders are currently available.",
+            }[filterby],
         })
         return request.render("trucalc_orders.portal_my_trucalc_orders", values)
 
