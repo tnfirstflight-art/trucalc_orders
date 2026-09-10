@@ -15,7 +15,7 @@ class TestVendorEngagementResponse(TransactionCase):
         cls.admin = cls._user("4c1-admin", "group_trucalc_admin")
         cls.ops = cls._user("4c1-ops", "group_trucalc_operations")
         cls.reviewer = cls._user("4c1-reviewer", "group_trucalc_reviewer")
-        cls.bank_company = cls.env["res.company"].create({"name": "4C1 Bank"})
+        cls.bank_company = cls.env["res.company"].with_context(trucalc_test_bank_fixture=True).create({"name": "4C1 Bank", "trucalc_is_bank": True, "trucalc_bank_active": True})
         cls.bank = cls._user(
             "4c1-bank", "group_bank_admin", bank_company=cls.bank_company,
         )
@@ -46,6 +46,8 @@ class TestVendorEngagementResponse(TransactionCase):
             ])],
             "trucalc_vendor_id": vendor.id if vendor else False,
             "trucalc_bank_company_id": bank_company.id if bank_company else False,
+            "company_id": bank_company.id if bank_company else cls.env.company.id,
+            "company_ids": [Command.set(bank_company.ids if bank_company else cls.env.company.ids)],
         })
 
     def _engaged(self):

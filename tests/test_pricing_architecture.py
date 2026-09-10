@@ -12,8 +12,9 @@ class TestPricingArchitecture(TransactionCase):
         cls.admin = cls._user("4e0-admin", "group_trucalc_admin")
         cls.ops = cls._user("4e0-ops", "group_trucalc_operations")
         cls.reviewer = cls._user("4e0-reviewer", "group_trucalc_reviewer")
-        cls.bank_a = cls.env["res.company"].create({"name": "4E0 Bank A"})
-        cls.bank_b = cls.env["res.company"].create({"name": "4E0 Bank B"})
+        Companies = cls.env["res.company"].with_context(trucalc_test_bank_fixture=True)
+        cls.bank_a = Companies.create({"name": "4E0 Bank A", "trucalc_is_bank": True, "trucalc_bank_active": True})
+        cls.bank_b = Companies.create({"name": "4E0 Bank B", "trucalc_is_bank": True, "trucalc_bank_active": True})
         cls.admin.write({
             "company_ids": [Command.link(cls.bank_a.id), Command.link(cls.bank_b.id)],
         })
@@ -51,6 +52,8 @@ class TestPricingArchitecture(TransactionCase):
                 cls.env.ref(f"trucalc_orders.{name}").id for name in groups
             ])],
             "trucalc_bank_company_id": bank.id if bank else False,
+            "company_id": bank.id if bank else cls.env.company.id,
+            "company_ids": [Command.set(bank.ids if bank else cls.env.company.ids)],
             "trucalc_vendor_id": vendor.id if vendor else False,
         })
 

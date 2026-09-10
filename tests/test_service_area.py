@@ -12,7 +12,7 @@ class TestServiceArea(TransactionCase):
         cls.admin = cls._user("4d1-area-admin", "group_trucalc_admin")
         cls.ops = cls._user("4d1-area-ops", "group_trucalc_operations")
         cls.reviewer = cls._user("4d1-area-reviewer", "group_trucalc_reviewer")
-        cls.bank_company = cls.env["res.company"].create({"name": "4D1 Area Bank"})
+        cls.bank_company = cls.env["res.company"].with_context(trucalc_test_bank_fixture=True).create({"name": "4D1 Area Bank", "trucalc_is_bank": True, "trucalc_bank_active": True})
         cls.bank = cls._user(
             "4d1-area-bank", "group_bank_requestor", bank=cls.bank_company,
         )
@@ -39,6 +39,8 @@ class TestServiceArea(TransactionCase):
                 cls.env.ref(f"trucalc_orders.{name}").id for name in groups
             ])],
             "trucalc_bank_company_id": bank.id if bank else False,
+            "company_id": bank.id if bank else cls.env.company.id,
+            "company_ids": [Command.set(bank.ids if bank else cls.env.company.ids)],
             "trucalc_vendor_id": vendor.id if vendor else False,
         })
 

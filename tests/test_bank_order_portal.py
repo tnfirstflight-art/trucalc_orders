@@ -16,8 +16,9 @@ class TestBankOrderPortal(HttpCase):
     def setUpClass(cls):
         super().setUpClass()
         cls.admin = cls._user("admin", "group_trucalc_admin")
-        cls.bank_a = cls.env["res.company"].create({"name": "4C2 Portal Bank A"})
-        cls.bank_b = cls.env["res.company"].create({"name": "4C2 Portal Bank B"})
+        Companies = cls.env["res.company"].with_context(trucalc_test_bank_fixture=True)
+        cls.bank_a = Companies.create({"name": "4C2 Portal Bank A", "trucalc_is_bank": True, "trucalc_bank_active": True})
+        cls.bank_b = Companies.create({"name": "4C2 Portal Bank B", "trucalc_is_bank": True, "trucalc_bank_active": True})
         cls.admin.write({
             "company_ids": [Command.set((cls.env.company | cls.bank_a | cls.bank_b).ids)]
         })
@@ -92,6 +93,8 @@ class TestBankOrderPortal(HttpCase):
             "password": cls.password,
             "group_ids": [Command.set([cls.env.ref("trucalc_orders.%s" % group).id])],
             "trucalc_bank_company_id": bank.id if bank else False,
+            "company_id": bank.id if bank else cls.env.company.id,
+            "company_ids": [Command.set(bank.ids if bank else cls.env.company.ids)],
         })
 
     @classmethod

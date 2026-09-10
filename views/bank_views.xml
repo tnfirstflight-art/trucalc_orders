@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_trucalc_bank_list" model="ir.ui.view">
+        <field name="name">res.company.trucalc.bank.list</field>
+        <field name="model">res.company</field>
+        <field name="group_ids" eval="[Command.link(ref('trucalc_orders.group_trucalc_admin'))]"/>
+        <field name="arch" type="xml">
+            <list string="Banks" create="false" edit="false" delete="false">
+                <header>
+                    <button name="%(action_trucalc_bank_new)d" type="action"
+                            string="New Bank" class="btn-primary" display="always"/>
+                </header>
+                <field name="name" string="Bank Name"/>
+                <field name="trucalc_bank_active" string="Bank Active"/>
+                <field name="email"/>
+                <field name="phone"/>
+                <field name="city"/>
+                <field name="state_id"/>
+                <field name="trucalc_bank_user_count"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_trucalc_bank_form" model="ir.ui.view">
+        <field name="name">res.company.trucalc.bank.form</field>
+        <field name="model">res.company</field>
+        <field name="group_ids" eval="[Command.link(ref('trucalc_orders.group_trucalc_admin'))]"/>
+        <field name="arch" type="xml">
+            <form string="Bank" create="false" edit="false" delete="false">
+                <header>
+                    <button name="action_trucalc_edit_bank" type="object"
+                            string="Edit Bank" class="btn-primary"/>
+                    <button name="action_trucalc_deactivate_bank" type="object"
+                            string="Deactivate Bank" class="btn-secondary"
+                            invisible="not trucalc_bank_active"
+                            confirm="Deactivate this Bank? Its active Bank users will be archived, while Orders, invoices, pricing, documents, and history will be preserved."/>
+                    <button name="action_trucalc_activate_bank" type="object"
+                            string="Activate Bank" class="btn-secondary"
+                            invisible="trucalc_bank_active"/>
+                    <field name="trucalc_bank_active" string="Bank Active"/>
+                </header>
+                <sheet>
+                    <field name="trucalc_is_bank" invisible="1"/>
+                    <div class="oe_title">
+                        <h1><field name="name" string="Bank Name"/></h1>
+                    </div>
+                    <group>
+                        <group string="Bank Profile">
+                            <field name="currency_id"/>
+                            <field name="email"/>
+                            <field name="phone"/>
+                            <field name="website" widget="url"/>
+                            <field name="trucalc_bank_user_count"/>
+                        </group>
+                        <group string="Address">
+                            <field name="street"/>
+                            <field name="street2"/>
+                            <field name="city"/>
+                            <field name="state_id"/>
+                            <field name="zip"/>
+                            <field name="country_id"/>
+                        </group>
+                    </group>
+                    <group string="Logo">
+                        <field name="logo" widget="image" class="oe_avatar"/>
+                    </group>
+                    <notebook>
+                        <page string="Administration History">
+                            <field name="trucalc_bank_admin_audit_ids" readonly="1">
+                                <list create="false" edit="false" delete="false">
+                                    <field name="event_at"/>
+                                    <field name="event_type"/>
+                                    <field name="actor_user_id"/>
+                                    <field name="target_user_id" optional="show"/>
+                                    <field name="prior_status" optional="hide"/>
+                                    <field name="new_status" optional="hide"/>
+                                </list>
+                            </field>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_trucalc_bank_search" model="ir.ui.view">
+        <field name="name">res.company.trucalc.bank.search</field>
+        <field name="model">res.company</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="name"/>
+                <field name="email"/>
+                <filter name="active_banks" string="Active Banks"
+                        domain="[('trucalc_bank_active', '=', True)]"/>
+                <filter name="inactive_banks" string="Inactive Banks"
+                        domain="[('trucalc_bank_active', '=', False)]"/>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_trucalc_banks" model="ir.actions.act_window">
+        <field name="name">Banks</field>
+        <field name="res_model">res.company</field>
+        <field name="view_mode">list,form</field>
+        <field name="view_ids" eval="[
+            Command.clear(),
+            Command.create({'sequence': 1, 'view_mode': 'list', 'view_id': ref('view_trucalc_bank_list')}),
+            Command.create({'sequence': 2, 'view_mode': 'form', 'view_id': ref('view_trucalc_bank_form')}),
+        ]"/>
+        <field name="search_view_id" ref="view_trucalc_bank_search"/>
+        <field name="domain">[('trucalc_is_bank', '=', True)]</field>
+        <field name="context">{'active_test': False}</field>
+        <field name="group_ids" eval="[Command.link(ref('trucalc_orders.group_trucalc_admin'))]"/>
+    </record>
+
+    <menuitem id="menu_trucalc_banks" name="Banks"
+              parent="menu_trucalc_configuration"
+              action="action_trucalc_banks" sequence="10"
+              groups="trucalc_orders.group_trucalc_admin"/>
+</odoo>

@@ -19,8 +19,9 @@ class BankInvoiceFixtures:
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.bank = cls.env["res.company"].create({"name": "4E2 Invoice Bank"})
-        cls.other_bank = cls.env["res.company"].create({"name": "4E2 Other Bank"})
+        Companies = cls.env["res.company"].with_context(trucalc_test_bank_fixture=True)
+        cls.bank = Companies.create({"name": "4E2 Invoice Bank", "trucalc_is_bank": True, "trucalc_bank_active": True})
+        cls.other_bank = Companies.create({"name": "4E2 Other Bank", "trucalc_is_bank": True, "trucalc_bank_active": True})
         cls.admin = cls._invoice_user("admin", ["group_trucalc_admin"])
         cls.ops = cls._invoice_user("ops", ["group_trucalc_operations"])
         cls.reviewer = cls._invoice_user("reviewer", ["group_trucalc_operations", "group_trucalc_reviewer"], scope=False)
@@ -40,10 +41,14 @@ class BankInvoiceFixtures:
     def _invoice_user(cls, suffix, groups, bank=False, vendor=False, scope=True):
         return cls.env["res.users"].with_context(no_reset_password=True).create({
             "name": "4E2 " + suffix, "login": "4e2-" + suffix, "password": cls.password,
-            "company_id": cls.env.company.id,
-            "company_ids": [Command.set((cls.env.company | cls.bank).ids if scope else cls.env.company.ids)],
             "group_ids": [Command.set([cls.env.ref("trucalc_orders." + name).id for name in groups])],
             "trucalc_bank_company_id": bank.id if bank else False,
+            "company_id": bank.id if bank else cls.env.company.id,
+            "company_ids": [Command.set(
+                bank.ids if bank else (
+                    (cls.env.company | cls.bank).ids if scope else cls.env.company.ids
+                )
+            )],
             "trucalc_vendor_id": vendor.id if vendor else False,
         })
 

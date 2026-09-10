@@ -25,8 +25,9 @@ class TestEngagementDocuments(TransactionCase):
             "4c2-admin-reviewer",
             ["group_trucalc_admin", "group_trucalc_reviewer"],
         )
-        cls.bank_a = cls.env["res.company"].create({"name": "4C2 Bank A"})
-        cls.bank_b = cls.env["res.company"].create({"name": "4C2 Bank B"})
+        Companies = cls.env["res.company"].with_context(trucalc_test_bank_fixture=True)
+        cls.bank_a = Companies.create({"name": "4C2 Bank A", "trucalc_is_bank": True, "trucalc_bank_active": True})
+        cls.bank_b = Companies.create({"name": "4C2 Bank B", "trucalc_is_bank": True, "trucalc_bank_active": True})
         internal_companies = cls.env.company | cls.bank_a | cls.bank_b
         for internal_user in (
             cls.admin, cls.ops, cls.operations_reviewer, cls.admin_reviewer,
@@ -56,6 +57,8 @@ class TestEngagementDocuments(TransactionCase):
                 for group_name in groups
             ])],
             "trucalc_bank_company_id": bank.id if bank else False,
+            "company_id": bank.id if bank else cls.env.company.id,
+            "company_ids": [Command.set(bank.ids if bank else cls.env.company.ids)],
             "trucalc_vendor_id": vendor.id if vendor else False,
         })
 

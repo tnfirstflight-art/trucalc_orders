@@ -222,7 +222,7 @@ class TestBankNavigation(TestBankOrderPortal):
         self.assertIn("Order Number:", draft_page.text)
         self.assertIn(draft.order_number, draft_page.text)
 
-        empty_bank = self.env["res.company"].create({"name": "Pass B Empty Bank"})
+        empty_bank = self.env["res.company"].with_context(trucalc_test_bank_fixture=True).create({"name": "Pass B Empty Bank", "trucalc_is_bank": True, "trucalc_bank_active": True})
         empty_user = self.env["res.users"].with_context(no_reset_password=True).create({
             "name": "Pass B Empty Admin",
             "login": "pass-b-empty-admin",
@@ -231,6 +231,8 @@ class TestBankNavigation(TestBankOrderPortal):
                 self.env.ref("trucalc_orders.group_bank_admin").id,
             ])],
             "trucalc_bank_company_id": empty_bank.id,
+            "company_id": empty_bank.id,
+            "company_ids": [Command.set(empty_bank.ids)],
         })
         messages = {
             "open": "No open TruCalc requests.",

@@ -11,7 +11,7 @@ class TestDownstreamLifecycleSecurity(TransactionCase):
         super().setUpClass()
         cls.company = cls.env.company
         cls.other_company = cls.env["res.company"].create({"name": "4D Other Company"})
-        cls.bank = cls.env["res.company"].create({"name": "4D Bank"})
+        cls.bank = cls.env["res.company"].with_context(trucalc_test_bank_fixture=True).create({"name": "4D Bank", "trucalc_is_bank": True, "trucalc_bank_active": True})
         cls.admin = cls._user("admin", "group_trucalc_admin")
         cls.ops = cls._user("ops", "group_trucalc_operations")
         reviewer_groups = ["group_trucalc_operations", "group_trucalc_reviewer"]
@@ -46,7 +46,7 @@ class TestDownstreamLifecycleSecurity(TransactionCase):
 
     @classmethod
     def _user(cls, suffix, group, bank=False, vendor=False, companies=False):
-        companies = companies or cls.company
+        companies = bank or companies or cls.company
         groups = group if isinstance(group, (list, tuple)) else [group]
         return cls.env["res.users"].with_context(no_reset_password=True).create({
             "name": "4D %s" % suffix,

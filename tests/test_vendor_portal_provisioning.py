@@ -31,7 +31,7 @@ class TestVendorPortalProvisioning(TransactionCase):
         cls.env["trucalc.vendor.fee"].create({
             "vendor_id": cls.vendor.id, "service_type": "evaluation", "fee": 500,
         })
-        cls.bank = cls.env["res.company"].create({"name": "4B2B1 Bank"})
+        cls.bank = cls.env["res.company"].with_context(trucalc_test_bank_fixture=True).create({"name": "4B2B1 Bank", "trucalc_is_bank": True, "trucalc_bank_active": True})
         cls.admin = cls._user("admin", cls.groups["group_trucalc_admin"])
         cls.ops = cls._user("ops", cls.groups["group_trucalc_operations"])
         cls.reviewer = cls._user("reviewer", cls.groups["group_trucalc_reviewer"])
@@ -55,6 +55,8 @@ class TestVendorPortalProvisioning(TransactionCase):
             "group_ids": [Command.set(group_ids)],
             "trucalc_bank_company_id": bank.id if bank else False,
             "trucalc_vendor_id": vendor.id if vendor else False,
+            "company_id": bank.id if bank else cls.env.company.id,
+            "company_ids": [Command.set(bank.ids if bank else cls.env.company.ids)],
         })
 
     @classmethod

@@ -170,6 +170,8 @@ class TestFeeChangeCompletion(TestOrderCompletion):
             'name': 'Fee Decision', 'login': 'fee-completion-bank',
             'group_ids': [Command.set([self.env.ref('trucalc_orders.group_bank_admin').id])],
             'trucalc_bank_company_id': order.company_id.id,
+            'company_id': order.company_id.id,
+            'company_ids': [Command.set(order.company_id.ids)],
         })
 
     def test_fee_pending_completion_and_revision(self):

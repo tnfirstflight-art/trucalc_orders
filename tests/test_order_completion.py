@@ -15,7 +15,11 @@ class TestOrderCompletion(TestControlledValuationReview):
     def setUpClass(cls):
         super().setUpClass()
         # Completion now issues a Bank invoice: use a distinct customer Bank.
-        cls.company = cls.env['res.company'].create({'name': 'Completion Customer Bank'})
+        cls.company = cls.env['res.company'].with_context(trucalc_test_bank_fixture=True).create({
+            'name': 'Completion Customer Bank',
+            'trucalc_is_bank': True,
+            'trucalc_bank_active': True,
+        })
         for actor in (cls.admin, cls.ops):
             actor.write({'company_ids': [Command.link(cls.company.id)]})
 
@@ -273,7 +277,11 @@ class TestOrderCompletion(TestControlledValuationReview):
 @tagged("post_install", "-at_install", "trucalc_order_completion_portal")
 class TestOrderCompletionPortal(TestVendorDeliverablePortal):
     def test_real_completion_releases_only_valuation_and_freezes_uploads(self):
-        customer = self.env['res.company'].create({'name':'Completion Portal Customer'})
+        customer = self.env['res.company'].with_context(trucalc_test_bank_fixture=True).create({
+            'name': 'Completion Portal Customer',
+            'trucalc_is_bank': True,
+            'trucalc_bank_active': True,
+        })
         for actor in (self.admin,self.reviewer,self.vendor_user):
             actor.write({'company_ids':[Command.link(customer.id)]})
         self.bank = self._user('completion-portal-bank','group_bank_admin',bank=customer)

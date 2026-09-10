@@ -177,7 +177,7 @@ class TestVendorUX(TestVendorOrderPortal):
             self.assertIn("var(%s)" % token, vendor_styles)
 
     def test_bank_landing_remains_unchanged(self):
-        bank = self.env["res.company"].create({"name": "Vendor UX Bank"})
+        bank = self.env["res.company"].with_context(trucalc_test_bank_fixture=True).create({"name": "Vendor UX Bank", "trucalc_is_bank": True, "trucalc_bank_active": True})
         bank_user = self.env["res.users"].with_context(no_reset_password=True).create({
             "name": "Vendor UX Bank User",
             "login": "vendor-ux-bank-user",
@@ -186,6 +186,8 @@ class TestVendorUX(TestVendorOrderPortal):
                 self.env.ref("trucalc_orders.group_bank_admin").id,
             ])],
             "trucalc_bank_company_id": bank.id,
+            "company_id": bank.id,
+            "company_ids": [Command.set(bank.ids)],
         })
         self._login(bank_user)
         response = self.url_open("/my", allow_redirects=False)

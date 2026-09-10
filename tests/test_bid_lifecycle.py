@@ -38,7 +38,7 @@ class TestBidLifecycle(TransactionCase):
             {"vendor_id": cls.vendor_a.id, "service_type": "evaluation", "fee": 500},
             {"vendor_id": cls.vendor_b.id, "service_type": "evaluation", "fee": 600},
         ])
-        cls.bank_company = cls.env["res.company"].create({"name": "4A3 Bank"})
+        cls.bank_company = cls.env["res.company"].with_context(trucalc_test_bank_fixture=True).create({"name": "4A3 Bank", "trucalc_is_bank": True, "trucalc_bank_active": True})
         cls.admin = cls._user("4a3-admin", cls.admin_group)
         cls.ops = cls._user("4a3-ops", cls.ops_group)
         cls.reviewer = cls._user("4a3-reviewer", cls.reviewer_group)
@@ -86,6 +86,8 @@ class TestBidLifecycle(TransactionCase):
             "group_ids": [Command.set(groups)],
             "trucalc_vendor_id": vendor.id if vendor else False,
             "trucalc_bank_company_id": bank_company.id if bank_company else False,
+            "company_id": bank_company.id if bank_company else cls.env.company.id,
+            "company_ids": [Command.set(bank_company.ids if bank_company else cls.env.company.ids)],
         })
 
     def _order(self, user=None):

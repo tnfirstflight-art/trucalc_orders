@@ -29,7 +29,7 @@ class TestVendorOrderAuthorization(TransactionCase):
             {"vendor_id": cls.vendor_b.id, "service_type": "evaluation", "fee": 600},
             {"vendor_id": cls.wrong_vendor.id, "service_type": "review", "fee": 200},
         ])
-        cls.bank = cls.env["res.company"].create({"name": "4B1B Bank"})
+        cls.bank = cls.env["res.company"].with_context(trucalc_test_bank_fixture=True).create({"name": "4B1B Bank", "trucalc_is_bank": True, "trucalc_bank_active": True})
         cls.admin = cls._user("4b1b-admin", cls.admin_group)
         cls.ops = cls._user("4b1b-ops", cls.ops_group)
         cls.reviewer = cls._user("4b1b-reviewer", cls.reviewer_group)
@@ -54,6 +54,8 @@ class TestVendorOrderAuthorization(TransactionCase):
             "group_ids": [Command.set(groups)],
             "trucalc_vendor_id": vendor.id if vendor else False,
             "trucalc_bank_company_id": bank_company.id if bank_company else False,
+            "company_id": bank_company.id if bank_company else cls.env.company.id,
+            "company_ids": [Command.set(bank_company.ids if bank_company else cls.env.company.ids)],
         })
 
     def _order(self):

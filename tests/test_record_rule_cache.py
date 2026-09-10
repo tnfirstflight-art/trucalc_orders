@@ -5,7 +5,7 @@ from odoo.tests import TransactionCase, tagged
 @tagged("post_install", "-at_install", "trucalc_record_rule_cache")
 class TestRecordRuleCache(TransactionCase):
     def test_mapping_ids_are_part_of_rule_cache_identity(self):
-        bank = self.env["res.company"].create({"name": "4B2A Cache Bank"})
+        bank = self.env["res.company"].with_context(trucalc_test_bank_fixture=True).create({"name": "4B2A Cache Bank", "trucalc_is_bank": True, "trucalc_bank_active": True})
         vendor = self.env["trucalc.vendor"].create({
             "name": "4B2A Cache Vendor", "vendor_type": "appraiser",
         })

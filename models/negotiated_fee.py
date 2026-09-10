@@ -10,6 +10,10 @@ class TruCalcNegotiatedFee(models.Model):
     bank_id = fields.Many2one(
         "res.company", string="Bank", required=True, index=True,
         ondelete="restrict",
+        domain=[
+            ("trucalc_is_bank", "=", True),
+            ("trucalc_bank_active", "=", True),
+        ],
     )
     service_area_id = fields.Many2one(
         "trucalc.service.area", string="Service Area", required=True,

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_trucalc_bank_provision_form" model="ir.ui.view">
+        <field name="name">trucalc.bank.provision.form</field>
+        <field name="model">trucalc.bank.provision</field>
+        <field name="group_ids" eval="[Command.link(ref('trucalc_orders.group_trucalc_admin'))]"/>
+        <field name="arch" type="xml">
+            <form string="Bank">
+                <field name="bank_company_id" invisible="1"/>
+                <group>
+                    <group string="Required">
+                        <field name="name"/>
+                        <field name="currency_id" options="{'no_create': True, 'no_open': True}"/>
+                        <field name="bank_active"/>
+                    </group>
+                    <group string="Contact">
+                        <field name="email"/>
+                        <field name="phone"/>
+                        <field name="website" widget="url"/>
+                    </group>
+                </group>
+                <group string="Address">
+                    <group>
+                        <field name="street"/>
+                        <field name="street2"/>
+                        <field name="city"/>
+                    </group>
+                    <group>
+                        <field name="state_id" options="{'no_create': True, 'no_open': True}"/>
+                        <field name="zip"/>
+                        <field name="country_id" options="{'no_create': True, 'no_open': True}"/>
+                    </group>
+                </group>
+                <group string="Logo">
+                    <field name="logo" widget="image" class="oe_avatar"/>
+                </group>
+                <footer>
+                    <button name="action_save" type="object" string="Save Bank"
+                            class="btn-primary"/>
+                    <button string="Cancel" special="cancel" class="btn-secondary"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_trucalc_bank_new" model="ir.actions.act_window">
+        <field name="name">New Bank</field>
+        <field name="res_model">trucalc.bank.provision</field>
+        <field name="view_mode">form</field>
+        <field name="view_id" ref="view_trucalc_bank_provision_form"/>
+        <field name="target">new</field>
+        <field name="group_ids" eval="[Command.link(ref('trucalc_orders.group_trucalc_admin'))]"/>
+    </record>
+</odoo>

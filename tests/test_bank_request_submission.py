@@ -10,8 +10,9 @@ class TestBankRequestSubmission(TransactionCase):
         super().setUpClass()
         cls.admin = cls._user("4d1-submit-admin", "group_trucalc_admin")
         cls.ops = cls._user("4d1-submit-ops", "group_trucalc_operations")
-        cls.bank_company = cls.env["res.company"].create({"name": "4D1 Submit Bank"})
-        cls.other_bank = cls.env["res.company"].create({"name": "4D1 Other Bank"})
+        Companies = cls.env["res.company"].with_context(trucalc_test_bank_fixture=True)
+        cls.bank_company = Companies.create({"name": "4D1 Submit Bank", "trucalc_is_bank": True, "trucalc_bank_active": True})
+        cls.other_bank = Companies.create({"name": "4D1 Other Bank", "trucalc_is_bank": True, "trucalc_bank_active": True})
         cls.bank_admin = cls._user("4d1-submit-bank-admin", "group_bank_admin", cls.bank_company)
         cls.requestor = cls._user("4d1-submit-requestor", "group_bank_requestor", cls.bank_company)
         cls.other_requestor = cls._user("4d1-submit-other-requestor", "group_bank_requestor", cls.bank_company)
@@ -32,6 +33,8 @@ class TestBankRequestSubmission(TransactionCase):
             "name": login, "login": login, "email": f"{login}@example.test",
             "group_ids": [Command.set([cls.env.ref(f"trucalc_orders.{group}").id])],
             "trucalc_bank_company_id": bank.id if bank else False,
+            "company_id": bank.id if bank else cls.env.company.id,
+            "company_ids": [Command.set(bank.ids if bank else cls.env.company.ids)],
         })
 
     def _values(self, minimal=False, **overrides):

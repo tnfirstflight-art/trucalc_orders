@@ -128,7 +128,10 @@ class ResUsers(models.Model):
             "vendor": groups & persona_groups["vendor"],
         }
 
-    @api.constrains("group_ids", "trucalc_bank_company_id", "trucalc_vendor_id")
+    @api.constrains(
+        "group_ids", "trucalc_bank_company_id", "trucalc_vendor_id",
+        "company_id", "company_ids",
+    )
     def _check_trucalc_persona(self):
         for user in self:
             membership = user._trucalc_persona_membership()
@@ -176,6 +179,13 @@ class ResUsers(models.Model):
                 raise ValidationError(_(
                     "A TruCalc Bank user requires one bank mapping and no vendor mapping."
                 ))
+            if bank_company and (
+                not bank_company.trucalc_is_bank
+                or bank_company == self.env.ref("base.main_company")
+            ):
+                raise ValidationError(_(
+                    "A TruCalc Bank user must map to an authorized Bank company."
+                ))
             if membership["bank"] and (
                 internal_group in effective_groups
                 or portal_group not in effective_groups
@@ -183,6 +193,13 @@ class ResUsers(models.Model):
             ):
                 raise ValidationError(_(
                     "A TruCalc Bank user must be an external portal user."
+                ))
+            if membership["bank"] and (
+                user_sudo.company_id != bank_company
+                or user_sudo.company_ids != bank_company
+            ):
+                raise ValidationError(_(
+                    "A TruCalc Bank user's primary and allowed company must be exactly the mapped Bank."
                 ))
             if membership["vendor"] and (not vendor or bank_company):
                 raise ValidationError(_(
@@ -207,14 +224,20 @@ class ResUsers(models.Model):
         user = self.sudo()
         effective_groups = user.all_group_ids
         if (
-            len(membership["bank"]) != 1
+            not user.active
+            or len(membership["bank"]) != 1
             or membership["internal"]
             or membership["vendor"]
             or not user.trucalc_bank_company_id
+            or not user.trucalc_bank_company_id.trucalc_is_bank
+            or not user.trucalc_bank_company_id.trucalc_bank_active
+            or user.trucalc_bank_company_id == self.env.ref("base.main_company")
             or user.trucalc_vendor_id
             or self.env.ref("base.group_user") in effective_groups
             or self.env.ref("base.group_portal") not in effective_groups
             or not user.share
+            or user.company_id != user.trucalc_bank_company_id
+            or user.company_ids != user.trucalc_bank_company_id
         ):
             raise AccessError(_("TruCalc bank authorization is not configured."))
         return user.trucalc_bank_company_id

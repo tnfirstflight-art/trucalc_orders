@@ -43,7 +43,7 @@ class TestVendorSolicitation(TransactionCase):
             {"vendor_id": cls.inactive_vendor.id,
              "service_type": "evaluation", "fee": 800},
         ])
-        cls.bank = cls.env["res.company"].create({"name": "4B2C1 Bank"})
+        cls.bank = cls.env["res.company"].with_context(trucalc_test_bank_fixture=True).create({"name": "4B2C1 Bank", "trucalc_is_bank": True, "trucalc_bank_active": True})
         cls.admin = cls._user("4b2c1-admin", "group_trucalc_admin")
         cls.ops = cls._user("4b2c1-ops", "group_trucalc_operations")
         cls.env["res.lang"]._activate_lang("fr_FR")
@@ -73,6 +73,8 @@ class TestVendorSolicitation(TransactionCase):
             "group_ids": [Command.set(group_ids)],
             "trucalc_bank_company_id": bank.id if bank else False,
             "trucalc_vendor_id": vendor.id if vendor else False,
+            "company_id": bank.id if bank else cls.env.company.id,
+            "company_ids": [Command.set(bank.ids if bank else cls.env.company.ids)],
         })
 
     def _accepted_order(self, user=None):

@@ -324,7 +324,9 @@ class EvaluationOrder(models.Model):
 
     @api.depends("requestor_company_id")
     def _compute_available_internal_banks(self):
-        allowed = self.env.user.company_ids
+        allowed = self.env.user.company_ids.filtered(
+            lambda company: company.trucalc_is_bank and company.trucalc_bank_active
+        )
         for order in self:
             order.available_internal_bank_ids = allowed - order.requestor_company_id
 
@@ -925,7 +927,9 @@ class EvaluationOrder(models.Model):
                     vals.get("company_id")
                 ).exists()
                 if company and (
-                    company == self.env.company
+                    not company.trucalc_is_bank
+                    or not company.trucalc_bank_active
+                    or company == self.env.ref("base.main_company")
                     or company not in user.company_ids
                 ):
                     raise ValidationError(_(
@@ -1374,7 +1378,10 @@ class EvaluationOrder(models.Model):
                         "The Bank/Client Company is immutable after Order creation."
                     ))
                 if company and (
-                    company == order.requestor_company_id
+                    not company.trucalc_is_bank
+                    or not company.trucalc_bank_active
+                    or company == self.env.ref("base.main_company")
+                    or company == order.requestor_company_id
                     or company not in self.env.user.company_ids
                 ):
                     raise ValidationError(_(

@@ -22,8 +22,9 @@ class TestTenantHardening(TransactionCase):
                 "group_vendor_portal",
             )
         }
-        cls.bank_a = cls.env["res.company"].create({"name": "4B1A Bank A"})
-        cls.bank_b = cls.env["res.company"].create({"name": "4B1A Bank B"})
+        Companies = cls.env["res.company"].with_context(trucalc_test_bank_fixture=True)
+        cls.bank_a = Companies.create({"name": "4B1A Bank A", "trucalc_is_bank": True, "trucalc_bank_active": True})
+        cls.bank_b = Companies.create({"name": "4B1A Bank B", "trucalc_is_bank": True, "trucalc_bank_active": True})
         cls.vendor_a = cls.env["trucalc.vendor"].create({
             "name": "4B1A Vendor A", "vendor_type": "appraiser",
         })
@@ -59,14 +60,17 @@ class TestTenantHardening(TransactionCase):
 
     @classmethod
     def _user(cls, login, role_names, bank=False, vendor=False):
-        return cls.env["res.users"].with_context(no_reset_password=True).create({
+        values = {
             "name": login,
             "login": login,
             "email": "%s@example.test" % login,
             "group_ids": [Command.set([cls.groups[name].id for name in role_names])],
             "trucalc_bank_company_id": bank.id if bank else False,
             "trucalc_vendor_id": vendor.id if vendor else False,
-        })
+        }
+        if bank:
+            values.update({"company_id": bank.id, "company_ids": [Command.set(bank.ids)]})
+        return cls.env["res.users"].with_context(no_reset_password=True).create(values)
 
     @classmethod
     def _order(cls, user, company, borrower="Tenant Test"):

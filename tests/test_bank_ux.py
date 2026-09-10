@@ -113,7 +113,7 @@ class TestBankUX(TestBankOrderPortal):
     def test_asset_scope_contract(self):
         root = Path(__file__).resolve().parents[1]
         manifest = ast.literal_eval((root / '__manifest__.py').read_text())
-        self.assertEqual(manifest['version'], '1.23')
+        self.assertEqual(manifest['version'], '1.24')
         self.assertNotIn('web._assets_primary_variables', manifest['assets'])
         self.assertFalse(any('trucalc_tokens' in p or 'bank_portal.scss' in p or 'trucalc_login' in p
                              for p in manifest['assets']['web.assets_backend']))

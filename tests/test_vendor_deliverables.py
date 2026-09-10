@@ -21,6 +21,7 @@ class TestVendorDeliverables(TransactionCase):
         super().setUpClass()
         cls.company = cls.env.company
         cls.other_company = cls.env["res.company"].create({"name": "4D2 Other"})
+        cls.bank_company = cls.env["res.company"].with_context(trucalc_test_bank_fixture=True).create({"name": "4D2 Bank", "trucalc_is_bank": True, "trucalc_bank_active": True})
         cls.admin = cls._user("4d2-admin", "group_trucalc_admin")
         cls.ops = cls._user("4d2-ops", "group_trucalc_operations")
         reviewer_groups = ["group_trucalc_operations", "group_trucalc_reviewer"]
@@ -44,7 +45,7 @@ class TestVendorDeliverables(TransactionCase):
             ["group_trucalc_admin", "group_trucalc_reviewer"],
         )
         cls.bank = cls._user(
-            "4d2-bank", "group_bank_admin", bank=cls.company,
+            "4d2-bank", "group_bank_admin", bank=cls.bank_company,
         )
         cls.vendor = cls.env["trucalc.vendor"].create({"name": "4D2 Vendor"})
         cls.other_vendor = cls.env["trucalc.vendor"].create({"name": "4D2 Other Vendor"})
@@ -62,7 +63,7 @@ class TestVendorDeliverables(TransactionCase):
     @classmethod
     def _user(cls, login, group, vendor=False, bank=False):
         groups = group if isinstance(group, (list, tuple)) else [group]
-        return cls.env["res.users"].with_context(no_reset_password=True).create({
+        values = {
             "name": login, "login": login, "email": f"{login}@example.test",
             "group_ids": [Command.set([
                 cls.env.ref(f"trucalc_orders.{group_name}").id
@@ -70,7 +71,10 @@ class TestVendorDeliverables(TransactionCase):
             ])],
             "trucalc_vendor_id": vendor.id if vendor else False,
             "trucalc_bank_company_id": bank.id if bank else False,
-        })
+        }
+        if bank:
+            values.update({"company_id": bank.id, "company_ids": [Command.set(bank.ids)]})
+        return cls.env["res.users"].with_context(no_reset_password=True).create(values)
 
     def _engaged(self, vendors=None, accept=True, delivery_date=None):
         order = self.env["trucalc.order"].with_user(self.admin).create({
@@ -534,13 +538,20 @@ class TestVendorDeliverablePortal(HttpCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
+        cls.bank_company = cls.env["res.company"].with_context(trucalc_test_bank_fixture=True).create({"name": "4D2 HTTP Bank", "trucalc_is_bank": True, "trucalc_bank_active": True})
         cls.admin = cls._user("4d2-http-admin", "group_trucalc_admin")
         cls.reviewer = cls._user(
             "4d3-http-reviewer",
             ["group_trucalc_operations", "group_trucalc_reviewer"],
         )
+        for internal_user in (cls.admin, cls.reviewer):
+            internal_user.sudo().write({
+                "company_ids": [Command.set(
+                    (cls.env.company | cls.bank_company).ids
+                )],
+            })
         cls.bank = cls._user(
-            "4d2-http-bank", "group_bank_admin", bank=cls.env.company,
+            "4d2-http-bank", "group_bank_admin", bank=cls.bank_company,
         )
         cls.vendor = cls.env["trucalc.vendor"].create({"name": "4D2 HTTP Vendor"})
         cls.other_vendor = cls.env["trucalc.vendor"].create({
@@ -560,7 +571,7 @@ class TestVendorDeliverablePortal(HttpCase):
     @classmethod
     def _user(cls, login, group, vendor=False, bank=False):
         groups = group if isinstance(group, (list, tuple)) else [group]
-        return cls.env["res.users"].with_context(no_reset_password=True).create({
+        values = {
             "name": login, "login": login, "email": f"{login}@example.test",
             "password": cls.password,
             "group_ids": [Command.set([
@@ -569,13 +580,16 @@ class TestVendorDeliverablePortal(HttpCase):
             ])],
             "trucalc_vendor_id": vendor.id if vendor else False,
             "trucalc_bank_company_id": bank.id if bank else False,
-        })
+        }
+        if bank:
+            values.update({"company_id": bank.id, "company_ids": [Command.set(bank.ids)]})
+        return cls.env["res.users"].with_context(no_reset_password=True).create(values)
 
     def _engaged(self):
         order = self.env["trucalc.order"].with_user(self.admin).create({
             "borrower": "4D2 HTTP Borrower",
             "property_address": "42 Portal Upload Way",
-            "company_id": self.env.company.id,
+            "company_id": self.bank.trucalc_bank_company_id.id,
             "service_type": "evaluation",
             "due_date": fields.Date.add(fields.Date.today(), days=14),
         })
@@ -851,7 +865,13 @@ class TestVendorDeliverablePortal(HttpCase):
         self.assertEqual(self.url_open(
             f"/my/trucalc/bank/orders/{order.order_number}/valuation/0/download"
         ).status_code, 404)
-        other_company = self.env["res.company"].create({"name": "4D3A Other Bank"})
+        other_company = self.env["res.company"].with_context(
+            trucalc_test_bank_fixture=True
+        ).create({
+            "name": "4D3A Other Bank",
+            "trucalc_is_bank": True,
+            "trucalc_bank_active": True,
+        })
         other_bank = self._user("4d3a-other-bank", "group_bank_admin", bank=other_company)
         self._login(other_bank)
         self.assertEqual(self.url_open(
