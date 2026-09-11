@@ -30,6 +30,13 @@
                 <header>
                     <button name="action_trucalc_edit_bank" type="object"
                             string="Edit Bank" class="btn-primary"/>
+                    <button name="action_trucalc_add_bank_user" type="object"
+                            string="Add Bank User" class="btn-primary"
+                            groups="trucalc_orders.group_trucalc_admin"
+                            invisible="not trucalc_bank_active"/>
+                    <button name="action_trucalc_view_bank_users" type="object"
+                            string="Edit Users" class="btn-primary"
+                            groups="trucalc_orders.group_trucalc_admin"/>
                     <button name="action_trucalc_deactivate_bank" type="object"
                             string="Deactivate Bank" class="btn-secondary"
                             invisible="not trucalc_bank_active"
@@ -41,6 +48,12 @@
                 </header>
                 <sheet>
                     <field name="trucalc_is_bank" invisible="1"/>
+                    <div class="oe_button_box" name="button_box">
+                        <button name="action_trucalc_view_bank_users" type="object"
+                                class="oe_stat_button" icon="fa-users">
+                            <field name="trucalc_bank_user_count" widget="statinfo" string="Bank Users"/>
+                        </button>
+                    </div>
                     <div class="oe_title">
                         <h1><field name="name" string="Bank Name"/></h1>
                     </div>
@@ -50,7 +63,6 @@
                             <field name="email"/>
                             <field name="phone"/>
                             <field name="website" widget="url"/>
-                            <field name="trucalc_bank_user_count"/>
                         </group>
                         <group string="Address">
                             <field name="street"/>

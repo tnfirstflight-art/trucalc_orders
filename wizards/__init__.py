@@ -9,3 +9,4 @@ from . import valuation_revision_wizard
 from . import fee_change_request_wizard
 from . import bank_invoice_status_wizard
 from . import bank_provision
+from . import bank_user_provision

@@ -1,7 +1,7 @@
 import logging
 
-from odoo import Command, api, fields, models, _
-from odoo.exceptions import AccessError, ValidationError
+from odoo import Command, api, fields, models, tools, _
+from odoo.exceptions import AccessError, UserError, ValidationError
 
 
 _logger = logging.getLogger(__name__)
@@ -23,6 +23,297 @@ class ResUsers(models.Model):
         index=True,
         help="Vendor organization this user is authorized to represent in TruCalc.",
     )
+
+    @api.model
+    @api.private
+    def _trucalc_bank_role_map(self):
+        return {
+            "administrator": self.env.ref("trucalc_orders.group_bank_admin"),
+            "requestor": self.env.ref("trucalc_orders.group_bank_requestor"),
+            "view_only": self.env.ref("trucalc_orders.group_bank_view_only"),
+        }
+
+    @api.private
+    def _trucalc_bank_role_key(self):
+        self.ensure_one()
+        memberships = self._trucalc_persona_membership()["bank"]
+        for key, group in self._trucalc_bank_role_map().items():
+            if group in memberships:
+                return key
+        return False
+
+    @api.model
+    @api.private
+    def _trucalc_normalize_login(self, value):
+        normalized = tools.email_normalize(value or "")
+        if not normalized or normalized != (value or "").strip().casefold():
+            raise ValidationError(_("Enter one valid email address for the Bank user."))
+        return normalized
+
+    @api.model
+    @api.private
+    def _trucalc_identity_collision(self):
+        return ValidationError(_(
+            "This email cannot be provisioned automatically. Resolve the identity "
+            "through controlled administration before trying again."
+        ))
+
+    @api.model
+    @api.private
+    def _trucalc_find_bank_user_identity(self, normalized):
+        Users = self.sudo().with_context(active_test=False)
+        Partners = self.env["res.partner"].sudo().with_context(active_test=False)
+        users = Users.search([
+            "|", ("login", "=ilike", normalized),
+            ("partner_id.email", "=ilike", normalized),
+        ]).filtered(lambda item: (
+            tools.email_normalize(item.login or "") == normalized
+            or tools.email_normalize(item.partner_id.email or "") == normalized
+        ))
+        partners = Partners.search([("email", "=ilike", normalized)]).filtered(
+            lambda item: tools.email_normalize(item.email or "") == normalized
+        ) | users.partner_id
+        if len(users) > 1 or len(partners) > 1:
+            raise self._trucalc_identity_collision()
+        if users and (
+            not partners
+            or users.partner_id != partners
+            or tools.email_normalize(users.login or "") != normalized
+            or tools.email_normalize(users.partner_id.email or "") != normalized
+        ):
+            raise self._trucalc_identity_collision()
+        return partners, users
+
+    @api.private
+    def _trucalc_assert_plain_portal_reusable(self):
+        self.ensure_one()
+        user = self.sudo()
+        membership = user._trucalc_persona_membership()
+        if (
+            not user.active or not user.share
+            or self.env.ref("base.group_portal") not in user.all_group_ids
+            or self.env.ref("base.group_user") in user.all_group_ids
+            or self.env.ref("base.group_public") in user.all_group_ids
+            or any(membership.values())
+            or user.trucalc_bank_company_id or user.trucalc_vendor_id
+        ):
+            raise self._trucalc_identity_collision()
+        return user
+
+    @api.private
+    def _trucalc_assert_managed_bank_user(self, bank, require_active=True):
+        self.ensure_one()
+        bank = bank._trucalc_bank_identity_record(require_active=require_active)
+        user = self.sudo().with_context(active_test=False).exists()
+        membership = user._trucalc_persona_membership() if user else {}
+        if (
+            not user or (require_active and not user.active)
+            or len(membership.get("bank", self.env["res.groups"])) != 1
+            or membership.get("internal") or membership.get("reviewer")
+            or membership.get("vendor") or user.trucalc_vendor_id
+            or user.trucalc_bank_company_id != bank
+            or user.company_id != bank or user.company_ids != bank
+            or not user.share
+            or self.env.ref("base.group_portal") not in user.all_group_ids
+            or self.env.ref("base.group_user") in user.all_group_ids
+            or self.env.ref("base.group_public") in user.all_group_ids
+        ):
+            raise AccessError(_("The Bank user is not configured for this controlled action."))
+        if require_active:
+            user._trucalc_bank_identity()
+        return user
+
+    @api.model
+    @api.private
+    def _trucalc_provision_bank_user(self, bank, name, login, role, active=True):
+        actor = self.env["res.company"]._trucalc_require_bank_administrator()
+        bank = bank._trucalc_bank_identity_record()
+        normalized = self._trucalc_normalize_login(login)
+        clean_name = " ".join((name or "").split())
+        role_group = self._trucalc_bank_role_map().get(role)
+        if not clean_name or not role_group:
+            raise ValidationError(_("Name and one Bank role are required."))
+        partner, user = self._trucalc_find_bank_user_identity(normalized)
+        if user:
+            if user.trucalc_bank_company_id == bank and user._trucalc_bank_role_key():
+                if user.active:
+                    raise ValidationError(_(
+                        "This Bank user already exists. Use the controlled Bank Users actions."
+                    ))
+                raise ValidationError(_(
+                    "This Bank user is inactive. Use the controlled Reactivate action."
+                ))
+            user._trucalc_assert_plain_portal_reusable()
+        elif partner:
+            if not partner.active or partner.user_ids:
+                raise self._trucalc_identity_collision()
+        with self.env.cr.savepoint():
+            values = {
+                "name": clean_name,
+                "login": normalized,
+                "email": normalized,
+                "active": bool(active),
+                "share": True,
+                "group_ids": [Command.set([role_group.id])],
+                "trucalc_bank_company_id": bank.id,
+                "trucalc_vendor_id": False,
+                "company_id": bank.id,
+                "company_ids": [Command.set([bank.id])],
+            }
+            if user:
+                user.with_context(no_reset_password=True).write(values)
+            else:
+                if partner:
+                    values["partner_id"] = partner.id
+                user = self.sudo().with_context(no_reset_password=True).create(values)
+            user.invalidate_recordset()
+            user._trucalc_assert_managed_bank_user(bank, require_active=bool(active))
+            self.env["trucalc.bank.admin.audit"]._trucalc_log(
+                "bank_user_created", actor, bank, target_user=user,
+                prior_status=False, new_status="active" if active else "inactive",
+                metadata={"role": role, "reused_identity": bool(partner)},
+            )
+        return user
+
+    @api.private
+    def _trucalc_change_bank_role(self, bank, role):
+        self.ensure_one()
+        actor = self.env["res.company"]._trucalc_require_bank_administrator()
+        target = self._trucalc_assert_managed_bank_user(bank)
+        selected = self._trucalc_bank_role_map().get(role)
+        if not selected:
+            raise ValidationError(_("Select one Bank role."))
+        prior = target._trucalc_bank_role_key()
+        if prior == role:
+            raise ValidationError(_("The Bank user already has this role."))
+        bank_roles = self.env["res.groups"].browse(
+            [group.id for group in self._trucalc_bank_role_map().values()]
+        )
+        direct = target.group_ids - bank_roles
+        with self.env.cr.savepoint():
+            target.write({
+                "group_ids": [Command.set((direct | selected).ids)],
+                "trucalc_bank_company_id": bank.id,
+                "company_id": bank.id,
+                "company_ids": [Command.set([bank.id])],
+            })
+            target.invalidate_recordset()
+            target._trucalc_assert_managed_bank_user(bank)
+            self.env["trucalc.bank.admin.audit"]._trucalc_log(
+                "role_changed", actor, bank, target_user=target,
+                prior_status=prior, new_status=role,
+            )
+        return True
+
+    @api.private
+    def _trucalc_deactivate_bank_user(self, bank):
+        self.ensure_one()
+        actor = self.env["res.company"]._trucalc_require_bank_administrator()
+        target = self._trucalc_assert_managed_bank_user(bank)
+        with self.env.cr.savepoint():
+            target.write({"active": False})
+            target.invalidate_recordset()
+            target._trucalc_assert_managed_bank_user(bank, require_active=False)
+            if target.active or target.partner_id.signup_type:
+                raise ValidationError(_("Bank user deactivation did not complete safely."))
+            self.env["trucalc.bank.admin.audit"]._trucalc_log(
+                "user_deactivated", actor, bank, target_user=target,
+                prior_status="active", new_status="inactive",
+            )
+        return True
+
+    @api.private
+    def _trucalc_reactivate_bank_user(self, bank):
+        self.ensure_one()
+        actor = self.env["res.company"]._trucalc_require_bank_administrator()
+        bank = bank._trucalc_bank_identity_record()
+        target = self._trucalc_assert_managed_bank_user(bank, require_active=False)
+        if target.active:
+            raise ValidationError(_("The Bank user is already active."))
+        normalized = self._trucalc_normalize_login(target.login)
+        partner, collision = self._trucalc_find_bank_user_identity(normalized)
+        if collision != target or partner != target.partner_id:
+            raise self._trucalc_identity_collision()
+        with self.env.cr.savepoint():
+            target.write({
+                "active": True, "share": True,
+                "trucalc_bank_company_id": bank.id,
+                "trucalc_vendor_id": False,
+                "company_id": bank.id,
+                "company_ids": [Command.set([bank.id])],
+            })
+            target.invalidate_recordset()
+            target._trucalc_assert_managed_bank_user(bank)
+            self.env["trucalc.bank.admin.audit"]._trucalc_log(
+                "user_reactivated", actor, bank, target_user=target,
+                prior_status="inactive", new_status="active",
+            )
+        return True
+
+    @api.private
+    def _trucalc_send_bank_invitation(self, bank):
+        self.ensure_one()
+        actor = self.env["res.company"]._trucalc_require_bank_administrator()
+        target = self._trucalc_assert_managed_bank_user(bank)
+        normalized = self._trucalc_normalize_login(target.login)
+        partner, collision = self._trucalc_find_bank_user_identity(normalized)
+        if collision != target or partner != target.partner_id:
+            raise self._trucalc_identity_collision()
+        template = self.env.ref("trucalc_orders.mail_template_bank_user_invitation")
+        main_company = self.env.ref("base.main_company")
+        if not main_company.email:
+            raise UserError(_("The TruCalc sender email is not configured."))
+        try:
+            with self.env.cr.savepoint():
+                target.partner_id.sudo().signup_prepare(signup_type="signup")
+                mail_id = template.sudo().with_context(
+                    dbname=self.env.cr.dbname,
+                    lang=target.lang or self.env.lang,
+                    allowed_company_ids=[main_company.id],
+                ).send_mail(
+                    target.id, force_send=True, raise_exception=False,
+                    email_values={
+                        # Retain the exact rendered outbound artifact for delivery
+                        # inspection and for diagnosing a failed SMTP attempt.
+                        "auto_delete": False,
+                        "email_from": main_company.email_formatted,
+                        "email_to": target.email,
+                        "recipient_ids": [],
+                        "partner_ids": [],
+                    },
+                )
+                if not mail_id:
+                    raise UserError(_(
+                        "The TruCalc invitation could not be sent. No successful invitation was recorded."
+                    ))
+                mail = self.env["mail.mail"].sudo().browse(mail_id).exists()
+                if not mail:
+                    raise UserError(_(
+                        "The TruCalc invitation could not be retained for inspection. "
+                        "No successful invitation was recorded."
+                    ))
+                target._trucalc_assert_managed_bank_user(bank)
+                sent = mail.state == "sent"
+                if sent:
+                    self.env["trucalc.bank.admin.audit"]._trucalc_log(
+                        "invitation_sent", actor, bank, target_user=target,
+                        new_status="pending",
+                        metadata={
+                            "template": template.get_external_id().get(template.id),
+                            "mail_id": mail.id,
+                        },
+                    )
+        except Exception as exc:
+            if isinstance(exc, (AccessError, ValidationError, UserError)):
+                raise
+            raise UserError(_(
+                "The TruCalc invitation could not be sent. No successful invitation was recorded."
+            )) from exc
+        return {
+            "sent": sent,
+            "mail_id": mail.id,
+            "state": mail.state,
+        }
 
     @api.model
     def _get_invalidation_fields(self):

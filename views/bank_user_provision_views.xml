@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_trucalc_bank_user_provision_form" model="ir.ui.view">
+        <field name="name">trucalc.bank.user.provision.form</field>
+        <field name="model">trucalc.bank.user.provision</field>
+        <field name="arch" type="xml">
+            <form string="Add Bank User" create="false" edit="true" delete="false">
+                <group>
+                    <field name="bank_company_id" options="{'no_open': True}"/>
+                    <field name="name"/>
+                    <field name="login"/>
+                    <field name="role"/>
+                    <field name="active"/>
+                </group>
+                <footer>
+                    <button name="action_save" type="object" string="Create User" class="btn-primary"/>
+                    <button string="Cancel" special="cancel" class="btn-secondary"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_trucalc_bank_user_role_change_form" model="ir.ui.view">
+        <field name="name">trucalc.bank.user.role.change.form</field>
+        <field name="model">trucalc.bank.user.role.change</field>
+        <field name="arch" type="xml">
+            <form string="Change Bank Role" create="false" edit="true" delete="false">
+                <group>
+                    <field name="bank_company_id" options="{'no_open': True}"/>
+                    <field name="target_user_id" options="{'no_open': True}"/>
+                    <field name="role"/>
+                </group>
+                <footer>
+                    <button name="action_save" type="object" string="Change Role" class="btn-primary"/>
+                    <button string="Cancel" special="cancel" class="btn-secondary"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_trucalc_bank_user_new" model="ir.actions.act_window">
+        <field name="name">Add Bank User</field>
+        <field name="res_model">trucalc.bank.user.provision</field>
+        <field name="view_mode">form</field>
+        <field name="view_id" ref="view_trucalc_bank_user_provision_form"/>
+        <field name="target">new</field>
+        <field name="group_ids" eval="[Command.link(ref('trucalc_orders.group_trucalc_admin'))]"/>
+    </record>
+
+    <record id="view_trucalc_bank_user_management_list" model="ir.ui.view">
+        <field name="name">trucalc.bank.user.management.list</field>
+        <field name="model">trucalc.bank.user.management</field>
+        <field name="group_ids" eval="[Command.link(ref('trucalc_orders.group_trucalc_admin'))]"/>
+        <field name="arch" type="xml">
+            <list string="Bank Users" create="false" edit="false" delete="false">
+                <header>
+                    <button name="%(action_trucalc_bank_user_new)d" type="action"
+                            string="Add Bank User" class="btn-primary" display="always"
+                            context="{'default_bank_company_id': context.get('active_bank_company_id'), 'trucalc_locked_bank_company_id': context.get('active_bank_company_id')}"/>
+                </header>
+                <field name="owner_user_id" column_invisible="True"/>
+                <field name="target_user_id" column_invisible="True"/>
+                <field name="name"/>
+                <field name="login"/>
+                <field name="role"/>
+                <field name="user_active"/>
+                <field name="bank_company_id" options="{'no_open': True}"/>
+                <field name="invitation_state"/>
+                <button name="action_change_role" type="object" string="Change Role" invisible="not user_active"/>
+                <button name="action_deactivate" type="object" string="Deactivate" invisible="not user_active"
+                        confirm="Deactivate this Bank user? Historical records will be preserved."/>
+                <button name="action_reactivate" type="object" string="Reactivate" invisible="user_active"/>
+                <button name="action_send_invitation" type="object" string="Send Invitation"
+                        invisible="not user_active or invitation_state == 'pending'"/>
+                <button name="action_send_invitation" type="object" string="Resend Invitation"
+                        invisible="not user_active or invitation_state != 'pending'"/>
+            </list>
+        </field>
+    </record>
+</odoo>

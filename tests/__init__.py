@@ -27,3 +27,4 @@ from . import test_bank_navigation
 from . import test_vendor_ux
 from . import test_vendor_navigation
 from . import test_bank_provisioning
+from . import test_bank_user_provisioning

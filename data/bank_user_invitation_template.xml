@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <record id="mail_template_bank_user_invitation" model="mail.template">
+            <field name="name">TruCalc: Bank User Invitation</field>
+            <field name="model_id" ref="base.model_res_users"/>
+            <field name="subject">Set up your TruCalc account</field>
+            <field name="email_from">{{ object.env.ref('base.main_company').email_formatted }}</field>
+            <field name="use_default_to" eval="True"/>
+            <field name="description">Signed set-password invitation for a TruCalc Bank user</field>
+            <field name="body_html" type="html">
+<div style="margin:0;padding:24px;background:#f5f7fa;font-family:Arial,sans-serif;color:#243447">
+  <div style="max-width:600px;margin:auto;background:#fff;padding:32px;border-radius:8px">
+    <h2 style="margin-top:0;color:#143a5a">Welcome to TruCalc</h2>
+    <p>Hello <t t-out="object.name or ''">Bank User</t>,</p>
+    <p>A TruCalc Administrator has created your secure Bank portal account. Use the button below to choose your password and activate access.</p>
+    <div style="margin:16px 0px 16px 0px;text-align:center">
+      <a t-att-href="object.partner_id._get_signup_url()"
+         style="display:inline-block;padding:10px;text-decoration:none;font-size:12px;background-color:#022f5b;color:#FFFFFF;border-radius:5px">
+        <strong>Set Your TruCalc Password</strong>
+      </a>
+    </div>
+    <p>Your sign-in email is <strong><t t-out="object.login or ''">user@example.com</t></strong>.</p>
+    <p style="color:#607080;font-size:12px">If you were not expecting this invitation, do not use the link and contact TruCalc support.</p>
+    <p>— The TruCalc Team</p>
+  </div>
+</div>
+            </field>
+            <field name="lang">{{ object.lang }}</field>
+            <field name="auto_delete" eval="False"/>
+        </record>
+    </data>
+</odoo>

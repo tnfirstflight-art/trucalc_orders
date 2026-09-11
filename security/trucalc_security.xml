@@ -180,6 +180,13 @@
         <field name="groups" eval="[(4, ref('group_bank_view_only'))]"/>
     </record>
 
+    <record id="rule_trucalc_bank_user_management_owner" model="ir.rule">
+        <field name="name">TruCalc Bank User Management Owner</field>
+        <field name="model_id" ref="model_trucalc_bank_user_management"/>
+        <field name="domain_force">[('owner_user_id', '=', user.id)]</field>
+        <field name="groups" eval="[(4, ref('group_trucalc_admin'))]"/>
+    </record>
+
     <record id="rule_vendor_order_projection" model="ir.rule">
         <field name="name">Vendor Order Projection</field>
         <field name="model_id" ref="model_trucalc_vendor_order"/>

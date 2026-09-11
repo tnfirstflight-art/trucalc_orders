@@ -240,6 +240,34 @@ class ResCompany(models.Model):
             "context": {"default_bank_company_id": bank.id},
         }
 
+    def action_trucalc_view_bank_users(self):
+        self.ensure_one()
+        self._trucalc_require_bank_administrator()
+        bank = self._trucalc_bank_identity_record(require_active=False)
+        return self.env["trucalc.bank.user.management"]._trucalc_open(bank)
+
+    def action_trucalc_add_bank_user(self):
+        self.ensure_one()
+        self._trucalc_require_bank_administrator()
+        bank = self._trucalc_bank_identity_record()
+        return {
+            "type": "ir.actions.act_window",
+            "name": _("Add Bank User"),
+            "res_model": "trucalc.bank.user.provision",
+            "view_mode": "form",
+            "views": [(
+                self.env.ref(
+                    "trucalc_orders.view_trucalc_bank_user_provision_form"
+                ).id,
+                "form",
+            )],
+            "target": "new",
+            "context": {
+                "default_bank_company_id": bank.id,
+                "trucalc_locked_bank_company_id": bank.id,
+            },
+        }
+
     @api.model_create_multi
     def create(self, vals_list):
         if any(vals.get("trucalc_is_bank") or vals.get("trucalc_bank_active") for vals in vals_list):
