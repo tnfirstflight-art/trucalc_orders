@@ -243,11 +243,16 @@ class TestVendorEngagementResponse(TransactionCase):
         list_arch = etree.fromstring(self.env.ref(
             "trucalc_orders.view_trucalc_order_list"
         ).arch_db.encode())
-        badge = list_arch.xpath(
-            "//field[@name='engagement_action_required_label' and @widget='badge']"
+        order_number = list_arch.xpath(
+            "//field[@name='order_number' "
+            "and @widget='trucalc_order_number_attention']"
         )
-        self.assertEqual(len(badge), 1)
-        self.assertEqual(badge[0].get("decoration-danger"), "engagement_action_required")
+        self.assertEqual(len(order_number), 1)
+        attention = list_arch.xpath(
+            "//field[@name='engagement_action_required_label' "
+            "and @column_invisible='True']"
+        )
+        self.assertEqual(len(attention), 1)
         self.assertEqual(len(list_arch.xpath(
             "//field[@name='engagement_action_required_reason']"
         )), 1)

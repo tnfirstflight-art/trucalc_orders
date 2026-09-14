@@ -741,6 +741,12 @@
                         <dd class="col-sm-8"><t t-out="order.borrower"/></dd>
                         <dt class="col-sm-4">Property Address</dt>
                         <dd class="col-sm-8"><t t-out="order.property_address"/></dd>
+                        <dt class="col-sm-4">City</dt>
+                        <dd class="col-sm-8"><t t-out="order.city"/></dd>
+                        <dt class="col-sm-4">State</dt>
+                        <dd class="col-sm-8"><t t-out="order.state"/></dd>
+                        <dt class="col-sm-4">ZIP</dt>
+                        <dd class="col-sm-8"><t t-out="order.zip_code"/></dd>
                         <dt class="col-sm-4">County</dt>
                         <dd class="col-sm-8"><t t-out="order.county"/></dd>
                         <dt class="col-sm-4">Loan Number</dt>

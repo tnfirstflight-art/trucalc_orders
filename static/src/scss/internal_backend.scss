@@ -1,0 +1,17 @@
+.o_trucalc_order_number_cell {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    line-height: 1.2;
+    min-width: 7rem;
+}
+
+.o_trucalc_order_number_value {
+    color: $o-brand-primary;
+    font-weight: 600;
+}
+
+.o_trucalc_order_attention {
+    font-size: .72rem;
+    white-space: nowrap;
+}

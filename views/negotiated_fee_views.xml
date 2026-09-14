@@ -60,13 +60,13 @@
         </field>
     </record>
     <record id="action_trucalc_negotiated_fees" model="ir.actions.act_window">
-        <field name="name">Negotiated Fee Schedule</field>
+        <field name="name">Negotiated Fee Schedules</field>
         <field name="res_model">trucalc.negotiated.fee</field>
         <field name="view_mode">list</field>
         <field name="view_id" ref="view_trucalc_negotiated_fee_list"/>
         <field name="context">{'active_test': False}</field>
     </record>
-    <menuitem id="menu_trucalc_negotiated_fees" name="Negotiated Fee Schedule"
+    <menuitem id="menu_trucalc_negotiated_fees" name="Negotiated Fee Schedules"
               parent="menu_trucalc_configuration"
               action="action_trucalc_negotiated_fees" sequence="30"
               groups="trucalc_orders.group_trucalc_admin"/>

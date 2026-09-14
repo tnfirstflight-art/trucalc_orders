@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="trucalc_orders.OrderNumberAttentionField"
+       t-inherit="web.CharField" t-inherit-mode="primary">
+        <xpath expr="//span[@t-esc='formattedValue']" position="replace">
+            <div class="o_trucalc_order_number_cell">
+                <span class="o_trucalc_order_number_value" t-esc="formattedValue"/>
+                <span t-if="attentionLabel"
+                      class="o_trucalc_order_attention badge rounded-pill text-bg-danger mt-1"
+                      t-esc="attentionLabel"/>
+            </div>
+        </xpath>
+    </t>
+</templates>

@@ -13,9 +13,10 @@
     </record>
     <menuitem id="menu_trucalc_configuration" name="Configuration" parent="menu_trucalc_root" sequence="90" groups="trucalc_orders.group_trucalc_admin"/>
     <menuitem id="menu_trucalc_draft_support" name="Bank Draft Support"
-              parent="menu_trucalc_configuration"
-              action="action_trucalc_draft_support" sequence="15"
+              parent="menu_trucalc_root"
+              action="action_trucalc_draft_support" sequence="20"
               groups="trucalc_orders.group_trucalc_admin"/>
     <menuitem id="menu_trucalc_document_tags" name="Document Tags" parent="menu_trucalc_configuration"
-              action="action_trucalc_document_tags" groups="trucalc_orders.group_trucalc_admin"/>
+              action="action_trucalc_document_tags" sequence="40"
+              groups="trucalc_orders.group_trucalc_admin"/>
 </odoo>

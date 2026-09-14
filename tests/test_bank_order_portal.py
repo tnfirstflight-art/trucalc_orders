@@ -5,7 +5,7 @@ from lxml import etree
 
 from odoo import Command, fields, http
 from odoo.exceptions import AccessError
-from odoo.tests import HttpCase, tagged
+from odoo.tests import Form, HttpCase, tagged
 
 
 @tagged("post_install", "-at_install", "trucalc_bank_order_portal")
@@ -268,6 +268,18 @@ class TestBankOrderPortal(HttpCase):
             self.assertEqual(len(order), 1)
             self.assertEqual(order.status, "draft")
             self.assertFalse(order.order_date)
+            self.assertEqual(
+                (
+                    order.city, order.state, order.zip_code, order.county,
+                    order.pricing_state_id, order.pricing_county_area_id,
+                    order.service_area_id,
+                ),
+                (
+                    "Memphis", self.service_state.code, "38103",
+                    self.service_area.county, self.service_state,
+                    self.service_area, self.service_area,
+                ),
+            )
             self.assertIn(order.order_number, response.headers["Location"])
             detail = self.url_open(response.headers["Location"]).text
             self.assertIn("Draft created", detail)
@@ -299,10 +311,55 @@ class TestBankOrderPortal(HttpCase):
             self.assertIn(send.status_code, (302, 303))
             self.assertEqual(order.status, "new")
             self.assertTrue(order.order_date)
+            self.assertEqual(
+                (
+                    order.city, order.state, order.zip_code, order.county,
+                    order.pricing_state_id, order.pricing_county_area_id,
+                    order.service_area_id, order.service_type,
+                ),
+                (
+                    "Memphis", self.service_state.code, "38103",
+                    self.service_area.county, self.service_state,
+                    self.service_area, self.service_area, "evaluation",
+                ),
+            )
+            self.assertEqual(
+                (
+                    order.agreed_fee, order.current_agreed_fee,
+                    order.fee_source, order.fee_currency_id,
+                ),
+                (500, 500, "base", self.service_area.currency_id),
+            )
+            self.assertTrue(order.fee_locked_at)
             submitted = self.url_open(send.headers["Location"]).text
             self.assertIn("submitted successfully", submitted)
+            submitted_tree = etree.HTML(submitted)
+            submitted_details = {
+                " ".join(dt.itertext()).strip():
+                    " ".join(dt.getnext().itertext()).strip()
+                for dt in submitted_tree.xpath("//dt")
+            }
+            self.assertEqual(submitted_details["City"], "Memphis")
+            self.assertEqual(submitted_details["State"], self.service_state.code)
+            self.assertEqual(submitted_details["ZIP"], "38103")
+            self.assertEqual(
+                submitted_details["County"], self.service_area.county,
+            )
             self.assertIn("(901) 555-0141 ext. 9", submitted)
             self.assertNotIn("Save Draft", submitted)
+
+            internal_form = Form(
+                order.with_user(self.admin),
+                view="trucalc_orders.view_trucalc_order_form",
+            )
+            self.assertEqual(internal_form.city, "Memphis")
+            self.assertEqual(internal_form.state, self.service_state.code)
+            self.assertEqual(internal_form.zip_code, "38103")
+            self.assertEqual(internal_form.county, self.service_area.county)
+            with self.assertRaises(AccessError):
+                order.with_user(self.admin).write({"state": "FORGED"})
+            with self.assertRaises(AccessError):
+                order.with_user(self.admin).write({"county": "FORGED"})
 
         for user in (self.bank_viewer, self.plain_portal):
             self._login(user)
@@ -373,8 +430,9 @@ class TestBankOrderPortal(HttpCase):
                 for node in etree.HTML(detail).xpath("//dt")
             }
             self.assertEqual(labels, {
-                "Order Number", "Borrower", "Property Address", "Service Type",
-                "Client Due Date", "Status", "County", "Loan Number",
+                "Order Number", "Borrower", "Property Address", "City", "State",
+                "ZIP", "County", "Service Type", "Client Due Date", "Status",
+                "Loan Number",
                 "Inspection Contact Person", "Inspection Contact Phone",
                 "Inspection Contact Email",
             })

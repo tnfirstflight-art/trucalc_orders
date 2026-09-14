@@ -333,7 +333,7 @@ class ResUsers(models.Model):
             return super().write(vals)
         home_action = self.env.ref("trucalc_orders.action_trucalc_orders")
         previously_restricted = {
-            user.id: user._trucalc_is_restricted_internal()
+            user.id: user._trucalc_uses_orders_home_action()
             for user in self
         }
         previous_actions = {user.id: user.action_id for user in self}
@@ -364,6 +364,24 @@ class ResUsers(models.Model):
         )
 
     @api.private
+    def _trucalc_uses_orders_home_action(self):
+        self.ensure_one()
+        if self._trucalc_is_restricted_internal():
+            return True
+        membership = self._trucalc_persona_membership()
+        user = self.sudo()
+        return bool(
+            user.active
+            and not user.share
+            and len(membership["internal"]) == 1
+            and not membership["bank"]
+            and not membership["vendor"]
+            and self.env.ref("base.group_user") in user.all_group_ids
+            and not user.trucalc_bank_company_id
+            and not user.trucalc_vendor_id
+        )
+
+    @api.private
     def _trucalc_sync_home_action(
         self, previously_restricted=None, previous_actions=None,
         explicit_action=False, home_action=None,
@@ -374,13 +392,13 @@ class ResUsers(models.Model):
         previously_restricted = previously_restricted or {}
         previous_actions = previous_actions or {}
         for user in self:
-            restricted = user._trucalc_is_restricted_internal()
-            if restricted and user.action_id.id != home_action.id:
+            uses_orders_home = user._trucalc_uses_orders_home_action()
+            if uses_orders_home and user.action_id.id != home_action.id:
                 user.sudo().with_context(trucalc_home_action_sync=True).write({
                     "action_id": home_action.id,
                 })
             elif (
-                not restricted
+                not uses_orders_home
                 and previously_restricted.get(user.id)
                 and not explicit_action
                 and previous_actions.get(user.id).id == home_action.id
@@ -389,6 +407,15 @@ class ResUsers(models.Model):
                 user.sudo().with_context(trucalc_home_action_sync=True).write({
                     "action_id": False,
                 })
+
+    @api.model
+    @api.private
+    def _trucalc_sync_all_home_actions(self):
+        users = self.sudo().with_context(active_test=False).search([]).filtered(
+            lambda user: user._trucalc_uses_orders_home_action()
+        )
+        users._trucalc_sync_home_action()
+        return True
 
     @api.model
     @api.private

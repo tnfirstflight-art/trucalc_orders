@@ -232,9 +232,10 @@ class TestDownstreamLifecycleSecurity(TransactionCase):
         )
 
     def test_reviewer_home_action_and_restricted_application_shell(self):
-        self.assertFalse(self.reviewer.action_id)
-        self.assertFalse(self.admin.action_id)
-        self.assertFalse(self.ops.action_id)
+        home_action = self.env.ref("trucalc_orders.action_trucalc_orders")
+        self.assertEqual(self.reviewer.action_id.id, home_action.id)
+        self.assertEqual(self.admin.action_id.id, home_action.id)
+        self.assertEqual(self.ops.action_id.id, home_action.id)
 
         reviewer_loaded = self.env["ir.ui.menu"].with_user(
             self.reviewer
@@ -260,7 +261,7 @@ class TestDownstreamLifecycleSecurity(TransactionCase):
             reviewer_loaded,
         )
 
-    def test_additive_reviewer_does_not_override_normal_home_action(self):
+    def test_additive_reviewer_keeps_orders_home_action(self):
         home_action = self.env.ref("trucalc_orders.action_trucalc_orders")
         self.reviewer.sudo().with_context(trucalc_home_action_sync=True).write({
             "action_id": home_action.id,

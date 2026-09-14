@@ -1,8 +1,11 @@
 from unittest.mock import patch
 
+from lxml import etree
+
 from odoo import Command
 from odoo.exceptions import AccessError, ValidationError
 from odoo.tests import tagged
+from odoo.tools.safe_eval import safe_eval
 
 from .test_pricing_architecture import TestPricingArchitecture
 
@@ -53,6 +56,36 @@ class TestFeeChangeRequest(TestPricingArchitecture):
             self.assertEqual((event.order_id, event.company_id, event.from_status, event.to_status), (order, self.bank_a, 'accepted', 'accepted'))
             self.assertEqual(event.actor_id, self.admin if event.event_type.endswith('requested') else self.bank_admin)
             self.assertEqual(event.event_at, req.requested_at if event.event_type.endswith('requested') else req.decision_at)
+
+    def test_internal_pending_fee_filter_uses_existing_request_state(self):
+        arch = etree.fromstring(self.env.ref(
+            'trucalc_orders.view_trucalc_order_search'
+        ).arch_db.encode())
+        node = arch.xpath("./filter[@name='fee_change_pending']")[0]
+        domain = safe_eval(node.get('domain'))
+        self.assertEqual(domain, [
+            ('fee_change_request_ids.state', '=', 'pending'),
+        ])
+
+        pending = self._priced()
+        self._request(pending)
+        approved = self._priced()
+        approved_request = self._request(approved)
+        approved_request.with_user(self.bank_admin)._decide(approved, 'approved')
+        declined = self._priced()
+        declined_request = self._request(declined)
+        declined_request.with_user(self.bank_admin)._decide(
+            declined, 'declined', 'Not approved',
+        )
+        completed = self._priced()
+        completed_request = self._request(completed)
+        completed_request.with_user(self.bank_admin)._decide(completed, 'approved')
+        completed._controlled_lifecycle_write({'status': 'completed'})
+
+        matches = self.env['trucalc.order'].with_user(self.admin).search(domain)
+        self.assertIn(pending, matches)
+        for order in (approved, declined, completed):
+            self.assertNotIn(order, matches)
 
     def test_fee_validation_eligibility_and_raw_security(self):
         order = self._priced()

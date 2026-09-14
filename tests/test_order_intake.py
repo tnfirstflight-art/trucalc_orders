@@ -156,8 +156,8 @@ class TestOrderIntake(TransactionCase):
             [field.get("name") for field in property_group.xpath("./field")],
             [
                 "property_address", "city", "pricing_state_id",
-                "pricing_county_area_id", "zip_code", "service_area_id",
-                "property_type",
+                "state", "pricing_county_area_id", "county", "zip_code",
+                "service_area_id", "property_type",
             ],
         )
         self.assertTrue(arch.xpath("//field[@name='order_date_display']"))

@@ -1213,6 +1213,8 @@ class EvaluationOrder(models.Model):
                 "service_area_id": service_area.id,
                 "state": service_area.state_id.code or service_area.state_id.name,
                 "county": service_area.county,
+                "pricing_state_id": service_area.state_id.id,
+                "pricing_county_area_id": service_area.id,
             })
         else:
             if final:
@@ -1220,6 +1222,7 @@ class EvaluationOrder(models.Model):
             prepared.update({
                 "service_type": False, "service_area_id": False,
                 "state": False, "county": False,
+                "pricing_state_id": False, "pricing_county_area_id": False,
             })
 
         due_input = values.get("due_date")

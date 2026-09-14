@@ -332,8 +332,8 @@ class TestPricingArchitecture(TransactionCase):
             [field.get("name") for field in details.xpath("./field")],
             [
                 "property_address", "city", "pricing_state_id",
-                "pricing_county_area_id", "zip_code", "service_area_id",
-                "property_type",
+                "state", "pricing_county_area_id", "county", "zip_code",
+                "service_area_id", "property_type",
             ],
         )
         request = arch.xpath(
@@ -357,13 +357,13 @@ class TestPricingArchitecture(TransactionCase):
             ("County", "pricing_county_area_id"),
             ("Service Type", "service_area_id"),
         ):
-            self.assertEqual(len(arch.xpath(
-                f"//field[@string='{label}' and not(@invisible='1')]"
-            )), 1)
             self.assertEqual(
                 details.xpath(f"./field[@string='{label}']")[0].get("name"),
                 field_name,
             )
+        self.assertEqual(len(details.xpath("./field[@string='State']")), 2)
+        self.assertEqual(len(details.xpath("./field[@string='County']")), 2)
+        self.assertEqual(len(details.xpath("./field[@string='Service Type']")), 1)
         self.assertEqual(
             details.xpath("./field[@name='pricing_state_id']")[0].get("context"),
             "{'trucalc_state_code_only': True}",
@@ -378,10 +378,22 @@ class TestPricingArchitecture(TransactionCase):
             details.xpath("./field[@name='service_area_id']")[0].get("context"),
             "{'trucalc_service_area_display': 'service_type'}",
         )
-        for legacy in ("state", "county", "service_type"):
+        for field_name in ("state", "county"):
+            display = details.xpath(f"./field[@name='{field_name}']")
+            self.assertEqual(len(display), 1)
+            self.assertEqual(display[0].get("readonly"), "1")
+            self.assertEqual(display[0].get("invisible"), "not fee_locked_at")
             self.assertEqual(len(arch.xpath(
-                f"//sheet/field[@name='{legacy}'][@invisible='1']"
+                f"//sheet/field[@name='{field_name}'][@invisible='1']"
             )), 1)
+        for field_name in ("pricing_state_id", "pricing_county_area_id"):
+            self.assertEqual(
+                details.xpath(f"./field[@name='{field_name}']")[0].get("invisible"),
+                "fee_locked_at",
+            )
+        self.assertEqual(len(arch.xpath(
+            "//sheet/field[@name='service_type'][@invisible='1']"
+        )), 1)
         self.assertEqual(len(arch.xpath(
             "//group[@string='Pricing Summary'][@invisible='not fee_locked_at']"
         )), 1)
@@ -514,7 +526,8 @@ class TestPricingArchitecture(TransactionCase):
         self.assertEqual(
             orders_action.context,
             "{'default_status': 'draft', 'default_company_id': False, "
-            "'trucalc_internal_draft_intake': True}",
+            "'trucalc_internal_draft_intake': True, "
+            "'search_default_open_orders': 1}",
         )
 
     def test_internal_selector_options_and_exact_resolution(self):

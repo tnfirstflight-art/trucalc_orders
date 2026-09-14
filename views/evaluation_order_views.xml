@@ -7,22 +7,34 @@
         <field name="name">trucalc.order.list</field>
         <field name="model">trucalc.order</field>
         <field name="arch" type="xml">
-            <list>
-                <field name="order_number"/>
-                <field name="borrower"/>
-                <field name="loan_number"/>
-                <field name="property_address"/>
-                <field name="company_id"/>
-                <field name="status"/>
+            <list class="o_trucalc_order_list"
+                  default_order="due_date asc, order_number asc">
+                <field name="order_number" widget="trucalc_order_number_attention"/>
                 <field name="engagement_action_required" column_invisible="True"
                        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
-                <field name="engagement_action_required_label" widget="badge"
-                       decoration-danger="engagement_action_required"
+                <field name="engagement_action_required_label" column_invisible="True"
                        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
+                <field name="company_id" string="Bank"/>
+                <field name="borrower"/>
+                <field name="property_address" string="Property Address"/>
+                <field name="service_type" string="Service Type"/>
+                <field name="due_date" string="Due Date" options="{'numeric': True}"/>
+                <field name="status" string="Order Status" widget="badge"
+                       decoration-info="status in ('bid_requested', 'assigned', 'engaged', 'under_review')"
+                       decoration-warning="status in ('new', 'report_received', 'reviewer_assigned')"
+                       decoration-success="status == 'completed'"
+                       decoration-danger="status in ('declined', 'cancelled')"/>
                 <field name="engagement_action_required_reason"
+                       optional="hide"
                        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
-                <field name="assigned_vendor_id"/>
-                <field name="due_date" options="{'numeric': True}"/>
+                <field name="assigned_vendor_id" optional="hide"/>
+                <field name="requestor_id" string="Requester" optional="hide"/>
+                <field name="loan_number" optional="hide"/>
+                <field name="fee_currency_id" column_invisible="True"/>
+                <field name="current_agreed_fee" string="Current Fee" widget="monetary"
+                       options="{'currency_field': 'fee_currency_id'}" optional="hide"/>
+                <field name="reviewer_user_id" string="Assigned Reviewer" optional="hide"
+                       groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer"/>
             </list>
         </field>
     </record>
@@ -215,15 +227,23 @@
                                    context="{'trucalc_state_code_only': True}"
                                    required="0"
                                    domain="[('id', 'in', available_pricing_state_ids)]"
+                                   invisible="fee_locked_at"
                                    readonly="fee_locked_at or status in ('declined', 'cancelled', 'completed') or (status == 'draft' and not is_internal_draft)"
                                    options="{'no_create': True, 'no_create_edit': True}"/>
+                            <field name="state" string="State" readonly="1"
+                                   groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                                   invisible="not fee_locked_at"/>
                             <field name="pricing_county_area_id" string="County"
                                    groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
                                    context="{'trucalc_service_area_display': 'county'}"
                                    required="0"
                                    domain="[('id', 'in', available_pricing_county_area_ids)]"
+                                   invisible="fee_locked_at"
                                    readonly="fee_locked_at or not pricing_state_id or status in ('declined', 'cancelled', 'completed') or (status == 'draft' and not is_internal_draft)"
                                    options="{'no_create': True, 'no_create_edit': True}"/>
+                            <field name="county" string="County" readonly="1"
+                                   groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                                   invisible="not fee_locked_at"/>
                             <field name="zip_code" readonly="status == 'completed'"/>
                             <field name="service_area_id" string="Service Type"
                                    groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
@@ -484,10 +504,51 @@
                 <field name="order_number"/>
                 <field name="borrower"/>
                 <field name="loan_number"/>
+                <field name="company_id" string="Bank"/>
+                <field name="requestor_id" string="Requester"/>
+                <field name="assigned_vendor_id" string="Vendor"/>
+                <field name="service_type" string="Service Type"/>
+                <field name="property_address"/>
+                <field name="city"/>
+                <field name="state"/>
+                <field name="zip_code"/>
                 <field name="status"/>
+                <separator/>
+                <filter name="open_orders" string="Open Orders"
+                        domain="[('status', 'in', ('new', 'bid_requested', 'assigned', 'engaged', 'report_received', 'reviewer_assigned', 'under_review'))]"/>
+                <filter name="intake" string="Intake" domain="[('status', '=', 'new')]"/>
+                <filter name="bidding" string="Bidding" domain="[('status', '=', 'bid_requested')]"/>
+                <filter name="assigned_engaged" string="Assigned / Engaged"
+                        domain="[('status', 'in', ('assigned', 'engaged'))]"/>
+                <filter name="report_received" string="Report Received"
+                        domain="[('status', '=', 'report_received')]"/>
+                <filter name="review_queue" string="Review Queue"
+                        domain="[('status', 'in', ('report_received', 'reviewer_assigned', 'under_review'))]"/>
+                <filter name="under_review" string="Under Review"
+                        domain="[('status', '=', 'under_review')]"/>
+                <filter name="completed" string="Completed"
+                        domain="[('status', '=', 'completed')]"/>
+                <separator/>
+                <filter name="fee_change_pending" string="Fee Change Pending"
+                        domain="[('fee_change_request_ids.state', '=', 'pending')]"
+                        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
+                <filter name="overdue" string="Overdue"
+                        domain="[('due_date', '&lt;', context_today()), ('status', 'not in', ('completed', 'cancelled', 'declined'))]"/>
                 <filter name="action_required" string="Action Required"
                         domain="[('engagement_action_required', '=', True)]"
                         groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
+                <separator/>
+                <filter name="group_bank" string="Bank" context="{'group_by': 'company_id'}"/>
+                <filter name="group_status" string="Status" context="{'group_by': 'status'}"/>
+                <filter name="group_service_type" string="Service Type"
+                        context="{'group_by': 'service_type'}"/>
+                <filter name="group_vendor" string="Assigned Vendor"
+                        context="{'group_by': 'assigned_vendor_id'}"/>
+                <filter name="group_reviewer" string="Assigned Reviewer"
+                        context="{'group_by': 'reviewer_user_id'}"
+                        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer"/>
+                <filter name="group_due_month" string="Due Date (Month)"
+                        context="{'group_by': 'due_date:month'}"/>
             </search>
         </field>
     </record>
@@ -504,7 +565,7 @@
             Command.create({'sequence': 2, 'view_mode': 'form', 'view_id': ref('view_trucalc_order_form')}),
         ]"/>
         <field name="domain">['|', ('status', '!=', 'draft'), ('requestor_id.share', '=', False)]</field>
-        <field name="context">{'default_status': 'draft', 'default_company_id': False, 'trucalc_internal_draft_intake': True}</field>
+        <field name="context">{'default_status': 'draft', 'default_company_id': False, 'trucalc_internal_draft_intake': True, 'search_default_open_orders': 1}</field>
     </record>
 
     <record id="view_trucalc_draft_support_list" model="ir.ui.view">
@@ -583,10 +644,13 @@
         name="Vendors"
         parent="menu_trucalc_root"
         action="action_trucalc_vendors"
-        sequence="20"/>
+        sequence="30"
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
 
     <menuitem id="menu_unpaid_bank_invoices" name="Unpaid Invoices"
         parent="menu_trucalc_root" action="action_unpaid_bank_invoices" sequence="15"
         groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
+
+    <function model="res.users" name="_trucalc_sync_all_home_actions"/>
 
 </odoo>
