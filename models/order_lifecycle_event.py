@@ -1,6 +1,8 @@
 from odoo import api, fields, models, _
 from odoo.exceptions import AccessError, ValidationError
 
+from .vendor_fee import SERVICE_SELECTION
+
 
 class TruCalcOrderLifecycleEvent(models.Model):
     _name = "trucalc.order.lifecycle.event"
@@ -27,6 +29,7 @@ class TruCalcOrderLifecycleEvent(models.Model):
             ("bank_request_sent", "Bank Request Sent"),
             ("internal_request_submitted", "Internal Request Submitted"),
             ("pricing_locked", "Pricing Locked"),
+            ("property_location_corrected", "Property Location Corrected"),
             ("valuation_received", "Valuation Received"),
             ("valuation_revision_requested", "Valuation Revision Requested"),
             ("valuation_revision_submitted", "Valuation Revision Submitted"),
@@ -89,6 +92,59 @@ class TruCalcOrderLifecycleEvent(models.Model):
         "res.currency", readonly=True, ondelete="restrict",
     )
     fee_locked_at = fields.Datetime(readonly=True)
+
+    correction_old_state_id = fields.Many2one(
+        "res.country.state", string="Old State Record",
+        readonly=True, ondelete="restrict",
+    )
+    correction_old_state = fields.Char(string="Old State Snapshot", readonly=True)
+    correction_old_county = fields.Char(readonly=True)
+    correction_old_service_area_id = fields.Many2one(
+        "trucalc.service.area", string="Old Service Area Record",
+        readonly=True, ondelete="restrict",
+    )
+    correction_old_service_area = fields.Char(
+        string="Old Service Area Snapshot", readonly=True,
+    )
+    correction_new_state_id = fields.Many2one(
+        "res.country.state", string="New State Record",
+        readonly=True, ondelete="restrict",
+    )
+    correction_new_state = fields.Char(string="New State Snapshot", readonly=True)
+    correction_new_county = fields.Char(readonly=True)
+    correction_new_service_area_id = fields.Many2one(
+        "trucalc.service.area", string="New Service Area Record",
+        readonly=True, ondelete="restrict",
+    )
+    correction_new_service_area = fields.Char(
+        string="New Service Area Snapshot", readonly=True,
+    )
+    correction_service_type = fields.Selection(
+        SERVICE_SELECTION, readonly=True,
+    )
+    correction_original_service_area_id = fields.Many2one(
+        "trucalc.service.area", string="Original Service Area Record",
+        readonly=True, ondelete="restrict",
+    )
+    correction_original_service_area = fields.Char(
+        string="Original Service Area Snapshot", readonly=True,
+    )
+    correction_current_fee = fields.Monetary(
+        currency_field="correction_currency_id", readonly=True,
+    )
+    correction_schedule_fee = fields.Monetary(
+        currency_field="correction_currency_id", readonly=True,
+    )
+    correction_fee_source = fields.Selection(
+        [("base", "Base"), ("negotiated", "Negotiated")], readonly=True,
+    )
+    correction_negotiated_fee_id = fields.Many2one(
+        "trucalc.negotiated.fee", readonly=True, ondelete="restrict",
+    )
+    correction_currency_id = fields.Many2one(
+        "res.currency", readonly=True, ondelete="restrict",
+    )
+    correction_reason = fields.Text(readonly=True)
 
     fee_change_request_id = fields.Many2one(
         "trucalc.fee.change.request", readonly=True, index=True, ondelete="restrict",
@@ -168,6 +224,85 @@ class TruCalcOrderLifecycleEvent(models.Model):
                     or (not creation and event.event_type != "fee_change_" + request.state)):
                 raise ValidationError(_("Fee change event provenance is invalid."))
 
+    @api.constrains(
+        "event_type", "order_id", "stable_order_id", "company_id",
+        "from_status", "to_status", "correction_old_state_id",
+        "correction_old_state", "correction_old_county",
+        "correction_old_service_area_id", "correction_old_service_area",
+        "correction_new_state_id", "correction_new_state",
+        "correction_new_county", "correction_new_service_area_id",
+        "correction_new_service_area", "correction_service_type",
+        "correction_original_service_area_id",
+        "correction_original_service_area", "correction_current_fee",
+        "correction_schedule_fee", "correction_fee_source",
+        "correction_negotiated_fee_id", "correction_currency_id",
+        "correction_reason",
+    )
+    def _check_location_correction_event(self):
+        correction_fields = (
+            "correction_old_state_id", "correction_old_state",
+            "correction_old_county", "correction_old_service_area_id",
+            "correction_old_service_area", "correction_new_state_id",
+            "correction_new_state", "correction_new_county",
+            "correction_new_service_area_id", "correction_new_service_area",
+            "correction_service_type", "correction_original_service_area_id",
+            "correction_original_service_area", "correction_current_fee",
+            "correction_schedule_fee", "correction_fee_source",
+            "correction_currency_id", "correction_reason",
+        )
+        for event in self.sudo():
+            if event.event_type != "property_location_corrected":
+                if any(event[field_name] for field_name in correction_fields) \
+                        or event.correction_negotiated_fee_id:
+                    raise ValidationError(_(
+                        "Only property location correction events may contain "
+                        "correction provenance."
+                    ))
+                continue
+            order = event.order_id
+            reason = event.correction_reason or ""
+            if (
+                not order
+                or event.stable_order_id != order.id
+                or event.company_id != order.company_id
+                or event.from_status != event.to_status
+                or event.from_status not in ("new", "accepted")
+                or not event.correction_old_state_id
+                or not event.correction_old_state
+                or not event.correction_old_county
+                or not event.correction_old_service_area_id
+                or not event.correction_old_service_area
+                or not event.correction_new_state_id
+                or not event.correction_new_state
+                or not event.correction_new_county
+                or not event.correction_new_service_area_id
+                or not event.correction_new_service_area
+                or not event.correction_service_type
+                or not event.correction_original_service_area_id
+                or not event.correction_original_service_area
+                or not event.correction_currency_id
+                or event.correction_fee_source not in ("base", "negotiated")
+                or bool(event.correction_negotiated_fee_id)
+                != (event.correction_fee_source == "negotiated")
+                or not reason.strip()
+                or reason != reason.strip()
+                or len(reason) > 5000
+                or event.correction_old_service_area_id
+                == event.correction_new_service_area_id
+                or event.correction_new_service_area_id != order.service_area_id
+                or event.correction_original_service_area_id
+                != order.original_service_area_id
+                or event.correction_currency_id != order.fee_currency_id
+                or event.correction_currency_id.compare_amounts(
+                    event.correction_current_fee,
+                    event.correction_schedule_fee,
+                )
+                != 0
+            ):
+                raise ValidationError(_(
+                    "Property location correction event provenance is invalid."
+                ))
+
     @api.model
     @api.private
     def _log_fee_change(self, request, event_type):
@@ -180,6 +315,50 @@ class TruCalcOrderLifecycleEvent(models.Model):
             "actor_id": (request.requester_id if creation else request.decision_actor_id).id,
             "event_at": request.requested_at if creation else request.decision_at,
             "fee_change_request_id": request.id,
+        })
+
+    @api.model
+    @api.private
+    def _log_location_correction(self, order, actor, snapshot):
+        old_area = self.env["trucalc.service.area"].sudo().browse(
+            snapshot["old_service_area_id"]
+        )
+        new_area = self.env["trucalc.service.area"].sudo().browse(
+            snapshot["new_service_area_id"]
+        )
+        original_area = self.env["trucalc.service.area"].sudo().browse(
+            snapshot["original_service_area_id"]
+        )
+        return super(TruCalcOrderLifecycleEvent, self.sudo()).create({
+            "order_id": order.id,
+            "stable_order_id": order.id,
+            "company_id": order.company_id.id,
+            "event_type": "property_location_corrected",
+            "from_status": order.status,
+            "to_status": order.status,
+            "actor_id": actor.id,
+            "event_at": fields.Datetime.now(),
+            "correction_old_state_id": snapshot["old_state_id"],
+            "correction_old_state": snapshot["old_state"],
+            "correction_old_county": snapshot["old_county"],
+            "correction_old_service_area_id": old_area.id,
+            "correction_old_service_area": old_area.display_name,
+            "correction_new_state_id": snapshot["new_state_id"],
+            "correction_new_state": snapshot["new_state"],
+            "correction_new_county": snapshot["new_county"],
+            "correction_new_service_area_id": new_area.id,
+            "correction_new_service_area": new_area.display_name,
+            "correction_service_type": snapshot["service_type"],
+            "correction_original_service_area_id": original_area.id,
+            "correction_original_service_area": original_area.display_name,
+            "correction_current_fee": snapshot["current_fee"],
+            "correction_schedule_fee": snapshot["corrected_schedule_fee"],
+            "correction_fee_source": snapshot["correction_fee_source"],
+            "correction_negotiated_fee_id": snapshot[
+                "correction_negotiated_fee_id"
+            ],
+            "correction_currency_id": snapshot["correction_currency_id"],
+            "correction_reason": snapshot["correction_reason"],
         })
 
     _valuation_received_unique = models.UniqueIndex(

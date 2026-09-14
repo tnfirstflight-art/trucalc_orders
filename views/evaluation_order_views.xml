@@ -49,6 +49,13 @@
             <form string="Evaluation Order">
 
                 <header>
+                    <field name="can_correct_property_location" invisible="1"
+                           groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
+                    <button name="action_open_location_correction_wizard" type="object"
+                            string="Correct Service Area / Property Location"
+                            class="btn-secondary"
+                            groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                            invisible="not can_correct_property_location"/>
                     <field name="can_request_fee_change" invisible="1"/>
                     <button name="action_open_fee_change_wizard" type="object" string="Request Fee Change"
                             groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"

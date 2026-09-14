@@ -23,7 +23,7 @@ CURRENT_FEE_FIELDS = frozenset({
 })
 FEE_SNAPSHOT_FIELDS = frozenset({
     "agreed_fee", "fee_source", "negotiated_fee_id", "fee_locked_at",
-    "fee_currency_id",
+    "fee_currency_id", "original_service_area_id",
 })
 
 
@@ -94,6 +94,16 @@ class EvaluationOrder(models.Model):
         copy=False,
         index=True,
         ondelete="restrict",
+    )
+    original_service_area_id = fields.Many2one(
+        "trucalc.service.area",
+        string="Original Service Area",
+        readonly=True,
+        copy=False,
+        index=True,
+        ondelete="restrict",
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+        help="Service Area that produced the original locked Bank fee.",
     )
     pricing_state_id = fields.Many2one(
         "res.country.state", string="Pricing State", copy=False,
@@ -168,6 +178,30 @@ class EvaluationOrder(models.Model):
     )
     fee_change_pending = fields.Boolean(compute="_compute_fee_change_controls")
     can_request_fee_change = fields.Boolean(compute="_compute_fee_change_controls")
+    can_correct_property_location = fields.Boolean(
+        compute="_compute_location_correction_control",
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+    )
+
+    @api.depends(
+        "status", "fee_locked_at", "original_service_area_id", "bidding_round",
+        "assigned_vendor_id", "vendor_fee", "vendor_delivery_date",
+        "vendor_engaged_at", "invitation_ids", "bid_ids",
+        "vendor_authorization_ids", "engagement_ids", "lifecycle_event_ids",
+        "fee_change_request_ids.state",
+    )
+    @api.depends_context("uid")
+    def _compute_location_correction_control(self):
+        for order in self:
+            order.can_correct_property_location = False
+            if not order.id:
+                continue
+            try:
+                order.with_user(self.env.user)._require_location_correction_actor()
+                order._validate_location_correction_eligibility()
+                order.can_correct_property_location = True
+            except (AccessError, ValidationError):
+                pass
 
     @api.depends("status", "fee_locked_at", "fee_workflow_revision")
     @api.depends_context("uid")
@@ -223,6 +257,7 @@ class EvaluationOrder(models.Model):
         if (not amounts or any(value is None for value in amounts)
                 or not order.fee_locked_at or not order.company_id
                 or not order.fee_currency_id or not order.service_area_id
+                or not order.original_service_area_id
                 or order.fee_source not in ("base", "negotiated")
                 or bool(order.negotiated_fee_id) != (order.fee_source == "negotiated")):
             raise ValidationError(_("This Order has no complete original fee agreement."))
@@ -252,6 +287,7 @@ class EvaluationOrder(models.Model):
             "fee_workflow_revision": order.fee_workflow_revision,
             "has_pending_request": bool(pending), "fee_locked_at": order.fee_locked_at,
             "fee_source": order.fee_source, "service_area_id": order.service_area_id.id,
+            "original_service_area_id": order.original_service_area_id.id,
             "negotiated_fee_id": order.negotiated_fee_id.id or False,
         }
 
@@ -269,6 +305,222 @@ class EvaluationOrder(models.Model):
     def action_request_fee_change(self, proposed_fee, reason):
         self._require_fee_request_actor()
         return self.env["trucalc.fee.change.request"]._request(self, proposed_fee, reason).id
+
+    @api.private
+    def _require_location_correction_actor(self):
+        self.ensure_one()
+        actor = self.env.user
+        self.with_user(actor).check_access("read")
+        if (
+            not actor.active
+            or actor.share
+            or actor._trucalc_has_external_role()
+            or not (
+                actor.has_group("trucalc_orders.group_trucalc_admin")
+                or actor.has_group("trucalc_orders.group_trucalc_operations")
+            )
+            or self.sudo().company_id not in actor.company_ids
+        ):
+            raise AccessError(_(
+                "Property location correction requires authorized TruCalc "
+                "Administrator or Operations access."
+            ))
+        return actor
+
+    @api.model
+    @api.private
+    def _resolve_service_area(self, state, county, service_type):
+        state = state.sudo().exists()
+        if len(state) != 1 or state._name != "res.country.state":
+            raise ValidationError(_("Select a valid corrected State."))
+        county, normalized = self.env["trucalc.service.area"]._normalize_county(
+            county
+        )
+        if service_type not in dict(SERVICE_SELECTION):
+            raise ValidationError(_("The existing Service Type is invalid."))
+        areas = self.env["trucalc.service.area"].sudo().with_context(
+            active_test=False
+        ).search([
+            ("state_id", "=", state.id),
+            ("county_normalized", "=", normalized),
+            ("service_type", "=", service_type),
+            ("active", "=", True),
+        ], limit=2)
+        if not areas:
+            raise ValidationError(_(
+                "No active Service Area matches the corrected State, County, "
+                "and existing Service Type."
+            ))
+        if len(areas) != 1:
+            raise ValidationError(_(
+                "Service Area resolution is ambiguous for the corrected location."
+            ))
+        return areas, county
+
+    @api.private
+    def _validate_location_correction_eligibility(self):
+        self.ensure_one()
+        order = self.sudo()
+        if order.status not in ("new", "accepted") or not order.fee_locked_at:
+            raise ValidationError(_(
+                "Property location correction is available only on a pricing-locked "
+                "New or Accepted Order before Vendor solicitation."
+            ))
+        if not order.original_service_area_id:
+            raise ValidationError(_(
+                "The Order has no original Service Area provenance."
+            ))
+        area = order.service_area_id
+        if (
+            not area
+            or not order.service_type
+            or area.service_type != order.service_type
+            or order.state != (area.state_id.code or area.state_id.name)
+            or order.county != area.county
+            # Legacy pricing-locked Orders can predate the selector provenance
+            # fields.  Absence is safe because the locked Service Area still
+            # supplies State, County, and Service Type; a conflicting selector
+            # value is not safe and remains blocked.
+            or (
+                order.pricing_state_id
+                and order.pricing_state_id != area.state_id
+            )
+            or (
+                order.pricing_county_area_id
+                and order.pricing_county_area_id.county_normalized
+                != area.county_normalized
+            )
+        ):
+            raise ValidationError(_(
+                "The current State, County, Service Area, or selector provenance "
+                "is inconsistent."
+            ))
+        if (
+            order.bidding_round
+            or order.assigned_vendor_id
+            or order.vendor_fee
+            or order.vendor_delivery_date
+            or order.vendor_engaged_at
+            or order.invitation_ids
+            or order.bid_ids
+            or order.vendor_authorization_ids
+            or order.engagement_ids
+            or self.env["trucalc.vendor.deliverable"].sudo().search_count([
+                ("order_id", "=", order.id),
+            ])
+            or self.env["trucalc.order.lifecycle.event"].sudo().search_count([
+                ("order_id", "=", order.id),
+                ("event_type", "=", "order_completed"),
+            ])
+        ):
+            raise ValidationError(_(
+                "Property location correction is blocked after Vendor solicitation "
+                "or downstream fulfillment evidence exists."
+            ))
+        if self.env["trucalc.fee.change.request"].sudo().search_count([
+            ("order_id", "=", order.id), ("state", "=", "pending"),
+        ]):
+            raise ValidationError(_(
+                "A pending Fee Change request must be resolved before correcting "
+                "the property location."
+            ))
+        return order._get_current_effective_fee()
+
+    def action_open_location_correction_wizard(self):
+        self.ensure_one()
+        self._require_location_correction_actor()
+        self._validate_location_correction_eligibility()
+        return {
+            "type": "ir.actions.act_window",
+            "name": _("Correct Service Area / Property Location"),
+            "res_model": "trucalc.location.correction.wizard",
+            "view_mode": "form",
+            "view_id": self.env.ref(
+                "trucalc_orders.view_trucalc_location_correction_wizard_form"
+            ).id,
+            "target": "new",
+            "context": {"default_order_id": self.id},
+        }
+
+    @api.private
+    def _apply_same_fee_location_correction(
+        self, corrected_state, corrected_county, reason,
+        expected_service_area_id,
+    ):
+        self.ensure_one()
+        actor = self._require_location_correction_actor()
+        reason = reason.strip() if isinstance(reason, str) else ""
+        if not reason or len(reason) > 5000:
+            raise ValidationError(_(
+                "A correction reason of 1 to 5000 characters is required."
+            ))
+        with self.env.cr.savepoint():
+            order = self.sudo()
+            order._lock_for_bid_lifecycle()
+            order.invalidate_recordset()
+            order.with_user(actor)._require_location_correction_actor()
+            current = order._validate_location_correction_eligibility()
+            if order.service_area_id.id != expected_service_area_id:
+                raise ValidationError(_(
+                    "The Order location changed after this correction was opened. "
+                    "Close the wizard and try again."
+                ))
+            area, county = order._resolve_service_area(
+                corrected_state, corrected_county, order.service_type,
+            )
+            if area == order.service_area_id:
+                raise ValidationError(_(
+                    "Corrected State or County must differ from the current location."
+                ))
+            pricing = order._resolve_and_lock_bank_fee(order.company_id, area)
+            currency = order.fee_currency_id
+            if pricing["fee_currency_id"] != currency.id:
+                raise ValidationError(_(
+                    "The corrected pricing currency does not match the current agreement."
+                ))
+            comparison = currency.compare_amounts(
+                pricing["agreed_fee"], current["amount"]
+            )
+            if comparison > 0:
+                raise ValidationError(_(
+                    "This correction increases the schedule fee and requires the "
+                    "later controlled fee-approval workflow. No changes were applied."
+                ))
+            if comparison < 0:
+                raise ValidationError(_(
+                    "Lower-fee property location correction is not supported in "
+                    "Location Correction A. No changes were applied."
+                ))
+            old_area = order.service_area_id
+            snapshot = {
+                "old_state_id": old_area.state_id.id,
+                "old_state": order.state,
+                "old_county": order.county,
+                "old_service_area_id": old_area.id,
+                "new_state_id": area.state_id.id,
+                "new_state": area.state_id.code or area.state_id.name,
+                "new_county": county,
+                "new_service_area_id": area.id,
+                "service_type": order.service_type,
+                "original_service_area_id": order.original_service_area_id.id,
+                "current_fee": current["amount"],
+                "corrected_schedule_fee": pricing["agreed_fee"],
+                "correction_fee_source": pricing["fee_source"],
+                "correction_negotiated_fee_id": pricing["negotiated_fee_id"],
+                "correction_currency_id": pricing["fee_currency_id"],
+                "correction_reason": reason,
+            }
+            order._controlled_location_correction_write({
+                "state": snapshot["new_state"],
+                "county": area.county,
+                "service_area_id": area.id,
+                "pricing_state_id": area.state_id.id,
+                "pricing_county_area_id": area.id,
+            })
+            self.env["trucalc.order.lifecycle.event"]._log_location_correction(
+                order, actor, snapshot,
+            )
+        return True
 
     requestor_company_id = fields.Many2one(
         "res.company",
@@ -1326,6 +1578,7 @@ class EvaluationOrder(models.Model):
         ))
         send_values.update({
             "current_agreed_fee": send_values["agreed_fee"],
+            "original_service_area_id": send_values["service_area_id"],
             "current_fee_change_request_id": False, "fee_workflow_revision": 0,
             "status": "new",
             "order_date": fields.Date.context_today(order.with_user(actor)),
@@ -1453,6 +1706,39 @@ class EvaluationOrder(models.Model):
 
     @api.private
     def _controlled_lifecycle_write(self, vals):
+        vals = dict(vals)
+        for order in self:
+            requested = vals.get("original_service_area_id")
+            if order.original_service_area_id and requested not in (
+                None, order.original_service_area_id.id,
+            ):
+                raise AccessError(_(
+                    "Original Service Area provenance is immutable."
+                ))
+            if (
+                vals.get("fee_locked_at")
+                and not order.fee_locked_at
+                and not order.original_service_area_id
+                and not requested
+            ):
+                service_area_id = vals.get(
+                    "service_area_id", order.service_area_id.id
+                )
+                if not service_area_id:
+                    raise ValidationError(_(
+                        "Pricing lock requires original Service Area provenance."
+                    ))
+                vals["original_service_area_id"] = service_area_id
+        return super(EvaluationOrder, self).write(vals)
+
+    @api.private
+    def _controlled_location_correction_write(self, vals):
+        allowed = {
+            "state", "county", "service_area_id",
+            "pricing_state_id", "pricing_county_area_id",
+        }
+        if not vals or set(vals) != allowed:
+            raise AccessError(_("Invalid controlled location correction fields."))
         return super(EvaluationOrder, self).write(vals)
 
     @api.private
@@ -1591,6 +1877,7 @@ class EvaluationOrder(models.Model):
         values = self._resolve_and_lock_bank_fee(self.company_id, area)
         values.update({
             "current_agreed_fee": values["agreed_fee"],
+            "original_service_area_id": values["service_area_id"],
             "current_fee_change_request_id": False, "fee_workflow_revision": 0,
             "status": "new",
             "order_date": fields.Date.context_today(self),

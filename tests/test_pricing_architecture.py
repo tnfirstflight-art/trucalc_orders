@@ -424,6 +424,8 @@ class TestPricingArchitecture(TransactionCase):
             [(button.get("name"), button.get("string"))
             for button in arch.xpath("//header/button")],
             [
+                ("action_open_location_correction_wizard",
+                 "Correct Service Area / Property Location"),
                 ("action_open_fee_change_wizard", "Request Fee Change"),
                 (None, "Save Draft"),
                 ("action_submit_internal_draft", "Submit"),

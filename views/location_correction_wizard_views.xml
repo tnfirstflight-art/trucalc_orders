@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_trucalc_location_correction_wizard_form" model="ir.ui.view">
+        <field name="name">trucalc.location.correction.wizard.form</field>
+        <field name="model">trucalc.location.correction.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Correct Service Area / Property Location">
+                <field name="order_id" invisible="1"/>
+                <field name="available_state_ids" invisible="1"/>
+                <field name="available_county_area_ids" invisible="1"/>
+                <group string="Current Locked Location">
+                    <field name="current_state_id" context="{'trucalc_state_code_only': True}"/>
+                    <field name="current_county"/>
+                    <field name="current_service_area_id"/>
+                    <field name="service_type"/>
+                    <field name="currency_id" invisible="1"/>
+                    <field name="current_effective_fee"/>
+                </group>
+                <group string="Corrected Location">
+                    <field name="corrected_state_id"
+                           context="{'trucalc_state_code_only': True}"
+                           domain="[('id', 'in', available_state_ids)]"
+                           options="{'no_create': True, 'no_create_edit': True}"/>
+                    <field name="corrected_county_area_id"
+                           context="{'trucalc_service_area_display': 'county'}"
+                           domain="[('id', 'in', available_county_area_ids)]"
+                           options="{'no_create': True, 'no_create_edit': True, 'no_open': True}"/>
+                    <field name="corrected_service_area_id"/>
+                    <field name="corrected_schedule_fee"/>
+                    <field name="fee_difference"/>
+                    <field name="fee_result"/>
+                    <field name="correction_reason"
+                           placeholder="Explain why the authoritative State or County is being corrected."/>
+                </group>
+                <footer>
+                    <button name="action_confirm" type="object" string="Apply Same-Fee Correction"
+                            class="btn-primary" invisible="fee_result != 'same'"
+                            confirm="Apply this State/County correction without changing the current agreed fee?"/>
+                    <button string="Cancel" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+</odoo>
