@@ -621,6 +621,25 @@
                                     <dt class="col-5">Reason</dt><dd class="col-7 text-break" style="white-space: pre-wrap"><t t-out="fee['reason']"/></dd>
                                     <dt class="col-5">Requested Date</dt><dd class="col-7"><span t-out="fee['requested_at']" t-options="{'widget': 'datetime'}"/></dd>
                                 </dl>
+                                <div t-if="fee['location_correction']" class="alert alert-warning">
+                                    <h6>Pending Property Location Correction</h6>
+                                    <t t-set="correction" t-value="fee['location_correction']"/>
+                                    <dl class="row mb-0">
+                                        <dt class="col-5">Current Location</dt>
+                                        <dd class="col-7"><t t-out="correction['current_state']"/> — <t t-out="correction['current_county']"/></dd>
+                                        <dt class="col-5">Proposed Location</dt>
+                                        <dd class="col-7"><t t-out="correction['proposed_state']"/> — <t t-out="correction['proposed_county']"/></dd>
+                                        <dt class="col-5">Proposed Service Area</dt>
+                                        <dd class="col-7"><t t-out="correction['proposed_service_area']"/></dd>
+                                        <dt class="col-5">Current Effective Fee</dt>
+                                        <dd class="col-7"><span t-out="correction['current_fee']" t-options="{'widget': 'monetary', 'display_currency': order.fee_currency_id}"/></dd>
+                                        <dt class="col-5">Proposed Fee</dt>
+                                        <dd class="col-7"><span t-out="correction['proposed_fee']" t-options="{'widget': 'monetary', 'display_currency': order.fee_currency_id}"/></dd>
+                                        <dt class="col-5">Correction Reason</dt>
+                                        <dd class="col-7 text-break" style="white-space: pre-wrap"><t t-out="correction['reason']"/></dd>
+                                        <dt class="col-5">State</dt><dd class="col-7">Pending Approval</dd>
+                                    </dl>
+                                </div>
                                 <div class="d-flex gap-2">
                                     <form method="post" t-att-action="'/my/trucalc/bank/orders/%s/fee/%s/approved' % (order.order_number, fee['id'])">
                                         <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
@@ -876,7 +895,18 @@
                                 <td><t t-out="fee['state'].title()"/></td>
                                 <td class="text-nowrap"><span t-out="fee['prior_fee']" t-options="{'widget': 'monetary', 'display_currency': order.fee_currency_id}"/></td>
                                 <td class="text-nowrap"><span t-out="fee['proposed_fee']" t-options="{'widget': 'monetary', 'display_currency': order.fee_currency_id}"/></td>
-                                <td class="o_trucalc_fee_reason" t-att-title="fee['reason']"><t t-out="fee['reason']"/></td>
+                                <td class="o_trucalc_fee_reason" t-att-title="fee['reason']">
+                                    <t t-out="fee['reason']"/>
+                                    <dl t-if="fee['location_correction']" class="small mt-2 mb-0">
+                                        <t t-set="correction" t-value="fee['location_correction']"/>
+                                        <dt>Location Correction</dt>
+                                        <dd>
+                                            <t t-out="correction['current_state']"/> — <t t-out="correction['current_county']"/>
+                                            → <t t-out="correction['proposed_state']"/> — <t t-out="correction['proposed_county']"/>
+                                        </dd>
+                                        <dt>Proposed Service Area</dt><dd><t t-out="correction['proposed_service_area']"/></dd>
+                                    </dl>
+                                </td>
                                 <td class="text-nowrap"><span t-out="fee['requested_at']" t-options="{'widget': 'datetime'}"/></td>
                                 <td class="text-nowrap"><t t-if="fee['decision_at']"><t t-out="fee['state'].title()"/> <span t-out="fee['decision_at']" t-options="{'widget': 'datetime'}"/></t><t t-else="">—</t></td>
                                 <td><t t-out="fee['decision_actor'] or '—'"/></td>

@@ -182,13 +182,85 @@ class EvaluationOrder(models.Model):
         compute="_compute_location_correction_control",
         groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
     )
+    location_correction_request_ids = fields.One2many(
+        "trucalc.location.correction.request", "order_id", readonly=True,
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+    )
+    current_location_correction_request_id = fields.Many2one(
+        "trucalc.location.correction.request",
+        compute="_compute_location_correction_request_state",
+        compute_sudo=True, readonly=True,
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
+    )
+    location_correction_pending = fields.Boolean(
+        compute="_compute_location_correction_request_state",
+        compute_sudo=True, readonly=True,
+    )
+    location_correction_blocked = fields.Boolean(
+        compute="_compute_location_correction_request_state",
+        compute_sudo=True, readonly=True,
+    )
+    internal_fee_change_outcome = fields.Selection(
+        [("approved", "Fee Change Approved"),
+         ("declined", "Fee Change Declined")],
+        compute="_compute_internal_fee_change_outcome",
+        compute_sudo=True, readonly=True,
+        groups=(
+            "trucalc_orders.group_trucalc_admin,"
+            "trucalc_orders.group_trucalc_operations,"
+            "trucalc_orders.group_trucalc_reviewer"
+        ),
+    )
+
+    @api.depends("status", "location_correction_request_ids.state")
+    def _compute_location_correction_request_state(self):
+        for order in self:
+            latest = order.location_correction_request_ids.sorted(
+                key=lambda item: item.id, reverse=True,
+            )[:1]
+            order.current_location_correction_request_id = latest
+            order.location_correction_pending = bool(
+                latest and latest.state == "pending"
+            )
+            order.location_correction_blocked = bool(
+                order.status != "cancelled"
+                and latest
+                and latest.state in ("pending", "declined")
+            )
+
+    @api.depends(
+        "status", "current_fee_change_request_id",
+        "current_fee_change_request_id.state", "fee_change_request_ids.state",
+        "location_correction_request_ids.state",
+    )
+    def _compute_internal_fee_change_outcome(self):
+        for order in self:
+            order.internal_fee_change_outcome = False
+            corrections = order.location_correction_request_ids
+            if (
+                order.location_correction_blocked
+                and any(item.state == "declined" for item in corrections)
+            ):
+                order.internal_fee_change_outcome = "declined"
+                continue
+            latest_fee = order.fee_change_request_ids.sorted(
+                key=lambda item: item.id, reverse=True,
+            )[:1]
+            current = order.current_fee_change_request_id
+            if (
+                order.status == "accepted"
+                and current
+                and current.state == "approved"
+                and latest_fee == current
+            ):
+                order.internal_fee_change_outcome = "approved"
 
     @api.depends(
         "status", "fee_locked_at", "original_service_area_id", "bidding_round",
         "assigned_vendor_id", "vendor_fee", "vendor_delivery_date",
         "vendor_engaged_at", "invitation_ids", "bid_ids",
         "vendor_authorization_ids", "engagement_ids", "lifecycle_event_ids",
-        "fee_change_request_ids.state",
+        "fee_change_request_ids.state", "location_correction_request_ids.state",
     )
     @api.depends_context("uid")
     def _compute_location_correction_control(self):
@@ -358,7 +430,49 @@ class EvaluationOrder(models.Model):
         return areas, county
 
     @api.private
-    def _validate_location_correction_eligibility(self):
+    def _resolve_location_correction_pricing(
+        self, corrected_state, corrected_county, lock=False,
+    ):
+        """Resolve and classify one correction from authoritative server data."""
+        self.ensure_one()
+        order = self.sudo()
+        area, county = order._resolve_service_area(
+            corrected_state, corrected_county, order.service_type,
+        )
+        resolver = (
+            order._resolve_and_lock_bank_fee if lock
+            else order._resolve_bank_fee
+        )
+        pricing = resolver(order.company_id, area)
+        current = order._get_current_effective_fee()
+        currency = order.fee_currency_id
+        if pricing["fee_currency_id"] != currency.id:
+            raise ValidationError(_(
+                "The corrected pricing currency does not match the current agreement."
+            ))
+        comparison = currency.compare_amounts(
+            pricing["agreed_fee"], current["amount"],
+        )
+        return {
+            "area": area,
+            "county": county,
+            "pricing": pricing,
+            "current": current,
+            "comparison": comparison,
+            "direction": (
+                "same" if comparison == 0
+                else "higher" if comparison > 0
+                else "lower"
+            ),
+            "difference": currency.round(
+                pricing["agreed_fee"] - current["amount"]
+            ),
+        }
+
+    @api.private
+    def _validate_location_correction_eligibility(
+        self, allowed_pending_fee_request=False,
+    ):
         self.ensure_one()
         order = self.sudo()
         if order.status not in ("new", "accepted") or not order.fee_locked_at:
@@ -417,9 +531,12 @@ class EvaluationOrder(models.Model):
                 "Property location correction is blocked after Vendor solicitation "
                 "or downstream fulfillment evidence exists."
             ))
-        if self.env["trucalc.fee.change.request"].sudo().search_count([
+        pending = self.env["trucalc.fee.change.request"].sudo().search([
             ("order_id", "=", order.id), ("state", "=", "pending"),
-        ]):
+        ])
+        allowed = allowed_pending_fee_request.sudo().exists() \
+            if allowed_pending_fee_request else pending.browse()
+        if pending and pending != allowed:
             raise ValidationError(_(
                 "A pending Fee Change request must be resolved before correcting "
                 "the property location."
@@ -465,22 +582,18 @@ class EvaluationOrder(models.Model):
                     "The Order location changed after this correction was opened. "
                     "Close the wizard and try again."
                 ))
-            area, county = order._resolve_service_area(
-                corrected_state, corrected_county, order.service_type,
+            resolution = order._resolve_location_correction_pricing(
+                corrected_state, corrected_county, lock=True,
             )
+            area = resolution["area"]
+            county = resolution["county"]
             if area == order.service_area_id:
                 raise ValidationError(_(
                     "Corrected State or County must differ from the current location."
                 ))
-            pricing = order._resolve_and_lock_bank_fee(order.company_id, area)
+            pricing = resolution["pricing"]
             currency = order.fee_currency_id
-            if pricing["fee_currency_id"] != currency.id:
-                raise ValidationError(_(
-                    "The corrected pricing currency does not match the current agreement."
-                ))
-            comparison = currency.compare_amounts(
-                pricing["agreed_fee"], current["amount"]
-            )
+            comparison = resolution["comparison"]
             if comparison > 0:
                 raise ValidationError(_(
                     "This correction increases the schedule fee and requires the "
@@ -510,6 +623,13 @@ class EvaluationOrder(models.Model):
                 "correction_currency_id": pricing["fee_currency_id"],
                 "correction_reason": reason,
             }
+            correction_request = False
+            if order.location_correction_blocked:
+                correction_request = self.env[
+                    "trucalc.location.correction.request"
+                ]._record_same_fee_resolution(
+                    order, actor, area, county, current, pricing, reason,
+                )
             order._controlled_location_correction_write({
                 "state": snapshot["new_state"],
                 "county": area.county,
@@ -518,8 +638,74 @@ class EvaluationOrder(models.Model):
                 "pricing_county_area_id": area.id,
             })
             self.env["trucalc.order.lifecycle.event"]._log_location_correction(
-                order, actor, snapshot,
+                order, actor, snapshot, correction_request=correction_request,
             )
+        return True
+
+    @api.private
+    def _stage_higher_fee_location_correction(
+        self, corrected_state, corrected_county, reason,
+        expected_service_area_id,
+    ):
+        self.ensure_one()
+        actor = self._require_location_correction_actor()
+        reason = reason.strip() if isinstance(reason, str) else ""
+        if not reason or len(reason) > 5000:
+            raise ValidationError(_(
+                "A correction reason of 1 to 5000 characters is required."
+            ))
+        with self.env.cr.savepoint():
+            order = self.sudo()
+            order._lock_for_bid_lifecycle()
+            order.invalidate_recordset()
+            order.with_user(actor)._require_location_correction_actor()
+            current = order._validate_location_correction_eligibility()
+            if order.status == "new":
+                raise ValidationError(_(
+                    "Accept this Order before submitting a higher-fee location correction."
+                ))
+            if order.status != "accepted":
+                raise ValidationError(_(
+                    "Higher-fee location correction requires an Accepted Order."
+                ))
+            if order.service_area_id.id != expected_service_area_id:
+                raise ValidationError(_(
+                    "The Order location changed after this correction was opened. "
+                    "Close the wizard and try again."
+                ))
+            resolution = order._resolve_location_correction_pricing(
+                corrected_state, corrected_county, lock=True,
+            )
+            area = resolution["area"]
+            county = resolution["county"]
+            if area == order.service_area_id:
+                raise ValidationError(_(
+                    "Corrected State or County must differ from the current location."
+                ))
+            pricing = resolution["pricing"]
+            comparison = resolution["comparison"]
+            if comparison <= 0:
+                message = (
+                    "Use the immediate same-fee correction action."
+                    if comparison == 0 else
+                    "Lower-fee property location correction is not supported."
+                )
+                raise ValidationError(_(message))
+            return self.env[
+                "trucalc.location.correction.request"
+            ]._stage(order, actor, area, county, current, pricing, reason)
+
+    @api.private
+    def _require_location_correction_resolved(self):
+        self.ensure_one()
+        latest = self.env[
+            "trucalc.location.correction.request"
+        ].sudo().search([("order_id", "=", self.id)], order="id desc", limit=1)
+        if latest and latest.state in ("pending", "declined"):
+            raise ValidationError(_(
+                "Vendor processing is blocked by an unresolved property location "
+                "correction. Submit another correction or cancel the Order."
+            ))
         return True
 
     requestor_company_id = fields.Many2one(
@@ -839,7 +1025,7 @@ class EvaluationOrder(models.Model):
     @api.depends(
         "status", "bidding_round", "invitation_ids.round_number",
         "bid_ids.round_number", "vendor_authorization_ids.round_number",
-        "vendor_authorization_ids.source",
+        "vendor_authorization_ids.source", "location_correction_request_ids.state",
     )
     def _compute_current_round_solicitation_controls(self):
         for order in self:
@@ -847,6 +1033,7 @@ class EvaluationOrder(models.Model):
             order.current_round_has_solicitation = bool(invitations)
             order.can_request_vendor_bids = bool(
                 order.id
+                and not order.location_correction_blocked
                 and (
                     (order.status == "accepted" and order.bidding_round == 0)
                     or (
@@ -1974,6 +2161,7 @@ class EvaluationOrder(models.Model):
         self._require_bid_manager()
         self.ensure_one()
         self._lock_for_bid_lifecycle()
+        self._require_location_correction_resolved()
         if (
             self.status != "accepted"
             or self.bidding_round != 0
@@ -2039,6 +2227,7 @@ class EvaluationOrder(models.Model):
         self._require_bid_manager()
         self.ensure_one()
         self._lock_for_bid_lifecycle()
+        self._require_location_correction_resolved()
         original_solicitation = self.status == "accepted" and self.bidding_round == 0
         reopened_solicitation = self._is_clean_reopened_unsolicited_round()
         if not original_solicitation and not reopened_solicitation:
@@ -2198,6 +2387,7 @@ class EvaluationOrder(models.Model):
     def action_open_request_bids_wizard(self):
         self._require_bid_manager()
         self.ensure_one()
+        self._require_location_correction_resolved()
         if not self.id or not (
             (self.status == "accepted" and self.bidding_round == 0)
             or self._is_clean_reopened_unsolicited_round()
@@ -2697,6 +2887,32 @@ class EvaluationOrder(models.Model):
         ))
 
     def action_cancelled(self):
-        raise AccessError(_(
-            "Cancellation is unavailable until the controlled cancellation workflow."
-        ))
+        self.ensure_one()
+        actor = self._require_location_correction_actor()
+        with self.env.cr.savepoint():
+            order = self.sudo()
+            order._lock_for_bid_lifecycle()
+            order.invalidate_recordset()
+            order.with_user(actor)._require_location_correction_actor()
+            correction = self.env[
+                "trucalc.location.correction.request"
+            ].sudo().search([
+                ("order_id", "=", order.id),
+            ], order="id desc", limit=1)
+            if (
+                order.status != "accepted"
+                or not correction
+                or correction.state != "declined"
+            ):
+                raise AccessError(_(
+                    "Cancellation is unavailable until the controlled "
+                    "cancellation workflow."
+                ))
+            correction._lock()
+            correction.invalidate_recordset()
+            if correction.state != "declined":
+                raise ValidationError(_(
+                    "The location correction outcome changed. Refresh the Order."
+                ))
+            order._controlled_lifecycle_write({"status": "cancelled"})
+        return True

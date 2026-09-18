@@ -10,6 +10,7 @@ from odoo.fields import Domain
 from odoo.tests import HttpCase, TransactionCase, tagged
 from odoo.tools.safe_eval import safe_eval
 
+from ..models.fee_change_request import FeeChangeRequest
 from ..models.ir_ui_menu import IrUiMenu
 
 
@@ -401,7 +402,35 @@ class TestInternalUXPassA(TransactionCase):
             fields_by_name["requestor_id"].get("string"), "Requester"
         )
         self.assertEqual(fields_by_name["due_date"].get("string"), "Due Date")
-        self.assertEqual(fields_by_name["status"].get("widget"), "badge")
+        self.assertEqual(
+            fields_by_name["status"].get("widget"),
+            "trucalc_order_status_badge",
+        )
+        self.assertEqual(
+            fields_by_name["internal_fee_change_outcome"].get(
+                "column_invisible"
+            ),
+            "True",
+        )
+        self.assertNotIn("internal_fee_change_outcome", default_fields)
+        addon_root = Path(__file__).resolve().parents[1]
+        component = (
+            addon_root / "static/src/js/order_status_badge_field.js"
+        ).read_text()
+        template = etree.parse(str(
+            addon_root / "static/src/xml/order_status_badge_field.xml"
+        ))
+        self.assertIn('_t("Fee Change Approved")', component)
+        self.assertIn('_t("Fee Change Declined")', component)
+        self.assertIn('"text-bg-success"', component)
+        self.assertIn('"text-bg-danger"', component)
+        outcome = template.xpath(
+            "//span[contains(concat(' ', normalize-space(@class), ' '), "
+            "' o_trucalc_fee_change_outcome ')]"
+        )
+        self.assertEqual(len(outcome), 1)
+        self.assertEqual(outcome[0].get("t-if"), "outcome")
+        self.assertEqual(outcome[0].get("t-esc"), "outcomeLabel")
         for decoration in (
             "decoration-info", "decoration-warning",
             "decoration-success", "decoration-danger",
@@ -604,6 +633,7 @@ class TestInternalUXPassABrowser(HttpCase):
         cls.first = cls._order("Browser First", "2000-01-01")
         cls.second = cls._order("Browser Second", "2000-01-02")
         cls.attention = cls._attention_order()
+        cls.fee_outcome = cls._fee_outcome_order()
 
     @classmethod
     def _order(cls, label, due_date):
@@ -669,19 +699,64 @@ class TestInternalUXPassABrowser(HttpCase):
         })
         return order
 
+    @classmethod
+    def _fee_outcome_order(cls):
+        state = cls.env["res.country.state"].search([
+            ("code", "=", "MS"),
+            ("country_id", "=", cls.env.ref("base.us").id),
+        ], limit=1)
+        area = cls.env["trucalc.service.area"].with_user(cls.admin).create({
+            "state_id": state.id,
+            "county": "Internal UX Fee Outcome County",
+            "service_type": "evaluation",
+            "base_fee": 200,
+        })
+        order = cls.second
+        order._controlled_lifecycle_write({
+            "status": "accepted",
+            "service_area_id": area.id,
+            "original_service_area_id": area.id,
+            "agreed_fee": 200,
+            "current_agreed_fee": 200,
+            "fee_currency_id": area.currency_id.id,
+            "fee_locked_at": fields.Datetime.now(),
+            "fee_source": "base",
+        })
+        Request = cls.env["trucalc.fee.change.request"].sudo()
+        approved = super(FeeChangeRequest, Request).create({
+            "order_id": order.id,
+            "company_id": order.company_id.id,
+            "currency_id": order.fee_currency_id.id,
+            "requester_id": cls.admin.id,
+            "requested_at": fields.Datetime.now(),
+            "prior_fee": 200,
+            "proposed_fee": 250,
+            "reason": "Internal list outcome fixture",
+            "state": "approved",
+            "decision_actor_id": cls.admin.id,
+            "decision_at": fields.Datetime.now(),
+        })
+        order._controlled_lifecycle_write({
+            "current_agreed_fee": 250,
+            "current_fee_change_request_id": approved.id,
+            "fee_workflow_revision": 1,
+        })
+        return order
+
     def test_orders_list_responsive_defaults_and_optional_columns(self):
         first_number = json.dumps(self.first.order_number)
         second_number = json.dumps(self.second.order_number)
         attention_number = json.dumps(self.attention.order_number)
+        fee_outcome_number = json.dumps(self.fee_outcome.order_number)
         code = """
             (async () => {
                 const wait = () => new Promise(resolve => setTimeout(resolve, 500));
-                const view = document.querySelector(
+                let view = document.querySelector(
                     '.o_list_view.o_trucalc_order_list'
                 );
-                const table = view && view.querySelector('.o_list_table');
+                let table = view && view.querySelector('.o_list_table');
                 if (!view || !table) throw Error('Orders list did not load');
-                const headerNodes = [...table.querySelectorAll('thead th')];
+                let headerNodes = [...table.querySelectorAll('thead th')];
                 const headers = headerNodes.map(node => node.innerText.trim()).filter(Boolean);
                 for (const label of [
                     'Order Number', 'Bank', 'Borrower', 'Property Address',
@@ -705,13 +780,19 @@ class TestInternalUXPassABrowser(HttpCase):
                 }
                 const facet = document.querySelector('.o_searchview_facet');
                 if (!facet || !facet.innerText.includes('Open Orders')) throw Error('Open Orders is not the default queue');
+                facet.querySelector('.o_facet_remove')?.click();
+                await wait();
+                view = document.querySelector('.o_list_view.o_trucalc_order_list');
+                table = view && view.querySelector('.o_list_table');
+                headerNodes = [...table.querySelectorAll('thead th')];
                 const rows = [...table.querySelectorAll('tbody tr.o_data_row')];
                 if (rows.length < 2) throw Error('Expected operational rows');
                 if (!rows[0].innerText.includes(%s) || !rows[1].innerText.includes(%s)) {
-                    throw Error('Due-date-first ordering is not visible');
+                    throw Error(`Due-date-first ordering is not visible: ${rows.map(row => row.innerText).join(' || ')}`);
                 }
                 const attentionRow = rows.find(row => row.innerText.includes(%s));
                 const ordinaryRow = rows.find(row => row.innerText.includes(%s));
+                const feeOutcomeRow = rows.find(row => row.innerText.includes(%s));
                 if (!attentionRow?.querySelector(
                     '.o_trucalc_order_number_cell .o_trucalc_order_attention'
                 )) throw Error('Attention is not beneath Order Number');
@@ -724,6 +805,23 @@ class TestInternalUXPassABrowser(HttpCase):
                 const addressCell = attentionRow?.cells[addressIndex];
                 if (!addressCell || !addressCell.innerText.includes('3 Attention Way')) {
                     throw Error('Property Address is not readable');
+                }
+                const statusIndex = headerNodes.findIndex(
+                    node => node.innerText.trim() === 'Order Status'
+                );
+                const statusCell = feeOutcomeRow?.cells[statusIndex];
+                const statusBadges = statusCell?.querySelectorAll(
+                    '.o_trucalc_order_status_cell .badge'
+                );
+                if (!statusBadges || statusBadges.length !== 2) {
+                    throw Error(`Fee Change outcome is not beneath Order Status: expected=%s; rows=${rows.map(row => row.innerText).join(' || ')}; status=${statusCell?.innerHTML}`);
+                }
+                if (statusBadges[0].innerText.trim() !== 'Accepted'
+                    || statusBadges[1].innerText.trim() !== 'Fee Change Approved') {
+                    throw Error('Fee Change outcome labels are incorrect');
+                }
+                if (getComputedStyle(statusBadges[1]).backgroundColor !== 'rgb(40, 167, 69)') {
+                    throw Error('Approved Fee Change lost success semantics');
                 }
                 if (!table.querySelector('.badge')) throw Error('Status badge missing');
                 const navbar = document.querySelector('.o_main_navbar');
@@ -782,7 +880,10 @@ class TestInternalUXPassABrowser(HttpCase):
                 }
                 console.log('test successful');
             })();
-        """ % (first_number, second_number, attention_number, second_number)
+        """ % (
+            first_number, second_number, attention_number, second_number,
+            fee_outcome_number, fee_outcome_number,
+        )
         action_url = "/odoo/action-trucalc_orders.action_trucalc_orders"
         self.browser_size = "1366x768"
         self.browser_js(

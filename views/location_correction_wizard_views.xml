@@ -29,6 +29,10 @@
                     <field name="corrected_schedule_fee"/>
                     <field name="fee_difference"/>
                     <field name="fee_result"/>
+                    <div class="alert alert-danger" invisible="fee_result != 'lower'">
+                        Lower-fee property location correction is not supported.
+                        No location or fee change will be applied.
+                    </div>
                     <field name="correction_reason"
                            placeholder="Explain why the authoritative State or County is being corrected."/>
                 </group>
@@ -36,6 +40,9 @@
                     <button name="action_confirm" type="object" string="Apply Same-Fee Correction"
                             class="btn-primary" invisible="fee_result != 'same'"
                             confirm="Apply this State/County correction without changing the current agreed fee?"/>
+                    <button name="action_confirm" type="object" string="Submit for Bank Approval"
+                            class="btn-primary" invisible="fee_result != 'higher'"
+                            confirm="Stage this State/County correction and submit the higher fee to the Bank Administrator? The current location and fee will remain unchanged until approval."/>
                     <button string="Cancel" special="cancel"/>
                 </footer>
             </form>

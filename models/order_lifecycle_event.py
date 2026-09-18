@@ -29,7 +29,9 @@ class TruCalcOrderLifecycleEvent(models.Model):
             ("bank_request_sent", "Bank Request Sent"),
             ("internal_request_submitted", "Internal Request Submitted"),
             ("pricing_locked", "Pricing Locked"),
+            ("property_location_correction_requested", "Property Location Correction Requested"),
             ("property_location_corrected", "Property Location Corrected"),
+            ("property_location_correction_fee_declined", "Property Location Correction Fee Declined"),
             ("valuation_received", "Valuation Received"),
             ("valuation_revision_requested", "Valuation Revision Requested"),
             ("valuation_revision_submitted", "Valuation Revision Submitted"),
@@ -145,6 +147,10 @@ class TruCalcOrderLifecycleEvent(models.Model):
         "res.currency", readonly=True, ondelete="restrict",
     )
     correction_reason = fields.Text(readonly=True)
+    location_correction_request_id = fields.Many2one(
+        "trucalc.location.correction.request", readonly=True, index=True,
+        ondelete="restrict",
+    )
 
     fee_change_request_id = fields.Many2one(
         "trucalc.fee.change.request", readonly=True, index=True, ondelete="restrict",
@@ -211,7 +217,11 @@ class TruCalcOrderLifecycleEvent(models.Model):
         for event in self:
             request = event.fee_change_request_id
             if not event.event_type.startswith("fee_change_"):
-                if request:
+                if request and event.event_type not in (
+                    "property_location_correction_requested",
+                    "property_location_corrected",
+                    "property_location_correction_fee_declined",
+                ):
                     raise ValidationError(_("Only fee events may reference a fee request."))
                 continue
             creation = event.event_type == "fee_change_requested"
@@ -236,7 +246,7 @@ class TruCalcOrderLifecycleEvent(models.Model):
         "correction_original_service_area", "correction_current_fee",
         "correction_schedule_fee", "correction_fee_source",
         "correction_negotiated_fee_id", "correction_currency_id",
-        "correction_reason",
+        "correction_reason", "location_correction_request_id",
     )
     def _check_location_correction_event(self):
         correction_fields = (
@@ -250,16 +260,23 @@ class TruCalcOrderLifecycleEvent(models.Model):
             "correction_schedule_fee", "correction_fee_source",
             "correction_currency_id", "correction_reason",
         )
+        correction_types = (
+            "property_location_correction_requested",
+            "property_location_corrected",
+            "property_location_correction_fee_declined",
+        )
         for event in self.sudo():
-            if event.event_type != "property_location_corrected":
+            if event.event_type not in correction_types:
                 if any(event[field_name] for field_name in correction_fields) \
-                        or event.correction_negotiated_fee_id:
+                        or event.correction_negotiated_fee_id \
+                        or event.location_correction_request_id:
                     raise ValidationError(_(
                         "Only property location correction events may contain "
                         "correction provenance."
                     ))
                 continue
             order = event.order_id
+            correction = event.location_correction_request_id
             reason = event.correction_reason or ""
             if (
                 not order
@@ -289,18 +306,96 @@ class TruCalcOrderLifecycleEvent(models.Model):
                 or len(reason) > 5000
                 or event.correction_old_service_area_id
                 == event.correction_new_service_area_id
-                or event.correction_new_service_area_id != order.service_area_id
-                or event.correction_original_service_area_id
-                != order.original_service_area_id
                 or event.correction_currency_id != order.fee_currency_id
-                or event.correction_currency_id.compare_amounts(
-                    event.correction_current_fee,
-                    event.correction_schedule_fee,
-                )
-                != 0
             ):
                 raise ValidationError(_(
                     "Property location correction event provenance is invalid."
+                ))
+            if correction:
+                expected_type = {
+                    "pending": "property_location_correction_requested",
+                    "applied": "property_location_corrected",
+                    "declined": "property_location_correction_fee_declined",
+                }[correction.state]
+                fee_request = correction.fee_change_request_id
+                expected_actor = (
+                    correction.requested_by_id
+                    if correction.state == "pending" else correction.decided_by_id
+                )
+                expected_at = (
+                    correction.requested_at
+                    if correction.state == "pending" else correction.decided_at
+                )
+                if (
+                    event.event_type != expected_type
+                    or event.actor_id != expected_actor
+                    or event.event_at != expected_at
+                    or event.company_id != correction.company_id
+                    or event.order_id != correction.order_id
+                    or event.correction_old_state_id != correction.old_state_id
+                    or event.correction_old_state != correction.old_state
+                    or event.correction_old_county != correction.old_county
+                    or event.correction_old_service_area_id
+                    != correction.old_service_area_id
+                    or event.correction_new_state_id != correction.proposed_state_id
+                    or event.correction_new_state != correction.proposed_state
+                    or event.correction_new_county != correction.proposed_county
+                    or event.correction_new_service_area_id
+                    != correction.proposed_service_area_id
+                    or event.correction_service_type != correction.service_type
+                    or event.correction_original_service_area_id
+                    != correction.original_service_area_id
+                    or event.correction_currency_id != correction.currency_id
+                    or event.correction_currency_id.compare_amounts(
+                        event.correction_current_fee,
+                        correction.prior_effective_fee,
+                    ) != 0
+                    or event.correction_currency_id.compare_amounts(
+                        event.correction_schedule_fee,
+                        correction.proposed_schedule_fee,
+                    ) != 0
+                    or event.correction_fee_source != correction.pricing_source
+                    or event.correction_negotiated_fee_id
+                    != correction.negotiated_fee_id
+                    or event.correction_reason != correction.reason
+                    or event.fee_change_request_id != fee_request
+                    or (
+                        correction.state == "pending"
+                        and (not fee_request or fee_request.state != "pending")
+                    )
+                    or (
+                        correction.state == "applied" and fee_request
+                        and fee_request.state != "approved"
+                    )
+                    or (
+                        correction.state == "declined"
+                        and (not fee_request or fee_request.state != "declined")
+                    )
+                    or (
+                        correction.state == "applied"
+                        and event.correction_new_service_area_id != order.service_area_id
+                    )
+                    or (
+                        correction.state in ("pending", "declined")
+                        and event.correction_old_service_area_id != order.service_area_id
+                    )
+                ):
+                    raise ValidationError(_(
+                        "Staged location correction event provenance is invalid."
+                    ))
+            elif (
+                event.event_type != "property_location_corrected"
+                or event.fee_change_request_id
+                or event.correction_new_service_area_id != order.service_area_id
+                or event.correction_original_service_area_id
+                != order.original_service_area_id
+                or event.correction_currency_id.compare_amounts(
+                    event.correction_current_fee,
+                    event.correction_schedule_fee,
+                ) != 0
+            ):
+                raise ValidationError(_(
+                    "Immediate location correction event provenance is invalid."
                 ))
 
     @api.model
@@ -319,7 +414,9 @@ class TruCalcOrderLifecycleEvent(models.Model):
 
     @api.model
     @api.private
-    def _log_location_correction(self, order, actor, snapshot):
+    def _log_location_correction(
+        self, order, actor, snapshot, correction_request=False,
+    ):
         old_area = self.env["trucalc.service.area"].sudo().browse(
             snapshot["old_service_area_id"]
         )
@@ -329,7 +426,7 @@ class TruCalcOrderLifecycleEvent(models.Model):
         original_area = self.env["trucalc.service.area"].sudo().browse(
             snapshot["original_service_area_id"]
         )
-        return super(TruCalcOrderLifecycleEvent, self.sudo()).create({
+        values = {
             "order_id": order.id,
             "stable_order_id": order.id,
             "company_id": order.company_id.id,
@@ -337,7 +434,10 @@ class TruCalcOrderLifecycleEvent(models.Model):
             "from_status": order.status,
             "to_status": order.status,
             "actor_id": actor.id,
-            "event_at": fields.Datetime.now(),
+            "event_at": (
+                correction_request.decided_at
+                if correction_request else fields.Datetime.now()
+            ),
             "correction_old_state_id": snapshot["old_state_id"],
             "correction_old_state": snapshot["old_state"],
             "correction_old_county": snapshot["old_county"],
@@ -359,7 +459,88 @@ class TruCalcOrderLifecycleEvent(models.Model):
             ],
             "correction_currency_id": snapshot["correction_currency_id"],
             "correction_reason": snapshot["correction_reason"],
-        })
+        }
+        if correction_request:
+            values["location_correction_request_id"] = correction_request.id
+        return super(TruCalcOrderLifecycleEvent, self.sudo()).create(values)
+
+    @api.model
+    @api.private
+    def _location_request_event_values(self, correction, fee_request, event_type):
+        actor = (
+            correction.requested_by_id
+            if event_type == "property_location_correction_requested"
+            else correction.decided_by_id
+        )
+        timestamp = (
+            correction.requested_at
+            if event_type == "property_location_correction_requested"
+            else correction.decided_at
+        )
+        return {
+            "order_id": correction.order_id.id,
+            "stable_order_id": correction.order_id.id,
+            "company_id": correction.company_id.id,
+            "event_type": event_type,
+            "from_status": correction.order_id.status,
+            "to_status": correction.order_id.status,
+            "actor_id": actor.id,
+            "event_at": timestamp,
+            "location_correction_request_id": correction.id,
+            "fee_change_request_id": fee_request.id if fee_request else False,
+            "correction_old_state_id": correction.old_state_id.id,
+            "correction_old_state": correction.old_state,
+            "correction_old_county": correction.old_county,
+            "correction_old_service_area_id": correction.old_service_area_id.id,
+            "correction_old_service_area": correction.old_service_area_id.display_name,
+            "correction_new_state_id": correction.proposed_state_id.id,
+            "correction_new_state": correction.proposed_state,
+            "correction_new_county": correction.proposed_county,
+            "correction_new_service_area_id": correction.proposed_service_area_id.id,
+            "correction_new_service_area": correction.proposed_service_area_id.display_name,
+            "correction_service_type": correction.service_type,
+            "correction_original_service_area_id": correction.original_service_area_id.id,
+            "correction_original_service_area": correction.original_service_area_id.display_name,
+            "correction_current_fee": correction.prior_effective_fee,
+            "correction_schedule_fee": correction.proposed_schedule_fee,
+            "correction_fee_source": correction.pricing_source,
+            "correction_negotiated_fee_id": correction.negotiated_fee_id.id,
+            "correction_currency_id": correction.currency_id.id,
+            "correction_reason": correction.reason,
+        }
+
+    @api.model
+    @api.private
+    def _log_location_correction_request(self, correction, fee_request):
+        values = self._location_request_event_values(
+            correction, fee_request, "property_location_correction_requested",
+        )
+        return super(TruCalcOrderLifecycleEvent, self.sudo()).create(values)
+
+    @api.model
+    @api.private
+    def _log_location_correction_decision(self, correction, fee_request):
+        event_type = (
+            "property_location_corrected"
+            if correction.state == "applied"
+            else "property_location_correction_fee_declined"
+        )
+        values = self._location_request_event_values(
+            correction, fee_request, event_type,
+        )
+        return super(TruCalcOrderLifecycleEvent, self.sudo()).create(values)
+
+    _location_correction_requested_unique = models.UniqueIndex(
+        "(location_correction_request_id) "
+        "WHERE event_type = 'property_location_correction_requested'",
+        "A location correction may have only one request event.",
+    )
+    _location_correction_terminal_unique = models.UniqueIndex(
+        "(location_correction_request_id) WHERE event_type IN "
+        "('property_location_corrected', "
+        "'property_location_correction_fee_declined')",
+        "A location correction may have only one terminal event.",
+    )
 
     _valuation_received_unique = models.UniqueIndex(
         "(order_id) WHERE event_type = 'valuation_received'",

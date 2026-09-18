@@ -610,10 +610,14 @@ class TruCalcVendorPortal(CustomerPortal):
                 "id": item.id, "current_fee": item.order_id.current_agreed_fee,
                 "requested_fee": item.proposed_fee, "reason": item.reason,
                 "requested_at": item.requested_at,
+                "location_correction": (
+                    item.location_correction_request_id._portal_snapshot()
+                    if item.location_correction_request_id else False
+                ),
             } for item in pending},
-            "can_decide_fee": request.env.user.active and request.env.user.has_group(
-                "trucalc_orders.group_bank_admin"
-            ),
+            "can_decide_fee": request.env[
+                "trucalc.fee.change.request"
+            ]._can_decide(),
             "fee_error": fee_error,
         })
         return request.render("trucalc_orders.portal_bank_orders", values)

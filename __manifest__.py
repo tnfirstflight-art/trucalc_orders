@@ -1,6 +1,6 @@
 {
     'name': 'TruCalc Orders',
-    'version': '1.25',
+    'version': '1.26',
     'author': 'TruCalc',
     'license': 'LGPL-3',
     'category': 'Services',
@@ -60,9 +60,11 @@
             'trucalc_orders/static/src/xml/inspection_phone_blur_field.xml',
             'trucalc_orders/static/src/js/many2one_autosave_field.js',
             'trucalc_orders/static/src/js/order_number_attention_field.js',
+            'trucalc_orders/static/src/js/order_status_badge_field.js',
             'trucalc_orders/static/src/scss/vendor_responses.scss',
             'trucalc_orders/static/src/scss/internal_backend.scss',
             'trucalc_orders/static/src/xml/order_number_attention_field.xml',
+            'trucalc_orders/static/src/xml/order_status_badge_field.xml',
         ],
         'web.assets_backend_lazy': [
             ('prepend', 'trucalc_orders/static/src/scss/backend_brand_variables.scss'),

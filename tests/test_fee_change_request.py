@@ -17,6 +17,9 @@ class TestFeeChangeRequest(TestPricingArchitecture):
         super().setUpClass()
         cls.bank_admin = cls._user('4e1-bank-admin', 'group_bank_admin', bank=cls.bank_a)
         cls.bank_other = cls._user('4e1-bank-other', 'group_bank_admin', bank=cls.bank_b)
+        cls.bank_other_requestor = cls._user(
+            '4e1-bank-other-requestor', 'group_bank_requestor', bank=cls.bank_b,
+        )
         cls.bank_view = cls._user('4e1-bank-view', 'group_bank_view_only', bank=cls.bank_a)
 
     def _priced(self):
@@ -117,7 +120,10 @@ class TestFeeChangeRequest(TestPricingArchitecture):
     def test_fee_bank_authorization_and_projection(self):
         order = self._priced()
         req = self._request(order)
-        for actor in (self.bank_user, self.bank_view, self.bank_other, self.vendor_user, self.admin):
+        for actor in (
+            self.bank_view, self.bank_other, self.bank_other_requestor,
+            self.vendor_user, self.admin,
+        ):
             with self.assertRaises(AccessError):
                 req.with_user(actor)._decide(order, 'approved')
         for actor in (self.bank_user, self.bank_view, self.bank_admin):
@@ -133,6 +139,64 @@ class TestFeeChangeRequest(TestPricingArchitecture):
         self.bank_admin.active = False
         with self.assertRaises(AccessError):
             req.with_user(self.bank_admin)._decide(order, 'approved')
+
+    def test_fee_requestor_may_approve_and_decline_with_actor_audit(self):
+        approved = self._priced()
+        approved_request = self._request(approved)
+        approved_request.with_user(self.bank_user)._decide(approved, 'approved')
+        self.assertEqual((approved_request.state, approved.current_agreed_fee), (
+            'approved', 650,
+        ))
+        approved_event = self.env['trucalc.order.lifecycle.event'].search([
+            ('fee_change_request_id', '=', approved_request.id),
+            ('event_type', '=', 'fee_change_approved'),
+        ])
+        self.assertEqual(approved_event.actor_id, self.bank_user)
+        with self.assertRaises(ValidationError):
+            approved_request.with_user(self.bank_user)._decide(
+                approved, 'approved',
+            )
+
+        declined = self._priced()
+        declined_request = self._request(declined)
+        declined_request.with_user(self.bank_user)._decide(
+            declined, 'declined', 'Requestor declined the increase',
+        )
+        self.assertEqual((declined_request.state, declined.current_agreed_fee), (
+            'declined', 500,
+        ))
+        declined_event = self.env['trucalc.order.lifecycle.event'].search([
+            ('fee_change_request_id', '=', declined_request.id),
+            ('event_type', '=', 'fee_change_declined'),
+        ])
+        self.assertEqual(declined_event.actor_id, self.bank_user)
+
+    def test_internal_approved_badge_uses_current_unsuperseded_fee(self):
+        order = self._priced()
+        approved = self._request(order)
+        approved.with_user(self.bank_admin)._decide(order, 'approved')
+        self.assertEqual(order.internal_fee_change_outcome, 'approved')
+
+        pending = self._request(order, 725)
+        self.assertFalse(order.internal_fee_change_outcome)
+        pending.with_user(self.bank_admin)._decide(
+            order, 'declined', 'Keep the current approved fee',
+        )
+        self.assertFalse(order.internal_fee_change_outcome)
+
+        downstream = self._priced()
+        current = self._request(downstream)
+        current.with_user(self.bank_admin)._decide(downstream, 'approved')
+        self.assertEqual(downstream.internal_fee_change_outcome, 'approved')
+        for status in (
+            'bid_requested', 'assigned', 'engaged', 'report_received',
+            'reviewer_assigned', 'under_review', 'completed',
+        ):
+            downstream._controlled_lifecycle_write({'status': status})
+            self.assertFalse(
+                downstream.internal_fee_change_outcome,
+                'Approved badge remained visible at %s' % status,
+            )
 
     def test_fee_atomicity_and_unpriced(self):
         order = self._priced()
@@ -257,22 +321,26 @@ class TestFeeChangePortal(TestBankOrderPortal):
             status_cell = row[0].xpath('./td')[5]
             self.assertEqual(status_cell.xpath('./div')[0].text_content().strip(), 'Accepted')
             self.assertEqual(status_cell.xpath('./div')[1].get('class'), 'mt-1')
+            can_decide = actor in (self.bank_requestor, self.bank_admin)
             self.assertEqual(len(status_cell.xpath('./div[2]//button')),
-                             int(actor == self.bank_admin))
-            if actor != self.bank_admin:
+                             int(can_decide))
+            if not can_decide:
                 self.assertEqual(status_cell.xpath('./div[2]')[0].text_content().strip(), 'Pending Fee Change')
             self.assertIn('o_trucalc_fee_pending', row[0].get('class', ''))
             buttons = row[0].xpath(".//button[normalize-space()='Fee Change']")
-            self.assertEqual(len(buttons), int(actor == self.bank_admin))
+            self.assertEqual(len(buttons), int(can_decide))
             modal = tree.xpath("//div[@id='fee-change-%s']" % order.id)
-            self.assertEqual(len(modal), int(actor == self.bank_admin))
-            if actor == self.bank_admin:
+            self.assertEqual(len(modal), int(can_decide))
+            if can_decide:
                 self.assertEqual(buttons[0].get('data-bs-toggle'), 'modal')
                 self.assertEqual(buttons[0].get('data-bs-target'), '#fee-change-%s' % order.id)
                 for label in ('Current Fee', 'Requested Fee', 'Reason', 'Requested Date', 'Approve', 'Decline', 'Decline Reason'):
                     self.assertIn(label, modal[0].text_content())
                 self.assertTrue(modal[0].xpath(".//textarea[@name='decline_reason'][@required][@maxlength='5000']"))
                 self.assertEqual(len(modal[0].xpath(".//input[@name='csrf_token']")), 2)
+                actions = modal[0].xpath('.//form/@action')
+                self.assertIn(url + '/fee/%s/approved' % rid, actions)
+                self.assertIn(url + '/fee/%s/declined' % rid, actions)
                 self.assertIn('&lt;script&gt;scope&lt;/script&gt;', page.text)
             else:
                 self.assertFalse(tree.xpath("//form[contains(@action, '/fee/')]"))
@@ -297,7 +365,7 @@ class TestFeeChangePortal(TestBankOrderPortal):
         self.assertFalse(foreign.xpath("//div[@id='fee-change-%s']" % order.id))
         self.assertEqual(self.url_open(url + '/documents').status_code, 404)
         self.assertEqual(self.url_open(url + '/fee/%s/approved' % rid, data={'csrf_token': self._csrf_token()}).status_code, 404)
-        self._login(self.bank_admin)
+        self._login(self.bank_requestor)
         target = url + '/fee/%s/approved' % rid
         self.assertIn(self.url_open(target).status_code, (404, 405))
         self.assertEqual(self.url_open(target, data={'csrf_token': 'bad'}).status_code, 400)

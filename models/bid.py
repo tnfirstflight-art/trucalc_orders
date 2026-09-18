@@ -435,6 +435,7 @@ class TruCalcBid(models.Model):
     def _validate_engagement_eligibility(self):
         self.ensure_one()
         order = self.order_id
+        order._require_location_correction_resolved()
         invitation = self.invitation_id
         self._validate_structure()
         if order.company_id not in self.env.user.company_ids:

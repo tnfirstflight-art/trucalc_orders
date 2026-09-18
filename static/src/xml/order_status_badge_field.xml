@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="trucalc_orders.OrderStatusBadgeField"
+       t-inherit="web.BadgeField" t-inherit-mode="primary">
+        <xpath expr="//span[@t-esc='formattedValue']" position="replace">
+            <div class="o_trucalc_order_status_cell d-flex flex-column align-items-start">
+                <span t-if="props.record.data[props.name]"
+                      class="badge rounded-pill" t-att-class="badgeClass"
+                      t-esc="formattedValue"/>
+                <span t-if="outcome"
+                      class="o_trucalc_fee_change_outcome badge rounded-pill mt-1"
+                      t-att-class="outcomeBadgeClass" t-esc="outcomeLabel"/>
+            </div>
+        </xpath>
+    </t>
+</templates>

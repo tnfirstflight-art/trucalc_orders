@@ -43,8 +43,8 @@ class LocationCorrectionWizard(models.TransientModel):
     fee_difference = fields.Monetary(readonly=True)
     fee_result = fields.Selection([
         ("same", "Same Fee"),
-        ("higher", "Higher Fee — Location Correction B Required"),
-        ("lower", "Lower Fee — Location Correction B Required"),
+        ("higher", "Higher Fee — Bank Approval Required"),
+        ("lower", "Lower Fee — Not Supported"),
     ], readonly=True, string="Fee Result")
     correction_reason = fields.Text(required=True, string="Correction Reason")
     available_state_ids = fields.Many2many(
@@ -121,39 +121,40 @@ class LocationCorrectionWizard(models.TransientModel):
         if not self.order_id or not self.corrected_state_id or not county_area:
             return
         try:
-            area, _county = self.order_id._resolve_service_area(
+            resolution = self.order_id._resolve_location_correction_pricing(
                 self.corrected_state_id, county_area.county,
-                self.order_id.service_type,
-            )
-            pricing = self.order_id._resolve_bank_fee(
-                self.order_id.company_id, area,
             )
         except ValidationError:
             return
-        currency = self.order_id.fee_currency_id
-        if pricing["fee_currency_id"] != currency.id:
-            return
-        comparison = currency.compare_amounts(
-            pricing["agreed_fee"], self.order_id.current_agreed_fee,
-        )
-        self.corrected_service_area_id = area
-        self.corrected_schedule_fee = pricing["agreed_fee"]
-        self.fee_difference = currency.round(
-            pricing["agreed_fee"] - self.order_id.current_agreed_fee
-        )
-        self.fee_result = "same" if comparison == 0 else (
-            "higher" if comparison > 0 else "lower"
-        )
+        self.corrected_service_area_id = resolution["area"]
+        self.corrected_schedule_fee = resolution["pricing"]["agreed_fee"]
+        self.fee_difference = resolution["difference"]
+        self.fee_result = resolution["direction"]
 
     def action_confirm(self):
         self.ensure_one()
         county_area = self.corrected_county_area_id
         if not county_area:
             raise ValidationError(_("Select a corrected County."))
-        self.order_id._apply_same_fee_location_correction(
-            self.corrected_state_id,
-            county_area.county,
-            self.correction_reason,
-            self.current_service_area_id.id,
+        resolution = self.order_id._resolve_location_correction_pricing(
+            self.corrected_state_id, county_area.county,
         )
+        if resolution["direction"] == "same":
+            self.order_id._apply_same_fee_location_correction(
+                self.corrected_state_id,
+                county_area.county,
+                self.correction_reason,
+                self.current_service_area_id.id,
+            )
+        elif resolution["direction"] == "higher":
+            self.order_id._stage_higher_fee_location_correction(
+                self.corrected_state_id,
+                county_area.county,
+                self.correction_reason,
+                self.current_service_area_id.id,
+            )
+        else:
+            raise ValidationError(_(
+                "Lower-fee property location correction is not supported."
+            ))
         return {"type": "ir.actions.act_window_close"}

@@ -426,6 +426,7 @@ class TestPricingArchitecture(TransactionCase):
             [
                 ("action_open_location_correction_wizard",
                  "Correct Service Area / Property Location"),
+                ("action_cancelled", "Cancel Order"),
                 ("action_open_fee_change_wizard", "Request Fee Change"),
                 (None, "Save Draft"),
                 ("action_submit_internal_draft", "Submit"),

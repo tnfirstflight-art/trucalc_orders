@@ -19,7 +19,9 @@
                 <field name="property_address" string="Property Address"/>
                 <field name="service_type" string="Service Type"/>
                 <field name="due_date" string="Due Date" options="{'numeric': True}"/>
-                <field name="status" string="Order Status" widget="badge"
+                <field name="internal_fee_change_outcome" column_invisible="True"
+                       groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer"/>
+                <field name="status" string="Order Status" widget="trucalc_order_status_badge"
                        decoration-info="status in ('bid_requested', 'assigned', 'engaged', 'under_review')"
                        decoration-warning="status in ('new', 'report_received', 'reviewer_assigned')"
                        decoration-success="status == 'completed'"
@@ -56,6 +58,14 @@
                             class="btn-secondary"
                             groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
                             invisible="not can_correct_property_location"/>
+                    <field name="location_correction_pending" invisible="1"/>
+                    <field name="location_correction_blocked" invisible="1"/>
+                    <button name="action_cancelled" type="object"
+                            string="Cancel Order"
+                            class="btn-secondary"
+                            groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                            invisible="not location_correction_blocked or location_correction_pending or status != 'accepted'"
+                            confirm="Cancel this Order after the declined location correction?"/>
                     <field name="can_request_fee_change" invisible="1"/>
                     <button name="action_open_fee_change_wizard" type="object" string="Request Fee Change"
                             groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
@@ -187,6 +197,25 @@
                         </h1>
                     </div>
 
+                    <field name="location_correction_pending" invisible="1"/>
+                    <field name="location_correction_blocked" invisible="1"/>
+                    <field name="current_location_correction_request_id" invisible="1"
+                           groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
+                    <div class="alert alert-warning"
+                         groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                         invisible="not location_correction_pending">
+                        <strong>Pending Location Correction:</strong>
+                        The current location and fee remain authoritative until the linked
+                        Bank Fee Change is approved. Vendor processing is blocked.
+                    </div>
+                    <div class="alert alert-danger"
+                         groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                         invisible="not location_correction_blocked or location_correction_pending">
+                        <strong>Location Correction Declined:</strong>
+                        The current location remains unchanged and Vendor processing is blocked.
+                        Submit another correction or cancel the Order.
+                    </div>
+
                     <div class="alert alert-danger d-flex align-items-center gap-2"
                          role="alert"
                          groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
@@ -292,6 +321,26 @@
                         <field name="negotiated_fee_id" readonly="1"
                                invisible="fee_source != 'negotiated'"/>
                         <field name="fee_locked_at" readonly="1"/>
+                    </group>
+
+                    <group string="Location Correction History"
+                           groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                           invisible="not location_correction_request_ids">
+                        <field name="location_correction_request_ids" nolabel="1" readonly="1">
+                            <list create="0" edit="0" delete="0">
+                                <field name="state"/>
+                                <field name="old_state" string="Current State"/>
+                                <field name="old_county" string="Current County"/>
+                                <field name="proposed_state"/>
+                                <field name="proposed_county"/>
+                                <field name="proposed_service_area_id"/>
+                                <field name="currency_id" column_invisible="True"/>
+                                <field name="prior_effective_fee"/>
+                                <field name="proposed_schedule_fee"/>
+                                <field name="reason"/>
+                                <field name="fee_change_request_id"/>
+                            </list>
+                        </field>
                     </group>
 
                     <group string="Bank Invoice" invisible="not bank_invoice_ids"
