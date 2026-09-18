@@ -342,7 +342,7 @@ class TestInternalUXPassA(TransactionCase):
         base_domain = literal_eval(action.domain)
         open_domain = self._filter_domain("open_orders")
         expected_open = {
-            "new", "bid_requested", "assigned", "engaged",
+            "new", "accepted", "bid_requested", "assigned", "engaged",
             "report_received", "reviewer_assigned", "under_review",
         }
         self.assertEqual(set(open_domain[0][2]), expected_open)
@@ -350,19 +350,41 @@ class TestInternalUXPassA(TransactionCase):
         today = fields.Date.today()
         early = self._order("Early", "engaged", today + timedelta(days=1))
         later = self._order("Later", "new", today + timedelta(days=3))
+        open_orders = {
+            status: self._order(
+                "Open %s" % status,
+                status,
+                today + timedelta(days=index + 4),
+            )
+            for index, status in enumerate(sorted(expected_open))
+        }
         terminal = [
             self._order("Terminal %s" % status, status, today + timedelta(days=2))
             for status in ("completed", "cancelled", "declined")
         ]
+        internal_draft = self.env["trucalc.order"].with_user(
+            self.admin
+        ).with_context(
+            default_status="draft", trucalc_internal_draft_intake=True,
+        ).create({})
         model = self.env["trucalc.order"].with_user(self.admin)
         queue = model.search(
             Domain.AND([base_domain, open_domain]),
             order="due_date asc, order_number asc",
         )
         self.assertLess(queue.ids.index(early.id), queue.ids.index(later.id))
+        self.assertTrue(all(order in queue for order in open_orders.values()))
         self.assertFalse(any(order in queue for order in terminal))
+        self.assertNotIn(internal_draft, queue)
         all_orders = model.search(base_domain)
         self.assertTrue(all(order in all_orders for order in terminal))
+        self.assertIn(internal_draft, all_orders)
+        completed = model.search(
+            Domain.AND([base_domain, self._filter_domain("completed")])
+        )
+        self.assertIn(terminal[0], completed)
+        self.assertNotIn(terminal[1], completed)
+        self.assertNotIn(terminal[2], completed)
 
         list_arch = etree.fromstring(self.env.ref(
             "trucalc_orders.view_trucalc_order_list"
@@ -780,6 +802,10 @@ class TestInternalUXPassABrowser(HttpCase):
                 }
                 const facet = document.querySelector('.o_searchview_facet');
                 if (!facet || !facet.innerText.includes('Open Orders')) throw Error('Open Orders is not the default queue');
+                const defaultRows = [...table.querySelectorAll('tbody tr.o_data_row')];
+                if (!defaultRows.some(row => row.innerText.includes(%s))) {
+                    throw Error('Accepted Order with Fee Change Approved badge is missing from Open Orders');
+                }
                 facet.querySelector('.o_facet_remove')?.click();
                 await wait();
                 view = document.querySelector('.o_list_view.o_trucalc_order_list');
@@ -881,6 +907,7 @@ class TestInternalUXPassABrowser(HttpCase):
                 console.log('test successful');
             })();
         """ % (
+            fee_outcome_number,
             first_number, second_number, attention_number, second_number,
             fee_outcome_number, fee_outcome_number,
         )

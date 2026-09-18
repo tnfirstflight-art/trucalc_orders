@@ -571,7 +571,7 @@
                 <field name="status"/>
                 <separator/>
                 <filter name="open_orders" string="Open Orders"
-                        domain="[('status', 'in', ('new', 'bid_requested', 'assigned', 'engaged', 'report_received', 'reviewer_assigned', 'under_review'))]"/>
+                        domain="[('status', 'in', ('new', 'accepted', 'bid_requested', 'assigned', 'engaged', 'report_received', 'reviewer_assigned', 'under_review'))]"/>
                 <filter name="intake" string="Intake" domain="[('status', '=', 'new')]"/>
                 <filter name="bidding" string="Bidding" domain="[('status', '=', 'bid_requested')]"/>
                 <filter name="assigned_engaged" string="Assigned / Engaged"
