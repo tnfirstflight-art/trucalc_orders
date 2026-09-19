@@ -8,6 +8,7 @@
                 <group>
                     <field name="order_id"/>
                     <field name="reviewer_user_id"/>
+                    <field name="review_due_date" options="{'numeric': True}"/>
                     <field name="reason" required="order_id.status != 'report_received'"
                            invisible="order_id.status == 'report_received'"/>
                 </group>

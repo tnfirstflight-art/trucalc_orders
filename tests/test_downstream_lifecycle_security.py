@@ -1,6 +1,6 @@
 from odoo import Command, fields
 from odoo.exceptions import AccessError, ValidationError
-from odoo.tests import TransactionCase, tagged
+from odoo.tests import Form, TransactionCase, tagged
 from lxml import etree
 
 
@@ -93,7 +93,9 @@ class TestDownstreamLifecycleSecurity(TransactionCase):
 
     def test_assignment_is_exact_state_locked_and_creates_one_event(self):
         order = self._ready_for_assignment()
-        self.assertTrue(order.with_user(self.ops).action_assign_reviewer())
+        self.assertTrue(order.with_user(self.ops).action_assign_reviewer(
+            review_due_date=fields.Date.add(fields.Date.today(), days=5),
+        ))
         event = self.env["trucalc.order.lifecycle.event"].search([
             ("order_id", "=", order.id),
         ])
@@ -111,7 +113,9 @@ class TestDownstreamLifecycleSecurity(TransactionCase):
         self.assertFalse(event.reviewer_id)
         self.assertEqual(event.reviewer_user_id, self.reviewer)
         with self.assertRaises(ValidationError):
-            order.with_user(self.ops).action_assign_reviewer()
+            order.with_user(self.ops).action_assign_reviewer(
+                review_due_date=fields.Date.add(fields.Date.today(), days=5),
+            )
         self.assertEqual(len(order.lifecycle_event_ids), 1)
 
     def test_internal_assignment_clears_stale_external_review_values(self):
@@ -120,7 +124,9 @@ class TestDownstreamLifecycleSecurity(TransactionCase):
             "reviewer_id": self.vendor.id,
             "review_fee": 250.0,
         })
-        order.with_user(self.admin).action_assign_reviewer()
+        order.with_user(self.admin).action_assign_reviewer(
+            review_due_date=fields.Date.add(fields.Date.today(), days=5),
+        )
         event = order.lifecycle_event_ids
         self.assertFalse(order.reviewer_id)
         self.assertEqual(order.review_fee, 0.0)
@@ -131,7 +137,9 @@ class TestDownstreamLifecycleSecurity(TransactionCase):
         first = self._ready_for_assignment()
         second = self._ready_for_assignment()
         with self.assertRaises(ValueError):
-            (first | second).with_user(self.admin).action_assign_reviewer()
+            (first | second).with_user(self.admin).action_assign_reviewer(
+                review_due_date=fields.Date.add(fields.Date.today(), days=5),
+            )
         self.assertEqual((first.status, second.status), (
             "report_received", "report_received",
         ))
@@ -141,7 +149,9 @@ class TestDownstreamLifecycleSecurity(TransactionCase):
         for user in (self.reviewer, self.bank_admin, self.vendor_user):
             order = self._ready_for_assignment()
             with self.assertRaises(AccessError):
-                order.with_user(user).action_assign_reviewer()
+                order.with_user(user).action_assign_reviewer(
+                    review_due_date=fields.Date.add(fields.Date.today(), days=5),
+                )
             self.assertEqual(order.status, "report_received")
             self.assertFalse(order.lifecycle_event_ids)
 
@@ -164,7 +174,9 @@ class TestDownstreamLifecycleSecurity(TransactionCase):
         order.with_user(self.admin)._controlled_lifecycle_write({
             "status": "report_received",
         })
-        order.with_user(self.admin).action_assign_reviewer()
+        order.with_user(self.admin).action_assign_reviewer(
+            review_due_date=fields.Date.add(fields.Date.today(), days=5),
+        )
         self.assertEqual(order.reviewer_user_id, self.cross_company_reviewer)
         self.assertEqual(order.status, "reviewer_assigned")
         self.assertNotIn(order.company_id, self.cross_company_reviewer.company_ids)
@@ -215,9 +227,13 @@ class TestDownstreamLifecycleSecurity(TransactionCase):
 
     def test_reviewer_reads_only_own_eligible_status_orders(self):
         assigned = self._ready_for_assignment(self.cross_company_reviewer)
-        assigned.with_user(self.admin).action_assign_reviewer()
+        assigned.with_user(self.admin).action_assign_reviewer(
+            review_due_date=fields.Date.add(fields.Date.today(), days=5),
+        )
         unassigned = self._ready_for_assignment(self.other_reviewer)
-        unassigned.with_user(self.admin).action_assign_reviewer()
+        unassigned.with_user(self.admin).action_assign_reviewer(
+            review_due_date=fields.Date.add(fields.Date.today(), days=5),
+        )
         new_order = self._order()
         reviewer_model = self.env["trucalc.order"].with_user(
             self.cross_company_reviewer
@@ -230,6 +246,38 @@ class TestDownstreamLifecycleSecurity(TransactionCase):
         self.assertFalse(
             assigned.with_user(self.cross_company_reviewer).has_access("write")
         )
+
+    def test_cross_company_reviewer_opens_detail_and_safe_profiles_only(self):
+        assigned = self._ready_for_assignment(self.cross_company_reviewer)
+        assigned.with_user(self.admin).action_assign_reviewer(
+            review_due_date=fields.Date.add(fields.Date.today(), days=5),
+        )
+        reviewer_order = assigned.with_user(self.cross_company_reviewer)
+
+        with Form(reviewer_order) as order_form:
+            self.assertEqual(order_form.borrower, "4D Borrower")
+        self.assertFalse(reviewer_order.available_internal_bank_ids)
+
+        bank_action = reviewer_order.action_open_bank_profile()
+        requestor_action = reviewer_order.action_open_requestor_profile()
+        for action, view_xmlid in (
+            (bank_action, "view_trucalc_order_bank_profile_form"),
+            (requestor_action, "view_trucalc_order_requestor_profile_form"),
+        ):
+            self.assertEqual(action["res_model"], "trucalc.order")
+            self.assertEqual(action["res_id"], assigned.id)
+            self.assertEqual(action["target"], "new")
+            self.assertEqual(
+                action["view_id"],
+                self.env.ref("trucalc_orders.%s" % view_xmlid).id,
+            )
+
+        self.assertEqual(reviewer_order.bank_profile_name, self.company.name)
+        self.assertEqual(
+            reviewer_order.requestor_profile_name, assigned.requestor_id.name,
+        )
+        with self.assertRaises(AccessError):
+            self.bank.with_user(self.cross_company_reviewer).read(["name"])
 
     def test_reviewer_home_action_and_restricted_application_shell(self):
         home_action = self.env.ref("trucalc_orders.action_trucalc_orders")
@@ -319,7 +367,9 @@ class TestDownstreamLifecycleSecurity(TransactionCase):
 
     def test_reviewer_collaborates_on_assigned_order_without_record_write_access(self):
         order = self._ready_for_assignment()
-        order.with_user(self.admin).action_assign_reviewer()
+        order.with_user(self.admin).action_assign_reviewer(
+            review_due_date=fields.Date.add(fields.Date.today(), days=5),
+        )
         reviewer_order = order.with_user(self.reviewer)
 
         self.assertEqual(
@@ -374,10 +424,13 @@ class TestDownstreamLifecycleSecurity(TransactionCase):
 
     def test_reassignment_transfers_reviewer_visibility(self):
         order = self._ready_for_assignment()
-        order.with_user(self.admin).action_assign_reviewer()
+        order.with_user(self.admin).action_assign_reviewer(
+            review_due_date=fields.Date.add(fields.Date.today(), days=5),
+        )
         self.assertTrue(order.with_user(self.reviewer).has_access("read"))
         order.with_user(self.admin).action_reassign_reviewer(
             self.other_reviewer, "Coverage transfer",
+            fields.Date.add(fields.Date.today(), days=6),
         )
         self.assertFalse(order.with_user(self.reviewer).has_access("read"))
         self.assertTrue(order.with_user(self.other_reviewer).has_access("read"))
@@ -401,7 +454,9 @@ class TestDownstreamLifecycleSecurity(TransactionCase):
 
     def test_lifecycle_events_are_immutable_and_internal_only(self):
         order = self._ready_for_assignment()
-        order.with_user(self.admin).action_assign_reviewer()
+        order.with_user(self.admin).action_assign_reviewer(
+            review_due_date=fields.Date.add(fields.Date.today(), days=5),
+        )
         event = self.env["trucalc.order.lifecycle.event"].search([
             ("order_id", "=", order.id),
         ])
@@ -559,7 +614,9 @@ class TestDownstreamLifecycleSecurity(TransactionCase):
         order.with_user(self.admin)._controlled_lifecycle_write({
             "status": "report_received",
         })
-        order.with_user(self.admin).action_assign_reviewer()
+        order.with_user(self.admin).action_assign_reviewer(
+            review_due_date=fields.Date.add(fields.Date.today(), days=5),
+        )
         event = self.env["trucalc.order.lifecycle.event"].search([
             ("order_id", "=", order.id),
         ])

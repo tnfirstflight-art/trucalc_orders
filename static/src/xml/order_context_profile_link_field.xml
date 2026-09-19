@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="trucalc_orders.OrderContextProfileLinkField">
+        <button t-if="canOpenProfile" type="button"
+                class="o_trucalc_context_profile_link btn btn-link p-0 border-0 text-start"
+                t-on-click="openProfile" t-esc="displayName"/>
+        <span t-elif="props.readonly" t-esc="displayName"/>
+        <Many2OneField t-else="" t-props="many2OneProps"/>
+    </t>
+</templates>

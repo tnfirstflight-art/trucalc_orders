@@ -55,7 +55,7 @@ class TestOrderCompletion(TestControlledValuationReview):
         arch = etree.fromstring(self.env.ref(view).arch)
         self.assertEqual(
             arch.xpath(
-                "//group[@string='Order / Request Information']/field[@name='company_id']"
+                "//group[@string='Order / Request Info']/field[@name='company_id']"
             )[0].get("readonly"),
             "fee_locked_at or (create_date and not is_internal_draft)",
         )
@@ -261,7 +261,10 @@ class TestOrderCompletion(TestControlledValuationReview):
             lambda: order.with_user(self.reviewer).action_start_review(),
             lambda: order.with_user(self.reviewer).action_request_valuation_revision(valuation, "Late"),
             lambda: order.with_user(self.reviewer).action_approve_valuation(valuation),
-            lambda: order.with_user(self.admin).action_reassign_reviewer(self.other_reviewer, "Late"),
+            lambda: order.with_user(self.admin).action_reassign_reviewer(
+                self.other_reviewer, "Late",
+                fields.Date.add(fields.Date.today(), days=5),
+            ),
         ):
             with self.assertRaises(ValidationError):
                 operation()

@@ -149,7 +149,7 @@ class TestOrderIntake(TransactionCase):
             self.env.ref("trucalc_orders.view_trucalc_order_form").arch
         )
         property_group = arch.xpath(
-            "//group[@string='Property / Service Details']"
+            "//group[@string='Property / Service']"
         )[0]
         self.assertFalse(property_group.xpath("./group"))
         self.assertEqual(
@@ -202,7 +202,7 @@ class TestOrderIntake(TransactionCase):
             self.env.ref("trucalc_orders.view_trucalc_order_form").arch
         )
         company_field = arch.xpath(
-            "//group[@string='Order / Request Information']/field[@name='company_id']"
+            "//group[@string='Order / Request Info']/field[@name='company_id']"
         )
         self.assertEqual(len(company_field), 1)
         self.assertEqual(
@@ -329,7 +329,9 @@ class TestOrderIntake(TransactionCase):
         with self.assertRaises(AccessError):
             order.action_report_received()
         with self.assertRaises(ValidationError):
-            order.action_assign_reviewer()
+            order.action_assign_reviewer(
+                review_due_date=fields.Date.add(fields.Date.today(), days=5),
+            )
         with self.assertRaises(AccessError):
             order.action_start_review()
         with self.assertRaises(AccessError):

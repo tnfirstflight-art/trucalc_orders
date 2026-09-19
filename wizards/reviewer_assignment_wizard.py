@@ -13,16 +13,19 @@ class TruCalcReviewerAssignmentWizard(models.TransientModel):
         "res.users", string="Reviewer", required=True,
         domain="[('active', '=', True), ('share', '=', False)]",
     )
+    review_due_date = fields.Date(string="Review Due Date", required=True)
     reason = fields.Text(string="Reason for Reassignment")
 
     def action_confirm(self):
         self.ensure_one()
         if self.order_id.status == "report_received":
-            self.order_id.action_assign_reviewer(self.reviewer_user_id)
+            self.order_id.action_assign_reviewer(
+                self.reviewer_user_id, self.review_due_date,
+            )
         else:
             if not self.reason or not self.reason.strip():
                 raise ValidationError(_("A reassignment reason is required."))
             self.order_id.action_reassign_reviewer(
-                self.reviewer_user_id, self.reason,
+                self.reviewer_user_id, self.reason, self.review_due_date,
             )
         return {"type": "ir.actions.act_window_close"}

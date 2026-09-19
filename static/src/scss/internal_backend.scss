@@ -15,3 +15,137 @@
     font-size: .72rem;
     white-space: nowrap;
 }
+
+.o_trucalc_order_form {
+    > .o_form_view_container > .o_control_panel {
+        display: none !important;
+    }
+
+    .o_form_statusbar {
+        position: sticky;
+        top: 0;
+        z-index: $zindex-sticky;
+        flex-wrap: wrap;
+        gap: .35rem .75rem;
+        padding-bottom: .4rem !important;
+        background: $body-bg;
+    }
+
+    .o_statusbar_buttons {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    .o_trucalc_order_identity {
+        display: flex;
+        flex: 1 0 100%;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: .4rem;
+        margin: 0 0 .15rem;
+        padding: .15rem 0 .45rem;
+        border-bottom: 1px solid $o-gray-300;
+        background: $o-view-background-color;
+        font-size: 1rem;
+        font-weight: 600;
+    }
+
+    .o_trucalc_identity_separator {
+        color: $o-gray-500;
+    }
+
+    .o_trucalc_request_details > div > .o_group {
+        height: 100%;
+        margin-bottom: 0;
+    }
+
+    .o_trucalc_context_profile_link {
+        min-height: 0;
+        color: $o-brand-primary;
+        font: inherit;
+        line-height: inherit;
+        text-decoration: underline;
+        text-underline-offset: .12em;
+    }
+
+    .o_notebook .nav-tabs .nav-link {
+        color: $o-gray-700;
+
+        &.active {
+            border-color: $o-gray-300 $o-gray-300 $o-brand-primary;
+            border-bottom-width: .2rem;
+            background-color: rgba($o-brand-primary, .1);
+            color: $o-brand-primary;
+            font-weight: 600;
+        }
+    }
+
+    .o_trucalc_deliverable_head,
+    .o_trucalc_deliverable_row {
+        grid-template-columns: minmax(7rem, .8fr) minmax(10rem, 2fr) minmax(8rem, 1fr) minmax(6rem, .8fr) minmax(4rem, .5fr);
+        align-items: center;
+        gap: .5rem;
+        padding: .35rem .5rem;
+    }
+
+    .o_trucalc_deliverable_head {
+        display: grid;
+        border-bottom: 1px solid $o-gray-300;
+        color: $o-gray-600;
+        font-size: .8rem;
+    }
+
+    .o_trucalc_deliverable_row {
+        display: grid;
+        min-height: 2.25rem;
+        border-bottom: 1px solid $o-gray-200;
+    }
+
+    .o_trucalc_deliverable_row .o_field_widget {
+        min-width: 0;
+        margin-bottom: 0;
+    }
+}
+
+.o_dialog:has(.o_trucalc_readonly_profile) > .modal > .modal-dialog {
+    width: calc(100% - 2rem);
+    max-width: 32rem;
+    margin-right: auto;
+    margin-left: auto;
+
+    .modal-content,
+    .modal-body,
+    .o_trucalc_readonly_profile {
+        min-width: 0;
+    }
+
+    .o_field_widget {
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+}
+
+@media (max-width: 767.98px) {
+    .o_trucalc_order_form {
+        .o_trucalc_order_identity {
+            align-items: flex-start;
+            font-size: .9rem;
+        }
+
+        .o_trucalc_identity_separator {
+            display: none;
+        }
+
+        .o_trucalc_identity_value {
+            flex: 0 0 100%;
+        }
+
+        .o_trucalc_deliverable_row {
+            grid-template-columns: minmax(6rem, .7fr) minmax(10rem, 1.3fr);
+        }
+
+        .o_trucalc_deliverable_row > :nth-child(n + 3) {
+            font-size: .8rem;
+        }
+    }
+}

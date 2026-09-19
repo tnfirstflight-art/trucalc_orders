@@ -71,6 +71,12 @@ class EvaluationOrder(models.Model):
         tracking=True,
     )
 
+    property_address_summary = fields.Char(
+        string="Property Address Summary",
+        compute="_compute_property_address_summary",
+        readonly=True,
+    )
+
     city = fields.Char(
         string="City",
     )
@@ -87,6 +93,14 @@ class EvaluationOrder(models.Model):
         string="County",
         tracking=True,
     )
+
+    @api.depends("property_address", "city", "state", "zip_code")
+    def _compute_property_address_summary(self):
+        for order in self:
+            locality = " ".join(filter(None, (order.state, order.zip_code)))
+            order.property_address_summary = ", ".join(filter(None, (
+                order.property_address, order.city, locality,
+            )))
 
     service_area_id = fields.Many2one(
         "trucalc.service.area",
@@ -723,6 +737,47 @@ class EvaluationOrder(models.Model):
         tracking=True,
     )
 
+    bank_profile_name = fields.Char(
+        string="Bank Name", compute="_compute_order_context_profiles",
+        compute_sudo=True, readonly=True,
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer",
+    )
+    bank_profile_state = fields.Char(
+        string="Status", compute="_compute_order_context_profiles",
+        compute_sudo=True, readonly=True,
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer",
+    )
+    bank_profile_email = fields.Char(
+        string="Email", compute="_compute_order_context_profiles",
+        compute_sudo=True, readonly=True,
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer",
+    )
+    bank_profile_phone = fields.Char(
+        string="Phone", compute="_compute_order_context_profiles",
+        compute_sudo=True, readonly=True,
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer",
+    )
+    requestor_profile_name = fields.Char(
+        string="Name", compute="_compute_order_context_profiles",
+        compute_sudo=True, readonly=True,
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer",
+    )
+    requestor_profile_bank = fields.Char(
+        string="Bank", compute="_compute_order_context_profiles",
+        compute_sudo=True, readonly=True,
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer",
+    )
+    requestor_profile_email = fields.Char(
+        string="Email", compute="_compute_order_context_profiles",
+        compute_sudo=True, readonly=True,
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer",
+    )
+    requestor_profile_phone = fields.Char(
+        string="Phone", compute="_compute_order_context_profiles",
+        compute_sudo=True, readonly=True,
+        groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer",
+    )
+
     loan_number = fields.Char(
         string="Loan Number",
         tracking=True,
@@ -760,13 +815,81 @@ class EvaluationOrder(models.Model):
             order.available_pricing_county_area_ids = county_representatives
             order.available_pricing_service_area_ids = service_areas
 
-    @api.depends("requestor_company_id")
+    @api.depends("requestor_company_id", "status", "requestor_id")
     def _compute_available_internal_banks(self):
-        allowed = self.env.user.company_ids.filtered(
-            lambda company: company.trucalc_is_bank and company.trucalc_bank_active
-        )
         for order in self:
-            order.available_internal_bank_ids = allowed - order.requestor_company_id
+            # This selector exists only for internal draft intake.  Evaluating it
+            # on a saved reviewer Order needlessly traversed companies outside
+            # the reviewer's company rules and prevented the form from opening.
+            if order.id and not order.is_internal_draft:
+                order.available_internal_bank_ids = False
+                continue
+            allowed = self.env.user.company_ids.filtered(
+                lambda company: (
+                    company.trucalc_is_bank and company.trucalc_bank_active
+                )
+            )
+            requestor_company_id = order.requestor_company_id.id
+            order.available_internal_bank_ids = allowed.filtered(
+                lambda company: company.id != requestor_company_id
+            )
+
+    @api.depends(
+        "company_id", "company_id.name", "company_id.trucalc_bank_active",
+        "company_id.email", "company_id.phone", "requestor_id",
+        "requestor_id.name", "requestor_id.email", "requestor_id.phone",
+        "requestor_company_id", "requestor_company_id.name",
+    )
+    def _compute_order_context_profiles(self):
+        """Expose only the two identities already authoritative on this Order."""
+        for order in self:
+            bank = order.company_id
+            requestor = order.requestor_id
+            requestor_bank = order.requestor_company_id or bank
+            order.bank_profile_name = bank.name or False
+            order.bank_profile_state = (
+                _("Active") if bank.trucalc_bank_active else _("Inactive")
+            ) if bank else False
+            order.bank_profile_email = bank.email or False
+            order.bank_profile_phone = bank.phone or False
+            order.requestor_profile_name = requestor.name or False
+            order.requestor_profile_bank = requestor_bank.name or False
+            order.requestor_profile_email = requestor.email or False
+            order.requestor_profile_phone = requestor.phone or False
+
+    def _order_context_profile_action(self, xmlid, title):
+        self.ensure_one()
+        if not any(self.env.user.has_group(group) for group in (
+            "trucalc_orders.group_trucalc_admin",
+            "trucalc_orders.group_trucalc_operations",
+            "trucalc_orders.group_trucalc_reviewer",
+        )):
+            raise AccessError(_("You cannot view this Order profile."))
+        self.check_access("read")
+        view = self.env.ref(xmlid)
+        return {
+            "type": "ir.actions.act_window",
+            "name": title,
+            "res_model": self._name,
+            "view_mode": "form",
+            "views": [(view.id, "form")],
+            "view_id": view.id,
+            "res_id": self.id,
+            "target": "new",
+            "context": {"create": False},
+        }
+
+    def action_open_bank_profile(self):
+        return self._order_context_profile_action(
+            "trucalc_orders.view_trucalc_order_bank_profile_form",
+            _("Bank Details"),
+        )
+
+    def action_open_requestor_profile(self):
+        return self._order_context_profile_action(
+            "trucalc_orders.view_trucalc_order_requestor_profile_form",
+            _("Requestor Details"),
+        )
 
     @api.depends("status", "requestor_id")
     def _compute_is_internal_draft(self):
@@ -866,6 +989,21 @@ class EvaluationOrder(models.Model):
         string="Vendor Fee",
         tracking=True,
     )
+
+    trucalc_fee = fields.Monetary(
+        string="TruCalc Fee",
+        currency_field="fee_currency_id",
+        compute="_compute_trucalc_fee",
+        readonly=True,
+        help="Current client fee less the current Vendor fee.",
+    )
+
+    @api.depends("current_agreed_fee", "vendor_fee")
+    def _compute_trucalc_fee(self):
+        for order in self:
+            order.trucalc_fee = (
+                (order.current_agreed_fee or 0.0) - (order.vendor_fee or 0.0)
+            )
 
     bidding_round = fields.Integer(
         string="Bidding Round",
@@ -1069,6 +1207,27 @@ class EvaluationOrder(models.Model):
         tracking=True,
         domain="[('active', '=', True), ('share', '=', False)]",
     )
+    review_due_date = fields.Date(
+        string="Review Due Date",
+        copy=False,
+        tracking=True,
+    )
+    reviewer_assigned_at = fields.Datetime(
+        string="Date Assigned",
+        compute="_compute_reviewer_assigned_at",
+        compute_sudo=True,
+        readonly=True,
+    )
+    review_action = fields.Selection(
+        [
+            ("accepted", "Accepted"),
+            ("accepted_revised", "Accepted as Revised"),
+        ],
+        string="Review Action",
+        compute="_compute_vendor_deliverables",
+        compute_sudo=True,
+        readonly=True,
+    )
     valuation_approved = fields.Boolean(
         compute="_compute_vendor_deliverables", compute_sudo=True, readonly=True,
         groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer",
@@ -1155,6 +1314,28 @@ class EvaluationOrder(models.Model):
         groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations",
     )
 
+    @api.depends(
+        "reviewer_user_id", "lifecycle_event_ids.event_type",
+        "lifecycle_event_ids.event_at", "lifecycle_event_ids.reviewer_user_id",
+    )
+    def _compute_reviewer_assigned_at(self):
+        Event = self.env["trucalc.order.lifecycle.event"].sudo()
+        assigned_by_order = {}
+        if self.ids:
+            events = Event.search([
+                ("order_id", "in", self.ids),
+                ("event_type", "in", ("reviewer_assigned", "reviewer_reassigned")),
+            ], order="event_at desc, id desc")
+            for event in events:
+                assigned_by_order.setdefault(event.order_id.id, event)
+        for order in self:
+            event = assigned_by_order.get(order.id)
+            order.reviewer_assigned_at = (
+                event.event_at
+                if event and event.reviewer_user_id == order.reviewer_user_id
+                else False
+            )
+
     def _compute_vendor_deliverables(self):
         Deliverable = self.env["trucalc.vendor.deliverable"].sudo()
         grouped = {}
@@ -1199,6 +1380,10 @@ class EvaluationOrder(models.Model):
             ].browse()
             order.valuation_approved = bool(approval)
             order.valuation_approved_at = approval.event_at if approval else False
+            order.review_action = (
+                "accepted_revised" if approval and valuation.version > 1
+                else "accepted" if approval else False
+            )
             order.vendor_invoice_submitted_at = invoice.submitted_at if invoice else False
             order.vendor_invoice_deliverable_status = invoice.status if invoice else False
 
@@ -1802,9 +1987,9 @@ class EvaluationOrder(models.Model):
     def write(self, vals):
         if (FEE_SNAPSHOT_FIELDS | CURRENT_FEE_FIELDS).intersection(vals):
             raise AccessError(_("Order fee snapshots are server-controlled."))
-        if "reviewer_user_id" in vals:
+        if {"reviewer_user_id", "review_due_date"}.intersection(vals):
             raise AccessError(_(
-                "Reviewer assignment requires the controlled assignment action."
+                "Reviewer assignment and Review Due Date require the controlled assignment action."
             ))
         self._check_operational_edit()
         self.invalidate_recordset([
@@ -2586,7 +2771,17 @@ class EvaluationOrder(models.Model):
             "context": {"default_order_id": self.id},
         }
 
-    def action_assign_reviewer(self, reviewer_user=False):
+    @api.model
+    def _validated_review_due_date(self, review_due_date):
+        try:
+            due_date = fields.Date.to_date(review_due_date)
+        except (TypeError, ValueError):
+            due_date = False
+        if not due_date:
+            raise ValidationError(_("Review Due Date is required."))
+        return due_date
+
+    def action_assign_reviewer(self, reviewer_user=False, review_due_date=False):
         self._require_intake_manager()
         self.ensure_one()
         self._lock_for_bid_lifecycle()
@@ -2601,17 +2796,24 @@ class EvaluationOrder(models.Model):
         if len(reviewer_user) != 1:
             raise ValidationError(_("Select an internal Reviewer before assignment."))
         reviewer_user._trucalc_reviewer_identity()
+        review_due_date = self._validated_review_due_date(review_due_date)
         return self._transition_status(
             "report_received", "reviewer_assigned", "reviewer_assigned",
-            {"reviewer_user_id": reviewer_user.id, "reviewer_id": False, "review_fee": 0.0},
+            {
+                "reviewer_user_id": reviewer_user.id,
+                "review_due_date": review_due_date,
+                "reviewer_id": False,
+                "review_fee": 0.0,
+            },
         )
 
-    def action_reassign_reviewer(self, reviewer_user, reason):
+    def action_reassign_reviewer(self, reviewer_user, reason, review_due_date=False):
         self._require_intake_manager()
         self.ensure_one()
         reason = reason.strip() if isinstance(reason, str) else ""
         if not reason:
             raise ValidationError(_("A reassignment reason is required."))
+        review_due_date = self._validated_review_due_date(review_due_date)
         reviewer_user = reviewer_user.sudo().exists()
         if len(reviewer_user) != 1:
             raise ValidationError(_("Select an internal Reviewer."))
@@ -2631,6 +2833,7 @@ class EvaluationOrder(models.Model):
         to_status = "reviewer_assigned"
         order._controlled_lifecycle_write({
             "reviewer_user_id": reviewer_user.id,
+            "review_due_date": review_due_date,
             "status": to_status,
         })
         self.env["trucalc.order.lifecycle.event"]._log_reviewer_reassignment(
@@ -2755,6 +2958,9 @@ class EvaluationOrder(models.Model):
         if Event._valuation_approval(target):
             raise ValidationError(_("This Valuation has already been approved."))
         Event._log_valuation_approval(order, target, actor)
+        order.invalidate_recordset([
+            "valuation_approved", "valuation_approved_at", "review_action",
+        ])
         return True
 
     @api.private

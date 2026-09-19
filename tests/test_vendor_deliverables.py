@@ -422,7 +422,9 @@ class TestVendorDeliverables(TransactionCase):
             invoice.with_user(self.bank)._authorize_download(self.bank)
 
         order.with_user(self.admin)._controlled_lifecycle_write({"reviewer_user_id": self.reviewer.id})
-        order.with_user(self.admin).action_assign_reviewer()
+        order.with_user(self.admin).action_assign_reviewer(
+            review_due_date=fields.Date.add(fields.Date.today(), days=5),
+        )
         self.assertTrue(valuation.with_user(self.reviewer).has_access("read"))
         self.assertFalse(invoice.with_user(self.reviewer).has_access("read"))
         self.assertFalse(valuation.with_user(self.other_reviewer).has_access("read"))
@@ -461,18 +463,16 @@ class TestVendorDeliverables(TransactionCase):
         self.assertTrue(order_view.xpath(".//field[@name='valuation_filename_link']"))
         self.assertTrue(order_view.xpath(".//field[@name='vendor_invoice_filename_link']"))
         order_information = order_view.xpath(
-            ".//group[@string='Workflow Information']"
+            ".//group[@string='Current Engagement']"
         )
         self.assertEqual(len(order_information), 1)
         self.assertEqual(
             [field.get("name") for field in order_information[0].xpath("./field")],
             [
-                "assigned_vendor_id", "currency_id", "vendor_fee",
-                "vendor_delivery_date", "vendor_engaged_at",
+                "assigned_vendor_id", "vendor_delivery_date", "vendor_engaged_at",
                 "current_engagement_id", "engagement_action_required",
                 "engagement_response_state", "engagement_requested_delivery_date",
                 "engagement_request_reason", "engagement_decline_reason",
-                "fee_override", "reviewer_user_id", "decline_reason",
             ],
         )
         self.assertFalse(order_information[0].xpath(
@@ -484,7 +484,11 @@ class TestVendorDeliverables(TransactionCase):
         self.assertEqual(len(deliverables_display), 1)
         self.assertEqual(
             deliverables_display[0].getparent(),
+            order_view.xpath(".//page[@string='Review & Deliverables']")[0],
+        )
+        self.assertEqual(
             order_information[0].getparent(),
+            order_view.xpath(".//page[@string='Engaged Vendor']")[0],
         )
         for artifact in ("valuation", "vendor_invoice"):
             artifact_block = order_view.xpath(
@@ -495,17 +499,11 @@ class TestVendorDeliverables(TransactionCase):
             self.assertFalse(artifact_block.xpath(
                 ".//*[contains(concat(' ', normalize-space(@class), ' '), ' o_row ')]"
             ))
-            filename_line = artifact_block.xpath(
-                "./div[.//field[@name='%s_filename_link']]" % artifact
-            )
-            self.assertEqual(len(filename_line), 1)
-            metadata_line = artifact_block.xpath(
-                "./div[.//field[@name='%s_submitted_at'] and "
-                ".//field[@name='%s_deliverable_status']]" % (artifact, artifact)
-            )
-            self.assertEqual(len(metadata_line), 1)
-            submitted_date = metadata_line[0].xpath(
-                ".//field[@name='%s_submitted_at']" % artifact
+            self.assertTrue(artifact_block.xpath(
+                "./field[@name='%s_filename_link']" % artifact
+            ))
+            submitted_date = artifact_block.xpath(
+                "./field[@name='%s_submitted_at']" % artifact
             )
             self.assertEqual(len(submitted_date), 1)
             self.assertNotIn("widget", submitted_date[0].attrib)
@@ -513,8 +511,8 @@ class TestVendorDeliverables(TransactionCase):
                 submitted_date[0].get("options"),
                 "{'show_time': False, 'numeric': True}",
             )
-            self.assertTrue(metadata_line[0].xpath(
-                ".//field[@name='%s_deliverable_status']" % artifact
+            self.assertTrue(artifact_block.xpath(
+                "./field[@name='%s_deliverable_status']" % artifact
             ))
         portal = self.env.ref(
             "trucalc_orders.portal_my_trucalc_order"
@@ -761,7 +759,9 @@ class TestVendorDeliverablePortal(HttpCase):
         valuation = self.env["trucalc.vendor.deliverable"].sudo().search([
             ("order_id", "=", order.id), ("artifact_type", "=", "valuation"),
         ])
-        order.with_user(self.admin).action_assign_reviewer(self.reviewer)
+        order.with_user(self.admin).action_assign_reviewer(
+            self.reviewer, fields.Date.add(fields.Date.today(), days=5),
+        )
         order.with_user(self.reviewer).action_start_review()
         return order, valuation
 

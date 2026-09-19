@@ -86,7 +86,9 @@ class TestControlledValuationReview(TransactionCase):
 
     def _assign_and_accept(self, order, reviewer=None):
         reviewer = reviewer or self.reviewer
-        order.with_user(self.admin).action_assign_reviewer(reviewer)
+        order.with_user(self.admin).action_assign_reviewer(
+            reviewer, fields.Date.add(fields.Date.today(), days=5),
+        )
         order.with_user(reviewer).action_start_review()
 
     def test_assignment_acceptance_and_direct_write_protection(self):
@@ -102,13 +104,28 @@ class TestControlledValuationReview(TransactionCase):
         self.assertEqual(revision_button[0].get("class"), "btn-outline-primary")
         with self.assertRaises(AccessError):
             order.with_user(self.admin).write({"reviewer_user_id": self.reviewer.id})
-        order.with_user(self.admin).action_assign_reviewer(self.reviewer)
+        with self.assertRaises(AccessError):
+            order.with_user(self.admin).write({
+                "review_due_date": fields.Date.add(fields.Date.today(), days=5),
+            })
+        self.assertFalse(order.review_due_date)
+        self.assertNotEqual(order.due_date, order.review_due_date)
+        with self.assertRaises(ValidationError):
+            order.with_user(self.admin).action_assign_reviewer(self.reviewer)
+        review_due = fields.Date.add(fields.Date.today(), days=5)
+        order.with_user(self.admin).action_assign_reviewer(
+            self.reviewer, review_due,
+        )
         self.assertEqual(order.status, "reviewer_assigned")
         self.assertEqual(order.reviewer_user_id, self.reviewer)
         assigned = order.lifecycle_event_ids.filtered(
             lambda event: event.event_type == "reviewer_assigned"
         )
         self.assertEqual(assigned.reviewer_user_id, self.reviewer)
+        self.assertEqual(order.review_due_date, review_due)
+        self.assertEqual(order.reviewer_assigned_at, assigned.event_at)
+        self.assertFalse(order.review_action)
+        self.assertFalse(order.valuation_approved_at)
         with self.assertRaises(AccessError):
             order.with_user(self.admin).action_start_review()
         self.assertEqual(order.status, "reviewer_assigned")
@@ -134,9 +151,16 @@ class TestControlledValuationReview(TransactionCase):
 
     def test_reassignment_requires_new_acceptance_and_preserves_request(self):
         order, authorization, valuation = self._valuation_order()
-        order.with_user(self.admin).action_assign_reviewer(self.reviewer)
+        order.with_user(self.admin).action_assign_reviewer(
+            self.reviewer, fields.Date.add(fields.Date.today(), days=5),
+        )
         order.with_user(self.ops).action_reassign_reviewer(
             self.other_reviewer, "Pre-acceptance coverage",
+            fields.Date.add(fields.Date.today(), days=6),
+        )
+        self.assertEqual(
+            order.review_due_date,
+            fields.Date.add(fields.Date.today(), days=6),
         )
         self.assertEqual(order.status, "reviewer_assigned")
         with self.assertRaises(AccessError):
@@ -147,6 +171,7 @@ class TestControlledValuationReview(TransactionCase):
         )
         order.with_user(self.admin).action_reassign_reviewer(
             self.reviewer, "Post-acceptance coverage",
+            fields.Date.add(fields.Date.today(), days=7),
         )
         self.assertEqual(order.status, "reviewer_assigned")
         self.assertTrue(self.env[
@@ -166,6 +191,26 @@ class TestControlledValuationReview(TransactionCase):
         self.assertEqual(event.prior_reviewer_user_id, self.other_reviewer)
         self.assertEqual(event.reviewer_user_id, self.reviewer)
         self.assertEqual(event.reassignment_reason, "Post-acceptance coverage")
+        self.assertEqual(order.reviewer_assigned_at, event.event_at)
+        self.assertEqual(
+            order.review_due_date,
+            fields.Date.add(fields.Date.today(), days=7),
+        )
+
+    def test_original_valuation_approval_derives_review_summary(self):
+        order, _authorization, valuation = self._valuation_order()
+        self._assign_and_accept(order)
+        self.assertFalse(order.review_action)
+        self.assertFalse(order.valuation_approved_at)
+        order.with_user(self.reviewer).action_approve_valuation(valuation)
+        approval = order.lifecycle_event_ids.filtered(
+            lambda event: event.event_type == "valuation_approved"
+        )
+        self.assertEqual(order.review_action, "accepted")
+        self.assertEqual(order.valuation_approved_at, approval.event_at)
+        self.assertNotIn(
+            "rejected", dict(order._fields["review_action"].selection),
+        )
 
     def test_reviewer_access_revision_approval_and_indicator(self):
         order, authorization, first = self._valuation_order()
@@ -238,6 +283,8 @@ class TestControlledValuationReview(TransactionCase):
         self.assertEqual(approval.actor_id, self.reviewer)
         self.assertEqual(approval.reviewer_user_id, self.reviewer)
         self.assertTrue(approval.event_at)
+        self.assertEqual(order.review_action, "accepted_revised")
+        self.assertEqual(order.valuation_approved_at, approval.event_at)
         self.assertEqual((approval.from_status, approval.to_status),
                          ("under_review", "under_review"))
         with self.assertRaises(AccessError):
@@ -255,4 +302,5 @@ class TestControlledValuationReview(TransactionCase):
         with self.assertRaises(ValidationError):
             order.with_user(self.admin).action_reassign_reviewer(
                 self.other_reviewer, "Too late",
+                fields.Date.add(fields.Date.today(), days=8),
             )

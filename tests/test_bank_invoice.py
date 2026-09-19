@@ -83,7 +83,9 @@ class BankInvoiceFixtures:
         deliverables = self.env["trucalc.vendor.deliverable"].with_user(self.vendor_user)
         valuation = deliverables._submit(authorization, self.vendor_user, "valuation", "Valuation.pdf", PDF)
         deliverables._submit(authorization, self.vendor_user, "vendor_invoice", "Vendor.pdf", PDF)
-        order.with_user(self.admin).action_assign_reviewer(self.reviewer)
+        order.with_user(self.admin).action_assign_reviewer(
+            self.reviewer, fields.Date.add(fields.Date.today(), days=5),
+        )
         order.with_user(self.reviewer).action_start_review()
         order.with_user(self.reviewer).action_approve_valuation(valuation)
         return order

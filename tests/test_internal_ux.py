@@ -144,11 +144,15 @@ class TestInternalUXPassA(TransactionCase):
             )],
             [
                 ("Orders", 10), ("Unpaid Invoices", 15),
-                ("Bank Draft Support", 20), ("Vendors", 30),
-                ("Configuration", 90),
+                ("Vendors", 30), ("Configuration", 90),
             ],
         )
         self.assertEqual(menus["menu_trucalc_draft_support"].parent_id, root)
+        self.assertFalse(menus["menu_trucalc_draft_support"].active)
+        self.assertEqual(
+            menus["menu_trucalc_draft_support"].action,
+            self.env.ref("trucalc_orders.action_trucalc_draft_support"),
+        )
         self.assertEqual(
             [(menu.name, menu.sequence) for menu in menus[
                 "menu_trucalc_configuration"
@@ -186,7 +190,12 @@ class TestInternalUXPassA(TransactionCase):
         }
         for user in (self.admin, self.admin_reviewer):
             loaded = self.env["ir.ui.menu"].with_user(user).load_menus(False)
-            self.assertTrue(all(menu_id in loaded for menu_id in menu_ids.values()))
+            for name in (
+                "menu_trucalc_orders", "menu_unpaid_bank_invoices",
+                "menu_trucalc_vendors", "menu_trucalc_configuration",
+            ):
+                self.assertIn(menu_ids[name], loaded)
+            self.assertNotIn(menu_ids["menu_trucalc_draft_support"], loaded)
         for user in (self.ops, self.ops_reviewer):
             loaded = self.env["ir.ui.menu"].with_user(user).load_menus(False)
             for name in ("menu_trucalc_orders", "menu_unpaid_bank_invoices", "menu_trucalc_vendors"):
@@ -470,6 +479,216 @@ class TestInternalUXPassA(TransactionCase):
         ))
         self.assertEqual(arch.get("class"), "o_trucalc_order_list")
 
+    def test_orders_action_uses_scoped_twenty_record_limit(self):
+        action = self.env.ref("trucalc_orders.action_trucalc_orders")
+        support = self.env.ref("trucalc_orders.action_trucalc_draft_support")
+        self.assertEqual(action.limit, 20)
+        self.assertEqual(support.limit, 80)
+
+        records = self.env["trucalc.order"].with_user(self.admin)
+        created = records.create([{
+            "borrower": "Pagination %02d" % index,
+            "property_address": "%d Paging Way" % index,
+            "company_id": self.company.id,
+            "service_type": "evaluation",
+            "due_date": fields.Date.add(fields.Date.today(), days=index + 1),
+        } for index in range(21)])
+        domain = [("id", "in", created.ids)]
+        first_page = records.search(domain, order="due_date asc", limit=action.limit)
+        second_page = records.search(
+            domain, order="due_date asc", limit=action.limit, offset=action.limit,
+        )
+        self.assertEqual(len(first_page), 20)
+        self.assertEqual(len(second_page), 1)
+        self.assertFalse(first_page & second_page)
+
+    def test_order_form_pass_b_architecture(self):
+        arch = etree.fromstring(self.env.ref(
+            "trucalc_orders.view_trucalc_order_form"
+        ).arch_db.encode())
+        self.assertIn("o_trucalc_order_form", arch.get("class", ""))
+        self.assertEqual(arch.get("duplicate"), "false")
+        self.assertEqual(arch.get("delete"), "false")
+        self.assertFalse(arch.xpath("//div[contains(@class, 'oe_title')]"))
+        identity = arch.xpath(
+            "./header/div[contains(@class, 'o_trucalc_order_identity')]"
+        )
+        self.assertEqual(len(identity), 1)
+        self.assertFalse(arch.xpath(
+            "./sheet//div[contains(@class, 'o_trucalc_order_identity')]"
+        ))
+        self.assertEqual(
+            [node.get("name") for node in identity[0].xpath("./field")],
+            ["order_number", "borrower", "property_address_summary"],
+        )
+        self.assertEqual(
+            [page.get("string") for page in arch.xpath("//notebook[1]/page")],
+            [
+                "Request Details", "Engaged Vendor", "Review & Deliverables",
+                "Fee History", "Documents", "Vendor Responses",
+                "History / Notes",
+            ],
+        )
+        self.assertFalse(arch.xpath(
+            "//div[contains(@class, 'o_trucalc_workflow_row')]"
+        ))
+
+        pages = {
+            page.get("string"): page for page in arch.xpath("//notebook[1]/page")
+        }
+        request = pages["Request Details"]
+        request_columns = request.xpath(
+            ".//div[contains(@class, 'o_trucalc_request_details')]/div"
+        )
+        self.assertEqual(len(request_columns), 3)
+        self.assertTrue(all(
+            "col-12" in node.get("class", "")
+            and "col-lg-4" in node.get("class", "")
+            for node in request_columns
+        ))
+        self.assertEqual(
+            [node.get("string") for node in request.xpath(
+                ".//div[contains(@class, 'o_trucalc_request_details')]"
+                "/div/group"
+            )],
+            ["Order / Request Info", "Property / Service", "Contact"],
+        )
+        self.assertFalse(request.xpath(".//field[@name='order_number']"))
+        self.assertFalse(request.xpath(".//group[@string='Operational State']"))
+        decline_reason = request.xpath(
+            ".//group[@string='Order / Request Info']"
+            "/field[@name='decline_reason']"
+        )
+        self.assertEqual(len(decline_reason), 1)
+        self.assertEqual(decline_reason[0].get("invisible"), "status != 'declined'")
+        for field_name in ("company_id", "requestor_id"):
+            node = request.xpath(".//field[@name='%s']" % field_name)[0]
+            self.assertTrue(safe_eval(node.get("options"))["no_open"])
+            self.assertEqual(
+                node.get("widget"), "trucalc_order_context_profile_link",
+            )
+        self.assertEqual(
+            safe_eval(request.xpath(".//field[@name='company_id']")[0].get("options"))[
+                "profile_action"
+            ],
+            "action_open_bank_profile",
+        )
+        self.assertEqual(
+            safe_eval(request.xpath(".//field[@name='requestor_id']")[0].get("options"))[
+                "profile_action"
+            ],
+            "action_open_requestor_profile",
+        )
+        self.assertFalse(request.xpath(
+            ".//button[@name='action_open_bank_profile' or "
+            "@name='action_open_requestor_profile']"
+        ))
+        self.assertNotIn("View Bank", etree.tostring(request, encoding="unicode"))
+        self.assertNotIn("View Requestor", etree.tostring(request, encoding="unicode"))
+
+        engaged = pages["Engaged Vendor"]
+        self.assertTrue(engaged.xpath(".//group[@string='Current Engagement']"))
+        self.assertTrue(engaged.xpath(".//field[@name='assigned_vendor_id']"))
+        self.assertTrue(engaged.xpath(".//field[@name='engagement_response_state']"))
+        self.assertEqual(len(arch.xpath(
+            "//group[@string='Current Engagement']"
+        )), 1)
+
+        review = pages["Review & Deliverables"]
+        reviewer = review.xpath(".//group[@string='Reviewer Information']")[0]
+        self.assertEqual(
+            [node.get("name") for node in reviewer.xpath("./field")],
+            [
+                "reviewer_user_id", "reviewer_assigned_at", "review_due_date",
+                "valuation_approved_at", "review_action",
+            ],
+        )
+        self.assertEqual(len(arch.xpath(
+            "//group[@string='Reviewer Information']"
+        )), 1)
+        deliverables = review.xpath(".//div[@name='deliverables_display']")[0]
+        valuation = deliverables.xpath("./div[@name='valuation_display']")[0]
+        invoice = deliverables.xpath("./div[@name='vendor_invoice_display']")[0]
+        self.assertEqual(
+            [node.get("name") for node in valuation.xpath("./field")],
+            [
+                "valuation_filename_link", "valuation_submitted_at",
+                "valuation_deliverable_status", "valuation_version",
+            ],
+        )
+        self.assertEqual(
+            [node.get("name") for node in invoice.xpath("./field")],
+            [
+                "vendor_invoice_filename_link", "vendor_invoice_submitted_at",
+                "vendor_invoice_deliverable_status",
+            ],
+        )
+
+        fee_history = pages["Fee History"]
+        pricing_fields = {
+            node.get("name") for node in fee_history.xpath(
+                ".//group[@string='Pricing Summary']/field"
+            )
+        }
+        self.assertTrue({
+            "agreed_fee", "current_agreed_fee", "fee_source",
+            "original_service_area_id", "service_area_id", "vendor_fee",
+            "trucalc_fee",
+        }.issubset(pricing_fields))
+        self.assertNotIn("review_fee", pricing_fields)
+
+        stylesheet = (
+            Path(__file__).resolve().parents[1]
+            / "static/src/scss/internal_backend.scss"
+        ).read_text()
+        self.assertIn(".o_trucalc_order_form", stylesheet)
+        self.assertIn("> .o_form_view_container > .o_control_panel", stylesheet)
+        self.assertIn(".o_form_statusbar", stylesheet)
+        self.assertIn("position: sticky", stylesheet)
+        self.assertIn(".o_notebook .nav-tabs .nav-link", stylesheet)
+        self.assertIn("&.active", stylesheet)
+        self.assertIn(
+            ".o_dialog:has(.o_trucalc_readonly_profile)", stylesheet,
+        )
+        self.assertIn("width: calc(100% - 2rem)", stylesheet)
+        self.assertIn("max-width: 32rem", stylesheet)
+        self.assertNotIn("\n.modal-dialog {", stylesheet)
+
+        expected_profile_fields = {
+            "view_trucalc_order_bank_profile_form": {
+                "bank_profile_name", "bank_profile_state",
+                "bank_profile_email", "bank_profile_phone",
+            },
+            "view_trucalc_order_requestor_profile_form": {
+                "requestor_profile_name", "requestor_profile_bank",
+                "requestor_profile_email", "requestor_profile_phone",
+            },
+        }
+        for view_xmlid, expected_fields in expected_profile_fields.items():
+            profile = etree.fromstring(
+                self.env.ref("trucalc_orders.%s" % view_xmlid)
+                .arch_db.encode()
+            )
+            self.assertEqual(profile.get("create"), "false")
+            self.assertEqual(profile.get("edit"), "false")
+            self.assertEqual(profile.get("delete"), "false")
+            self.assertEqual(profile.get("duplicate"), "false")
+            self.assertEqual(
+                {node.get("name") for node in profile.xpath("//field")},
+                expected_fields,
+            )
+            self.assertEqual(len(profile.xpath(
+                "//footer/button[@special='cancel'][@string='Close']"
+            )), 1)
+
+    def test_trucalc_fee_is_current_total_less_vendor_fee(self):
+        order = self.env["trucalc.order"].new({
+            "current_agreed_fee": 625.0,
+            "vendor_fee": 400.0,
+        })
+        order._compute_trucalc_fee()
+        self.assertEqual(order.trucalc_fee, 225.0)
+
     def test_internal_home_action_and_backend_brand_contract(self):
         home_action = self.env.ref("trucalc_orders.action_trucalc_orders")
         for user in (
@@ -514,7 +733,9 @@ class TestInternalUXPassA(TransactionCase):
         self.assertNotIn("web._assets_primary_variables", manifest["assets"])
         self.assertNotIn("web._assets_backend_helpers", manifest["assets"])
         for asset in (
+            "trucalc_orders/static/src/js/order_context_profile_link_field.js",
             "trucalc_orders/static/src/js/order_number_attention_field.js",
+            "trucalc_orders/static/src/xml/order_context_profile_link_field.xml",
             "trucalc_orders/static/src/xml/order_number_attention_field.xml",
             "trucalc_orders/static/src/scss/internal_backend.scss",
         ):
@@ -541,8 +762,7 @@ class TestInternalUXPassA(TransactionCase):
         ):
             self.assertIn(required, styles)
         for forbidden in (
-            ".o_trucalc_internal", ".o_trucalc_order_form",
-            ".o_action_manager", ":has(", ".o_main_navbar",
+            ".o_trucalc_internal", ".o_action_manager", ".o_main_navbar",
             ".o_web_client", ":root", "#022f5b", ".btn-primary",
             ".btn-warning", ".btn-success", ".btn-danger",
         ):
@@ -652,10 +872,35 @@ class TestInternalUXPassABrowser(HttpCase):
                 cls.env.ref("project.group_project_manager").id,
             ])],
         })
+        cls.reviewer_company = cls.env["res.company"].create({
+            "name": "Internal UX Reviewer Company",
+        })
+        cls.reviewer = cls.env["res.users"].with_context(
+            no_reset_password=True
+        ).create({
+            "name": "Internal UX Browser Reviewer",
+            "login": "internal-ux-browser-reviewer",
+            "email": "internal-ux-browser-reviewer@example.test",
+            "password": cls.password,
+            "company_id": cls.reviewer_company.id,
+            "company_ids": [Command.set(cls.reviewer_company.ids)],
+            "group_ids": [Command.set([
+                cls.env.ref("trucalc_orders.group_trucalc_operations").id,
+                cls.env.ref("trucalc_orders.group_trucalc_reviewer").id,
+            ])],
+        })
         cls.first = cls._order("Browser First", "2000-01-01")
         cls.second = cls._order("Browser Second", "2000-01-02")
         cls.attention = cls._attention_order()
         cls.fee_outcome = cls._fee_outcome_order()
+        cls.reviewer_order = cls._order("Browser Reviewer", "2030-01-01")
+        cls.reviewer_order._controlled_lifecycle_write({
+            "reviewer_user_id": cls.reviewer.id,
+            "status": "report_received",
+        })
+        cls.reviewer_order.with_user(cls.admin).action_assign_reviewer(
+            review_due_date=fields.Date.add(fields.Date.today(), days=5),
+        )
 
     @classmethod
     def _order(cls, label, due_date):
@@ -1053,5 +1298,234 @@ class TestInternalUXPassABrowser(HttpCase):
             """,
             login=self.admin.login,
             ready="!!document.querySelector('.o_form_view .o_arrow_button_current')",
+            timeout=90,
+        )
+
+    def test_order_form_pass_b_responsive_shell(self):
+        url = "/odoo/action-trucalc_orders.action_trucalc_orders/%s" % self.first.id
+        code = """
+            (async () => {
+                const pause = () => new Promise(resolve => setTimeout(resolve, 250));
+                const form = document.querySelector('.o_form_view.o_trucalc_order_form');
+                if (!form) throw Error('Scoped TruCalc Order form class missing');
+
+                const controlPanel = form.querySelector('.o_control_panel');
+                if (controlPanel && (
+                    getComputedStyle(controlPanel).display !== 'none'
+                    || controlPanel.getBoundingClientRect().height > 1
+                )) {
+                    throw Error('Blank Order detail control-panel band remains visible');
+                }
+
+                const identity = form.querySelector('.o_trucalc_order_identity');
+                if (!identity || !identity.innerText.includes(%s)
+                    || !identity.innerText.includes('Browser First')
+                    || !identity.innerText.includes('Browser First Way')) {
+                    throw Error(`Compact identity is incomplete: ${identity?.innerText}`);
+                }
+                const statusbar = identity.closest('.o_form_statusbar');
+                if (!statusbar) throw Error('Identity is not in the sticky status shell');
+                if (getComputedStyle(statusbar).position !== 'sticky') {
+                    throw Error('Order status shell is not sticky');
+                }
+                if (!statusbar.querySelector('.o_arrow_button_current')) {
+                    throw Error('Current workflow status is not usable');
+                }
+
+                const tabLinks = [...form.querySelectorAll(
+                    '.o_notebook_headers .nav-link'
+                )];
+                const tabs = tabLinks.map(node => node.innerText.trim());
+                const expectedTabs = [
+                    'Request Details', 'Engaged Vendor', 'Review & Deliverables',
+                    'Fee History', 'Documents', 'Vendor Responses',
+                    'History / Notes',
+                ];
+                if (JSON.stringify(tabs) !== JSON.stringify(expectedTabs)) {
+                    throw Error(`Unexpected tabs: ${tabs.join('|')}`);
+                }
+                const activeTab = tabLinks.find(node => node.classList.contains('active'));
+                const inactiveTab = tabLinks.find(node => !node.classList.contains('active'));
+                const activeStyle = getComputedStyle(activeTab);
+                const inactiveStyle = getComputedStyle(inactiveTab);
+                if (activeStyle.color === inactiveStyle.color
+                    || activeStyle.backgroundColor === 'rgba(0, 0, 0, 0)'
+                    || parseFloat(activeStyle.borderBottomWidth) < 3
+                    || activeStyle.fontWeight < 600) {
+                    throw Error('Active tab emphasis is not visually distinct');
+                }
+                if (form.innerText.includes('Operational State')) {
+                    throw Error('Empty Operational State shell is still rendered');
+                }
+
+                const columns = [...form.querySelectorAll(
+                    '.o_trucalc_request_details > .col-12'
+                )];
+                if (columns.length !== 3) throw Error('Request Details columns missing');
+                const tops = columns.map(node => node.getBoundingClientRect().top);
+                if (window.innerWidth >= 992 && Math.max(...tops) - Math.min(...tops) > 2) {
+                    throw Error('Request Details columns are not aligned on desktop');
+                }
+                if (window.innerWidth < 992 && !(tops[1] > tops[0] && tops[2] > tops[1])) {
+                    throw Error('Request Details columns did not stack');
+                }
+
+                const engagedTab = tabLinks.find(
+                    node => node.innerText.trim() === 'Engaged Vendor'
+                );
+                engagedTab.click();
+                await pause();
+                let activePage = form.querySelector('.tab-pane.active');
+                if (!engagedTab.classList.contains('active') || !activePage
+                    || !activePage.querySelector('[name="assigned_vendor_id"]')) {
+                    throw Error('Engaged Vendor content is not isolated in its tab');
+                }
+                const reviewTab = tabLinks.find(
+                    node => node.innerText.trim() === 'Review & Deliverables'
+                );
+                reviewTab.click();
+                await pause();
+                activePage = form.querySelector('.tab-pane.active');
+                if (!reviewTab.classList.contains('active') || !activePage
+                    || !activePage.querySelector('[name="reviewer_user_id"]')) {
+                    throw Error('Reviewer Information is not in Review & Deliverables');
+                }
+                if (activePage.querySelectorAll('.o_trucalc_deliverable_row').length !== 2) {
+                    throw Error('Compact deliverable rows are not in Review & Deliverables');
+                }
+
+                const spacer = document.createElement('div');
+                spacer.style.height = '1200px';
+                activePage.appendChild(spacer);
+                let scrollHost = statusbar.parentElement;
+                while (scrollHost && scrollHost !== document.body) {
+                    const style = getComputedStyle(scrollHost);
+                    if (scrollHost.scrollHeight > scrollHost.clientHeight + 2
+                        && /(auto|scroll)/.test(style.overflowY)) break;
+                    scrollHost = scrollHost.parentElement;
+                }
+                if (!scrollHost || scrollHost === document.body) {
+                    throw Error('Order form scroll container was not found');
+                }
+                const beforeTop = statusbar.getBoundingClientRect().top;
+                scrollHost.scrollTop += 500;
+                await pause();
+                const afterTop = statusbar.getBoundingClientRect().top;
+                if (Math.abs(afterTop - beforeTop) > 2) {
+                    throw Error(`Identity did not remain sticky: ${beforeTop} -> ${afterTop}`);
+                }
+                if (!identity.getClientRects().length) {
+                    throw Error('Identity is not visible after vertical scroll');
+                }
+                if (!statusbar.querySelector('.o_arrow_button_current')?.getClientRects().length) {
+                    throw Error('Workflow/status controls are not reachable after scroll');
+                }
+                spacer.remove();
+
+                if (document.documentElement.scrollWidth > document.documentElement.clientWidth + 1) {
+                    throw Error('Order form page-level horizontal overflow');
+                }
+                console.log('test successful');
+            })();
+        """ % json.dumps(self.first.order_number)
+        for size in ("1366x768", "1024x768", "768x1024"):
+            with self.subTest(size=size):
+                self.browser_size = size
+                self.browser_js(
+                    url, code, login=self.admin.login,
+                    ready="!!document.querySelector('.o_trucalc_order_identity')",
+                    timeout=90,
+                )
+        self.browser_size = "1366x768"
+        self.browser_js(
+            url, "document.documentElement.style.zoom = '2';" + code,
+            login=self.admin.login,
+            ready="!!document.querySelector('.o_trucalc_order_identity')",
+            timeout=90,
+        )
+
+    def test_reviewer_detail_and_readonly_order_context_profiles(self):
+        url = "/odoo/action-trucalc_orders.action_trucalc_orders/%s" % (
+            self.reviewer_order.id,
+        )
+        code = """
+                (async () => {
+                    const pause = () => new Promise(resolve => setTimeout(resolve, 350));
+                    const form = document.querySelector('.o_form_view.o_trucalc_order_form');
+                    if (!form) throw Error('Assigned Reviewer could not open Order detail');
+                    if (document.body.innerText.includes('Failed to write field')) {
+                        throw Error('Reviewer Bank selector access failure remains');
+                    }
+                    if (form.innerText.includes('View Bank') || form.innerText.includes('View Requestor')) {
+                        throw Error('Separate Bank or Requestor action text remains');
+                    }
+                    for (const [fieldName, actionName] of [
+                        ['company_id', 'action_open_bank_profile'],
+                        ['requestor_id', 'action_open_requestor_profile'],
+                    ]) {
+                        const field = form.querySelector(`[name="${fieldName}"]`);
+                        const link = field?.querySelector('.o_trucalc_context_profile_link');
+                        if (!link || !link.innerText.trim()) {
+                            throw Error(`${fieldName} name is not the profile link`);
+                        }
+                        if (field.querySelector('a[href]')) {
+                            throw Error(`${fieldName} still links to a standard Odoo profile`);
+                        }
+                        link.click();
+                        await pause();
+                        const modal = document.querySelector(
+                            '.o_dialog .o_form_view.o_trucalc_readonly_profile'
+                        );
+                        if (!modal) throw Error(`${actionName} did not open a modal`);
+                        const dialog = modal.closest('.o_dialog');
+                        const dialogBox = dialog.querySelector('.modal-dialog');
+                        const bounds = dialogBox.getBoundingClientRect();
+                        const viewportWidth = document.documentElement.clientWidth;
+                        const zoom = parseFloat(
+                            getComputedStyle(document.documentElement).zoom
+                        ) || 1;
+                        if (bounds.width / zoom > 514) {
+                            throw Error(`${actionName} modal is not compact: ${bounds.width}px`);
+                        }
+                        if (bounds.left < -1 || bounds.right > viewportWidth + 1) {
+                            throw Error(`${actionName} modal overflows the viewport`);
+                        }
+                        const leftSpace = bounds.left;
+                        const rightSpace = viewportWidth - bounds.right;
+                        if (Math.abs(leftSpace - rightSpace) > 2) {
+                            throw Error(`${actionName} modal is not centered`);
+                        }
+                        if (dialogBox.scrollWidth > dialogBox.clientWidth + 1) {
+                            throw Error(`${actionName} modal content is clipped horizontally`);
+                        }
+                        if (dialog.querySelector(
+                            '.o_form_button_edit, .o_form_button_create, '
+                            + '.o_form_button_save, .o_form_button_cancel'
+                        )) {
+                            throw Error(`${actionName} exposes maintenance controls`);
+                        }
+                        const close = [...dialog.querySelectorAll('button')].find(
+                            node => node.innerText.trim() === 'Close'
+                        );
+                        if (!close) throw Error(`${actionName} modal has no Close action`);
+                        close.click();
+                        await pause();
+                    }
+                    console.log('test successful');
+                })();
+            """
+        for size in ("1366x768", "1024x768", "768x1024"):
+            with self.subTest(size=size):
+                self.browser_size = size
+                self.browser_js(
+                    url, code, login=self.reviewer.login,
+                    ready="!!document.querySelector('.o_trucalc_order_identity')",
+                    timeout=90,
+                )
+        self.browser_size = "1366x768"
+        self.browser_js(
+            url, "document.documentElement.style.zoom = '2';" + code,
+            login=self.reviewer.login,
+            ready="!!document.querySelector('.o_trucalc_order_identity')",
             timeout=90,
         )

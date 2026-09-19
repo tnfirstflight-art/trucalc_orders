@@ -79,7 +79,9 @@ def setup(pending):
     deliverables = env['trucalc.vendor.deliverable'].with_user(vendor_user)
     valuation = deliverables._submit(authorization, vendor_user, 'valuation', 'Fixture.pdf', PDF)
     deliverables._submit(authorization, vendor_user, 'vendor_invoice', 'Fixture Invoice.pdf', PDF)
-    order.with_user(admin).action_assign_reviewer(reviewer)
+    order.with_user(admin).action_assign_reviewer(
+        reviewer, fields.Date.add(fields.Date.today(), days=5),
+    )
     order.with_user(reviewer).action_start_review()
     order.with_user(reviewer).action_approve_valuation(valuation)
     rid = order.with_user(admin).action_request_fee_change(650, 'Concurrent scope') if pending else False

@@ -297,7 +297,7 @@ class TestPricingArchitecture(TransactionCase):
             "trucalc_orders.view_trucalc_order_form"
         ).arch.encode())
         details = arch.xpath(
-            "//group[@string='Property / Service Details']"
+            "//group[@string='Property / Service']"
         )[0]
         for field_name in (
             "pricing_state_id", "pricing_county_area_id", "service_area_id",
@@ -312,11 +312,14 @@ class TestPricingArchitecture(TransactionCase):
         )
         for field_name in ("borrower", "property_address"):
             self.assertEqual(
-                arch.xpath(f"//field[@name='{field_name}' and not(@invisible='1')]")[0].get("required"),
+                arch.xpath(
+                    "//page[@string='Request Details']//field[@name='%s']"
+                    % field_name
+                )[0].get("required"),
                 "not is_internal_draft",
             )
         due = arch.xpath(
-            "//group[@string='Order / Request Information']/field[@name='due_date']"
+            "//group[@string='Order / Request Info']/field[@name='due_date']"
         )[0]
         self.assertEqual(due.get("required"), "not is_internal_draft")
 
@@ -326,7 +329,7 @@ class TestPricingArchitecture(TransactionCase):
         ).arch.encode())
         self.assertFalse(arch.xpath("//group[@string='Pricing Selection']"))
         details = arch.xpath(
-            "//group[@string='Property / Service Details']"
+            "//group[@string='Property / Service']"
         )[0]
         self.assertEqual(
             [field.get("name") for field in details.xpath("./field")],
@@ -337,7 +340,7 @@ class TestPricingArchitecture(TransactionCase):
             ],
         )
         request = arch.xpath(
-            "//group[@string='Order / Request Information']"
+            "//group[@string='Order / Request Info']"
         )[0]
         self.assertEqual(
             [(field.get("name"), field.get("string"))
@@ -350,6 +353,7 @@ class TestPricingArchitecture(TransactionCase):
                 ("borrower", "Borrower"),
                 ("due_date", "Due Date"),
                 ("status", "Status"),
+                ("decline_reason", None),
             ],
         )
         for label, field_name in (
@@ -403,14 +407,21 @@ class TestPricingArchitecture(TransactionCase):
             self.assertEqual(len(arch.xpath(
                 f"//div[@name='{lower_surface}']"
             )), 1)
-        for page in ("Notes", "Documents", "Vendor Responses"):
+        for page in (
+            "Request Details", "Engaged Vendor", "Review & Deliverables",
+            "Fee History", "Documents", "Vendor Responses", "History / Notes",
+        ):
             self.assertEqual(len(arch.xpath(f"//page[@string='{page}']")), 1)
-        sheet = arch.xpath("//sheet")[0]
-        inspection = arch.xpath("//group[@string='Inspection Contact']")[0]
+        inspection = arch.xpath("//group[@string='Contact']")[0]
         pricing = arch.xpath("//group[@string='Pricing Summary']")[0]
-        workflow = arch.xpath("//group[@string='Workflow Information']")[0]
-        self.assertLess(sheet.index(inspection), sheet.index(pricing))
-        self.assertLess(sheet.index(pricing), sheet.index(workflow))
+        workflow = arch.xpath("//group[@string='Current Engagement']")[0]
+        self.assertEqual(
+            inspection.getparent().getparent().getparent().get("string"),
+            "Request Details",
+        )
+        self.assertEqual(pricing.getparent().get("string"), "Fee History")
+        self.assertEqual(workflow.getparent().get("string"), "Engaged Vendor")
+        self.assertTrue(workflow.xpath("./field[@name='assigned_vendor_id']"))
         self.assertEqual(
             [(field.get("name"), field.get("string"))
              for field in inspection.xpath("./field")],

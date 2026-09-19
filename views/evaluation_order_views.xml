@@ -48,9 +48,20 @@
         <field name="model">trucalc.order</field>
         <field name="arch" type="xml">
 
-            <form string="Evaluation Order">
+            <form string="Evaluation Order" class="o_trucalc_order_form"
+                duplicate="false" delete="false">
 
                 <header>
+                    <div class="o_trucalc_order_identity" invisible="not id">
+                        <field name="order_number" readonly="1" nolabel="1"
+                               class="o_trucalc_identity_value"/>
+                        <span class="o_trucalc_identity_separator">::</span>
+                        <field name="borrower" readonly="1" nolabel="1"
+                               class="o_trucalc_identity_value"/>
+                        <span class="o_trucalc_identity_separator">::</span>
+                        <field name="property_address_summary" readonly="1" nolabel="1"
+                               class="o_trucalc_identity_value"/>
+                    </div>
                     <field name="can_correct_property_location" invisible="1"
                            groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
                     <button name="action_open_location_correction_wizard" type="object"
@@ -190,39 +201,10 @@
                 </header>
 
                 <sheet>
-
-                    <div class="oe_title">
-                        <h1>
-                            <field name="order_number" readonly="1"/>
-                        </h1>
-                    </div>
-
                     <field name="location_correction_pending" invisible="1"/>
                     <field name="location_correction_blocked" invisible="1"/>
                     <field name="current_location_correction_request_id" invisible="1"
                            groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
-                    <div class="alert alert-warning"
-                         groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
-                         invisible="not location_correction_pending">
-                        <strong>Pending Location Correction:</strong>
-                        The current location and fee remain authoritative until the linked
-                        Bank Fee Change is approved. Vendor processing is blocked.
-                    </div>
-                    <div class="alert alert-danger"
-                         groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
-                         invisible="not location_correction_blocked or location_correction_pending">
-                        <strong>Location Correction Declined:</strong>
-                        The current location remains unchanged and Vendor processing is blocked.
-                        Submit another correction or cancel the Order.
-                    </div>
-
-                    <div class="alert alert-danger d-flex align-items-center gap-2"
-                         role="alert"
-                         groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
-                         invisible="not engagement_action_required">
-                        <span class="badge text-bg-danger">Action Required</span>
-                        <strong><field name="engagement_action_required_reason"/></strong>
-                    </div>
 
                     <!-- Technical selector state stays on the form so onchange values are
                          persisted, but users work only with the three controlled widgets below. -->
@@ -235,13 +217,19 @@
                     <field name="service_type" invisible="1"/>
                     <field name="create_date" invisible="1"/>
 
-                    <group>
-                        <group string="Order / Request Information">
+                    <notebook>
+                        <page string="Request Details">
+                            <div class="o_trucalc_request_details row g-3">
+                                <div class="col-12 col-lg-4">
+                                    <group string="Order / Request Info">
                             <field name="company_id" string="Bank"
                                    domain="[('id', 'in', available_internal_bank_ids)]"
-                                   options="{'no_create': True, 'no_create_edit': True}"
+                                   widget="trucalc_order_context_profile_link"
+                                   options="{'no_create': True, 'no_create_edit': True, 'no_open': True, 'profile_action': 'action_open_bank_profile'}"
                                    readonly="fee_locked_at or (create_date and not is_internal_draft)"/>
-                            <field name="requestor_id" string="Requester" readonly="1"/>
+                            <field name="requestor_id" string="Requester" readonly="1"
+                                   widget="trucalc_order_context_profile_link"
+                                   options="{'no_open': True, 'profile_action': 'action_open_requestor_profile'}"/>
                             <field name="order_date_display" string="Order Date"/>
                             <field name="loan_number" string="Loan Number"
                                    readonly="status == 'completed'"/>
@@ -252,9 +240,12 @@
                                    required="not is_internal_draft"
                                    options="{'numeric': True}" readonly="status == 'completed'"/>
                             <field name="status" string="Status" readonly="1"/>
-                        </group>
+                            <field name="decline_reason" invisible="status != 'declined'" readonly="1"/>
+                                    </group>
+                                </div>
 
-                        <group string="Property / Service Details">
+                                <div class="col-12 col-lg-4">
+                                    <group string="Property / Service">
                             <field name="property_address" required="not is_internal_draft"
                                    readonly="status == 'completed'"/>
                             <field name="city" readonly="status == 'completed'"/>
@@ -289,185 +280,195 @@
                                    readonly="fee_locked_at or not pricing_county_area_id or status in ('declined', 'cancelled', 'completed') or (status == 'draft' and not is_internal_draft)"
                                    options="{'no_create': True, 'no_create_edit': True, 'no_open': True}"/>
                             <field name="property_type" readonly="status == 'completed'"/>
-                        </group>
-                    </group>
+                                    </group>
+                                </div>
 
-                    <group string="Inspection Contact">
-                        <field name="inspection_contact_name" string="Name"
-                               readonly="status == 'completed'"/>
-                        <field name="inspection_contact_phone_display" string="Phone"
-                               widget="inspection_phone_blur" readonly="status == 'completed'"/>
-                        <field name="inspection_contact_email" string="Email"
-                               widget="email" readonly="status == 'completed'"/>
-                    </group>
-
-                    <group string="Pricing Summary"
-                           groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
-                           invisible="not fee_locked_at">
-                        <field name="fee_currency_id" invisible="1"/>
-                        <field name="agreed_fee" string="Original Agreed Fee" readonly="1" widget="monetary"
-                               options="{'currency_field': 'fee_currency_id'}"/>
-                        <field name="current_agreed_fee" readonly="1"/>
-                        <field name="fee_change_pending" string="Fee Request Pending" readonly="1"/>
-                        <field name="fee_change_request_ids" readonly="1">
-                            <list create="0" edit="0" delete="0">
-                                <field name="requested_at"/><field name="currency_id" column_invisible="True"/>
-                                <field name="prior_fee"/><field name="proposed_fee"/>
-                                <field name="state"/><field name="reason"/>
-                                <field name="decision_at"/><field name="decline_reason"/>
-                            </list>
-                        </field>
-                        <field name="fee_source" readonly="1"/>
-                        <field name="negotiated_fee_id" readonly="1"
-                               invisible="fee_source != 'negotiated'"/>
-                        <field name="fee_locked_at" readonly="1"/>
-                    </group>
-
-                    <group string="Location Correction History"
-                           groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
-                           invisible="not location_correction_request_ids">
-                        <field name="location_correction_request_ids" nolabel="1" readonly="1">
-                            <list create="0" edit="0" delete="0">
-                                <field name="state"/>
-                                <field name="old_state" string="Current State"/>
-                                <field name="old_county" string="Current County"/>
-                                <field name="proposed_state"/>
-                                <field name="proposed_county"/>
-                                <field name="proposed_service_area_id"/>
-                                <field name="currency_id" column_invisible="True"/>
-                                <field name="prior_effective_fee"/>
-                                <field name="proposed_schedule_fee"/>
-                                <field name="reason"/>
-                                <field name="fee_change_request_id"/>
-                            </list>
-                        </field>
-                    </group>
-
-                    <group string="Bank Invoice" invisible="not bank_invoice_ids"
-                           groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations">
-
-                        <field name="bank_invoice_ids" nolabel="1" readonly="1">
-                            <list create="0" edit="0" delete="0">
-                                <field name="invoice_number"/><field name="invoice_date"/><field name="due_date"/>
-                                <field name="currency_id" column_invisible="True"/><field name="amount"/><field name="status"/>
-                                <button name="action_download" type="object" string="Download Invoice"/>
-                            </list>
-                        </field>
-                    </group>
-
-                    <group string="Workflow Information">
-                        <field name="assigned_vendor_id" readonly="(status in ('new', 'accepted', 'declined')) or status == 'completed'"/>
-                        <field name="currency_id" invisible="1"/>
-                        <field name="vendor_fee" readonly="1" widget="monetary"
-                               options="{'currency_field': 'currency_id'}"/>
-                        <field name="vendor_delivery_date" readonly="1"
-                               options="{'numeric': True}"/>
-                        <field name="vendor_engaged_at" readonly="1"/>
-                        <field name="current_engagement_id" invisible="1"/>
-                        <field name="engagement_action_required" invisible="1"
-                               groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
-                        <field name="engagement_response_state" readonly="1"
-                               groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
-                        <field name="engagement_requested_delivery_date" readonly="1"
-                               options="{'numeric': True}"
-                               groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
-                               invisible="engagement_response_state != 'delivery_change_requested'"/>
-                        <field name="engagement_request_reason" readonly="1"
-                               groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
-                               invisible="engagement_response_state != 'delivery_change_requested'"/>
-                        <field name="engagement_decline_reason" readonly="1"
-                               groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
-                               invisible="engagement_response_state != 'declined'"/>
-                        <field name="fee_override" readonly="(status in ('new', 'accepted', 'declined')) or status == 'completed'"/>
-                        <field name="reviewer_user_id"
-                               groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer"
-                               readonly="1"/>
-                        <field name="decline_reason" invisible="status != 'declined'" readonly="1"/>
-                    </group>
-
-                    <div name="deliverables_display" class="mb-3">
-                        <field name="current_valuation_id" invisible="1"
-                               groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer"/>
-                        <field name="previous_valuation_count" invisible="1"
-                               groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer"/>
-                        <field name="valuation_approved" invisible="1"
-                               groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer"/>
-                        <div name="valuation_display" class="mb-3"
-                             groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer">
-                            <div class="mb-1">
-                                <strong class="me-1">Valuation:</strong>
-                                <field name="valuation_filename_link" widget="html" nolabel="1" class="oe_inline"/>
-                                <button name="action_view_previous_valuations" type="object"
-                                        string="View Previous Versions" class="btn-link p-0 ms-3"
-                                        invisible="previous_valuation_count == 0"/>
+                                <div class="col-12 col-lg-4">
+                                    <group string="Contact">
+                                <field name="inspection_contact_name" string="Name"
+                                       readonly="status == 'completed'"/>
+                                <field name="inspection_contact_phone_display" string="Phone"
+                                       widget="inspection_phone_blur" readonly="status == 'completed'"/>
+                                <field name="inspection_contact_email" string="Email"
+                                       widget="email" readonly="status == 'completed'"/>
+                                    </group>
+                                </div>
                             </div>
-                            <div invisible="not current_valuation_id" class="d-flex align-items-center gap-4">
-                                <div class="d-flex align-items-center">
-                                    <span class="text-muted me-1">Submitted Date:</span>
-                                    <field name="valuation_submitted_at" nolabel="1" class="oe_inline"
+
+                            <div class="alert alert-warning"
+                                 groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                                 invisible="not location_correction_pending">
+                                <strong>Pending Location Correction:</strong>
+                                The current location and fee remain authoritative until the linked
+                                Bank Fee Change is approved. Vendor processing is blocked.
+                            </div>
+                            <div class="alert alert-danger"
+                                 groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                                 invisible="not location_correction_blocked or location_correction_pending">
+                                <strong>Location Correction Declined:</strong>
+                                The current location remains unchanged and Vendor processing is blocked.
+                                Submit another correction or cancel the Order.
+                            </div>
+
+                        </page>
+
+                        <page string="Engaged Vendor">
+                            <div class="alert alert-danger d-flex align-items-center gap-2"
+                                 role="alert"
+                                 groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                                 invisible="not engagement_action_required">
+                                <span class="badge text-bg-danger">Action Required</span>
+                                <strong><field name="engagement_action_required_reason"/></strong>
+                            </div>
+                            <group string="Current Engagement">
+                                <field name="assigned_vendor_id" readonly="(status in ('new', 'accepted', 'declined')) or status == 'completed'"/>
+                                <field name="vendor_delivery_date" readonly="1" options="{'numeric': True}"/>
+                                <field name="vendor_engaged_at" readonly="1"/>
+                                <field name="current_engagement_id" invisible="1"/>
+                                <field name="engagement_action_required" invisible="1"
+                                       groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
+                                <field name="engagement_response_state" readonly="1"
+                                       groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
+                                <field name="engagement_requested_delivery_date" readonly="1"
+                                       options="{'numeric': True}"
+                                       groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                                       invisible="engagement_response_state != 'delivery_change_requested'"/>
+                                <field name="engagement_request_reason" readonly="1"
+                                       groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                                       invisible="engagement_response_state != 'delivery_change_requested'"/>
+                                <field name="engagement_decline_reason" readonly="1"
+                                       groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
+                                       invisible="engagement_response_state != 'declined'"/>
+                            </group>
+                        </page>
+
+                        <page string="Review &amp; Deliverables"
+                              groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations,trucalc_orders.group_trucalc_reviewer">
+                            <group string="Reviewer Information">
+                                <field name="reviewer_user_id" string="Assigned Reviewer Name" readonly="1"/>
+                                <field name="reviewer_assigned_at" string="Date Assigned" readonly="1"/>
+                                <field name="review_due_date" readonly="1" options="{'numeric': True}"/>
+                                <field name="valuation_approved_at" string="Date Review Completed" readonly="1"/>
+                                <field name="review_action" readonly="1"/>
+                            </group>
+
+                            <div name="deliverables_display" class="o_trucalc_deliverables mb-3">
+                                <field name="current_valuation_id" invisible="1"/>
+                                <field name="previous_valuation_count" invisible="1"/>
+                                <field name="valuation_approved" invisible="1"/>
+                                <field name="vendor_invoice_id" invisible="1"
+                                       groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
+                                <div class="o_trucalc_deliverable_head d-none d-md-grid">
+                                    <strong>Deliverable</strong>
+                                    <strong>Document Link</strong>
+                                    <strong>Date Submitted</strong>
+                                    <strong>Status</strong>
+                                    <strong>Version</strong>
+                                </div>
+                                <div name="valuation_display" class="o_trucalc_deliverable_row">
+                                    <strong>Valuation</strong>
+                                    <field name="valuation_filename_link" widget="html" nolabel="1"/>
+                                    <field name="valuation_submitted_at" nolabel="1" readonly="1"
                                            options="{'show_time': False, 'numeric': True}"/>
+                                    <field name="valuation_deliverable_status" nolabel="1" readonly="1"/>
+                                    <field name="valuation_version" nolabel="1" readonly="1"/>
                                 </div>
-                                <div class="d-flex align-items-center">
-                                    <span class="text-muted me-1">Status:</span>
-                                    <field name="valuation_deliverable_status" nolabel="1" class="oe_inline"/>
-                                </div>
-                                <div class="d-flex align-items-center">
-                                    <span class="text-muted me-1">Version:</span>
-                                    <field name="valuation_version" nolabel="1" class="oe_inline"/>
+                                <div name="vendor_invoice_display" class="o_trucalc_deliverable_row"
+                                     groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations">
+                                    <strong>Vendor Invoice</strong>
+                                    <field name="vendor_invoice_filename_link" widget="html" nolabel="1"/>
+                                    <field name="vendor_invoice_submitted_at" nolabel="1" readonly="1"
+                                           options="{'show_time': False, 'numeric': True}"/>
+                                    <field name="vendor_invoice_deliverable_status" nolabel="1" readonly="1"/>
+                                    <span class="text-muted" aria-label="Not versioned">—</span>
                                 </div>
                             </div>
-                            <div class="alert alert-warning mt-2" role="status"
+
+                            <div class="alert alert-warning" role="status"
                                  invisible="not valuation_revision_requested">
                                 <strong>Revision Requested</strong>
                                 <div><field name="valuation_revision_instructions" nolabel="1" readonly="1"/></div>
                             </div>
-                            <div class="alert alert-success mt-2" role="status"
+                            <div class="alert alert-success" role="status"
                                  invisible="not valuation_approved">
                                 <strong>Valuation Approved</strong>
                                 <span class="ms-2"><field name="valuation_approved_at" nolabel="1" readonly="1"/></span>
                             </div>
-                        </div>
+                            <button name="action_view_previous_valuations" type="object"
+                                    string="View Previous Versions" class="btn-link p-0"
+                                    invisible="previous_valuation_count == 0"/>
+                        </page>
 
-                        <field name="vendor_invoice_id" invisible="1"
-                               groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"/>
-                        <div name="vendor_invoice_display"
-                             groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations">
-                            <div class="mb-1">
-                                <strong class="me-1">Vendor Invoice:</strong>
-                                <field name="vendor_invoice_filename_link" widget="html" nolabel="1" class="oe_inline"/>
-                            </div>
-                            <div invisible="not vendor_invoice_id" class="d-flex align-items-center gap-4">
-                                <div class="d-flex align-items-center">
-                                    <span class="text-muted me-1">Submitted Date:</span>
-                                    <field name="vendor_invoice_submitted_at" nolabel="1" class="oe_inline"
-                                           options="{'show_time': False, 'numeric': True}"/>
-                                </div>
-                                <div class="d-flex align-items-center">
-                                    <span class="text-muted me-1">Status:</span>
-                                    <field name="vendor_invoice_deliverable_status" nolabel="1" class="oe_inline"/>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                        <page string="Fee History"
+                              groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations">
+                            <group string="Pricing Summary" invisible="not fee_locked_at">
+                                <field name="currency_id" invisible="1"/>
+                                <field name="fee_currency_id" invisible="1"/>
+                                <field name="agreed_fee" string="Original Agreed Fee" readonly="1" widget="monetary"
+                                       options="{'currency_field': 'fee_currency_id'}"/>
+                                <field name="current_agreed_fee" string="Total Fee" readonly="1"/>
+                                <field name="fee_source" string="Pricing Source" readonly="1"/>
+                                <field name="negotiated_fee_id" readonly="1"
+                                       invisible="fee_source != 'negotiated'"/>
+                                <field name="original_service_area_id" readonly="1"/>
+                                <field name="service_area_id" string="Current Service Area" readonly="1"/>
+                                <field name="fee_locked_at" readonly="1"/>
+                                <field name="fee_override" readonly="(status in ('new', 'accepted', 'declined')) or status == 'completed'"/>
+                                <field name="vendor_fee" readonly="1" widget="monetary"
+                                       options="{'currency_field': 'currency_id'}"/>
+                                <field name="trucalc_fee" readonly="1" widget="monetary"
+                                       options="{'currency_field': 'fee_currency_id'}"/>
+                            </group>
 
-                    <notebook>
+                            <group string="Fee Changes">
+                                <field name="fee_change_pending" string="Fee Request Pending" readonly="1"/>
+                                <field name="fee_change_request_ids" readonly="1">
+                                    <list create="0" edit="0" delete="0">
+                                        <field name="requested_at"/><field name="currency_id" column_invisible="True"/>
+                                        <field name="prior_fee"/><field name="proposed_fee"/>
+                                        <field name="state"/><field name="reason"/>
+                                        <field name="decision_at"/><field name="decline_reason"/>
+                                    </list>
+                                </field>
+                            </group>
 
-                        <page string="Notes">
+                            <group string="Location Correction History"
+                                   invisible="not location_correction_request_ids">
+                                <field name="location_correction_request_ids" nolabel="1" readonly="1">
+                                    <list create="0" edit="0" delete="0">
+                                        <field name="state"/>
+                                        <field name="old_state" string="Current State"/>
+                                        <field name="old_county" string="Current County"/>
+                                        <field name="proposed_state"/>
+                                        <field name="proposed_county"/>
+                                        <field name="proposed_service_area_id"/>
+                                        <field name="currency_id" column_invisible="True"/>
+                                        <field name="prior_effective_fee"/>
+                                        <field name="proposed_schedule_fee"/>
+                                        <field name="reason"/>
+                                        <field name="fee_change_request_id"/>
+                                    </list>
+                                </field>
+                            </group>
 
-                            <field name="notes" readonly="status == 'completed'"/>
-
+                            <group string="Bank Invoice" invisible="not bank_invoice_ids">
+                                <field name="bank_invoice_ids" nolabel="1" readonly="1">
+                                    <list create="0" edit="0" delete="0">
+                                        <field name="invoice_number"/><field name="invoice_date"/><field name="due_date"/>
+                                        <field name="currency_id" column_invisible="True"/><field name="amount"/><field name="status"/>
+                                        <button name="action_download" type="object" string="Download Invoice"/>
+                                    </list>
+                                </field>
+                            </group>
                         </page>
 
                         <page string="Documents">
-
                             <button name="action_add_document" type="object"
                                     string="Add Document" icon="fa-plus"
                                     class="btn-primary mb-2"
                                     groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
                                     invisible="(not id) or status == 'completed'"/>
-
                             <field name="document_ids" readonly="status == 'completed'">
-
                                 <list create="false" delete="false" editable="bottom"
                                       open_form_view="false" limit="10000">
                                     <field name="active" column_invisible="True" readonly="parent.status == 'completed'"/>
@@ -487,38 +488,28 @@
                                             confirm-title="Delete Document?" confirm-label="Delete"
                                             confirm="Are you sure you want to delete this document? This action cannot be undone."/>
                                 </list>
-
                             </field>
-
                         </page>
 
                         <page string="Vendor Responses"
                               groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations">
-                            <field name="bid_ids" readonly="1"
-                                   class="o_trucalc_vendor_responses">
+                            <field name="bid_ids" readonly="1" class="o_trucalc_vendor_responses">
                                 <list class="o_trucalc_vendor_responses"
                                       decoration-muted="round_number &lt; parent.bidding_round">
-                                    <button name="action_select_bid" type="object"
-                                            string="Select"
+                                    <button name="action_select_bid" type="object" string="Select"
                                             groups="trucalc_orders.group_trucalc_admin,trucalc_orders.group_trucalc_operations"
                                             invisible="not is_currently_selectable"/>
-                                    <button string="Selected"
-                                            class="btn-success opacity-100"
+                                    <button string="Selected" class="btn-success opacity-100"
                                             invisible="status != 'selected' or round_number &lt; parent.bidding_round"/>
-                                    <button string="Selected"
-                                            class="btn-secondary opacity-75"
+                                    <button string="Selected" class="btn-secondary opacity-75"
                                             invisible="status != 'selected' or round_number &gt;= parent.bidding_round"/>
-                                    <button string="Not Selected"
-                                            class="btn-secondary opacity-100"
+                                    <button string="Not Selected" class="btn-secondary opacity-100"
                                             invisible="status != 'not_selected' or round_number &lt; parent.bidding_round"/>
-                                    <button string="Not Selected"
-                                            class="btn-secondary opacity-75"
+                                    <button string="Not Selected" class="btn-secondary opacity-75"
                                             invisible="status != 'not_selected' or round_number &gt;= parent.bidding_round"/>
-                                    <button string="Disqualified"
-                                            class="btn-danger opacity-100"
+                                    <button string="Disqualified" class="btn-danger opacity-100"
                                             invisible="status != 'disqualified' or round_number &lt; parent.bidding_round"/>
-                                    <button string="Disqualified"
-                                            class="btn-secondary opacity-75"
+                                    <button string="Disqualified" class="btn-secondary opacity-75"
                                             invisible="status != 'disqualified' or round_number &gt;= parent.bidding_round"/>
                                     <field name="status" column_invisible="True"/>
                                     <field name="is_currently_selectable" column_invisible="True"/>
@@ -530,10 +521,8 @@
                                            options="{'currency_field': 'currency_id'}"/>
                                     <field name="bid_amount" string="Proposed Fee" widget="monetary"
                                            options="{'currency_field': 'currency_id'}"/>
-                                    <field name="requested_delivery_date"
-                                           options="{'numeric': True}"/>
-                                    <field name="proposed_delivery_date"
-                                           options="{'numeric': True}"/>
+                                    <field name="requested_delivery_date" options="{'numeric': True}"/>
+                                    <field name="proposed_delivery_date" options="{'numeric': True}"/>
                                     <field name="notes" string="Vendor Comments"/>
                                     <field name="submitted_at"/>
                                     <field name="last_revised_at"/>
@@ -541,6 +530,22 @@
                             </field>
                         </page>
 
+                        <page string="History / Notes">
+                            <group string="Order Notes">
+                                <field name="notes" readonly="status == 'completed'"/>
+                            </group>
+                            <group string="Lifecycle History">
+                                <field name="lifecycle_event_ids" nolabel="1" readonly="1">
+                                    <list create="false" edit="false" delete="false">
+                                        <field name="event_at"/>
+                                        <field name="event_type"/>
+                                        <field name="actor_id"/>
+                                        <field name="from_status"/>
+                                        <field name="to_status"/>
+                                    </list>
+                                </field>
+                            </group>
+                        </page>
                     </notebook>
 
                     <chatter/>
@@ -549,6 +554,50 @@
 
             </form>
 
+        </field>
+    </record>
+
+    <record id="view_trucalc_order_bank_profile_form" model="ir.ui.view">
+        <field name="name">trucalc.order.bank.profile.form</field>
+        <field name="model">trucalc.order</field>
+        <field name="priority" eval="90"/>
+        <field name="arch" type="xml">
+            <form string="Bank Details" class="o_trucalc_readonly_profile"
+                  create="false" edit="false" delete="false" duplicate="false">
+                <sheet>
+                    <group>
+                        <field name="bank_profile_name" readonly="1"/>
+                        <field name="bank_profile_state" readonly="1"/>
+                        <field name="bank_profile_email" readonly="1" widget="email"/>
+                        <field name="bank_profile_phone" readonly="1" widget="phone"/>
+                    </group>
+                </sheet>
+                <footer>
+                    <button string="Close" special="cancel" class="btn-primary"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_trucalc_order_requestor_profile_form" model="ir.ui.view">
+        <field name="name">trucalc.order.requestor.profile.form</field>
+        <field name="model">trucalc.order</field>
+        <field name="priority" eval="90"/>
+        <field name="arch" type="xml">
+            <form string="Requestor Details" class="o_trucalc_readonly_profile"
+                  create="false" edit="false" delete="false" duplicate="false">
+                <sheet>
+                    <group>
+                        <field name="requestor_profile_name" readonly="1"/>
+                        <field name="requestor_profile_bank" readonly="1"/>
+                        <field name="requestor_profile_email" readonly="1" widget="email"/>
+                        <field name="requestor_profile_phone" readonly="1" widget="phone"/>
+                    </group>
+                </sheet>
+                <footer>
+                    <button string="Close" special="cancel" class="btn-primary"/>
+                </footer>
+            </form>
         </field>
     </record>
 
@@ -615,6 +664,7 @@
         <field name="name">Orders</field>
         <field name="res_model">trucalc.order</field>
         <field name="view_mode">list,form</field>
+        <field name="limit">20</field>
         <field name="view_ids" eval="[
             Command.clear(),
             Command.create({'sequence': 1, 'view_mode': 'list', 'view_id': ref('view_trucalc_order_list')}),
