@@ -134,6 +134,7 @@ class TestInternalUXPassA(TransactionCase):
                 "menu_trucalc_orders", "menu_unpaid_bank_invoices",
                 "menu_trucalc_draft_support", "menu_trucalc_vendors",
                 "menu_trucalc_configuration", "menu_trucalc_banks",
+                "menu_trucalc_internal_users",
                 "menu_trucalc_service_areas", "menu_trucalc_negotiated_fees",
                 "menu_trucalc_document_tags",
             )
@@ -158,8 +159,9 @@ class TestInternalUXPassA(TransactionCase):
                 "menu_trucalc_configuration"
             ].child_id.sorted(lambda menu: (menu.sequence, menu.id))],
             [
-                ("Banks", 10), ("Service Areas", 20),
-                ("Negotiated Fee Schedules", 30), ("Document Tags", 40),
+                ("Banks", 10), ("TruCalc Users", 20),
+                ("Service Areas", 30),
+                ("Negotiated Fee Schedules", 40), ("Document Tags", 50),
             ],
         )
         self.assertEqual(

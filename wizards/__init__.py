@@ -11,3 +11,4 @@ from . import location_correction_wizard
 from . import bank_invoice_status_wizard
 from . import bank_provision
 from . import bank_user_provision
+from . import internal_user_provision

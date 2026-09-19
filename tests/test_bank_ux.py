@@ -1,5 +1,6 @@
 import ast
 from pathlib import Path
+from urllib.parse import urlsplit
 from unittest.mock import patch
 
 from lxml import html
@@ -113,7 +114,7 @@ class TestBankUX(TestBankOrderPortal):
     def test_asset_scope_contract(self):
         root = Path(__file__).resolve().parents[1]
         manifest = ast.literal_eval((root / '__manifest__.py').read_text())
-        self.assertEqual(manifest['version'], '1.27')
+        self.assertEqual(manifest['version'], '1.28')
         self.assertNotIn('web._assets_primary_variables', manifest['assets'])
         self.assertFalse(any('trucalc_tokens' in p or 'bank_portal.scss' in p or 'trucalc_login' in p
                              for p in manifest['assets']['web.assets_backend']))
@@ -141,6 +142,62 @@ class TestBankUX(TestBankOrderPortal):
             console.log('test successful');
             })();
         """, ready="!!document.querySelector('.o_trucalc_login .passkey_login_link')")
+
+    def test_internal_signup_uses_scoped_trucalc_branding(self):
+        main = self.env.ref("base.main_company")
+        internal = self.env["res.users"].with_context(
+            no_reset_password=True
+        ).create({
+            "name": "Internal Signup Branding",
+            "login": "internal-signup-branding@example.test",
+            "email": "internal-signup-branding@example.test",
+            "company_id": main.id,
+            "company_ids": [Command.set(
+                self.env["res.users"]._trucalc_internal_companies().ids
+            )],
+            "group_ids": [Command.set([
+                self.env.ref("trucalc_orders.group_trucalc_operations").id,
+            ])],
+        })
+        internal.partner_id.signup_prepare(signup_type="signup")
+        signup_url = internal.partner_id._get_signup_url()
+        signup_path = urlsplit(signup_url).path + "?" + urlsplit(
+            signup_url
+        ).query
+
+        generic = self.env["res.users"].with_context(
+            no_reset_password=True
+        ).create({
+            "name": "Generic Signup Branding",
+            "login": "generic-signup-branding@example.test",
+            "email": "generic-signup-branding@example.test",
+            "company_id": main.id,
+            "company_ids": [Command.set([main.id])],
+            "group_ids": [Command.set([self.env.ref("base.group_user").id])],
+        })
+        generic.partner_id.signup_prepare(signup_type="signup")
+        generic_url = generic.partner_id._get_signup_url()
+        generic_path = urlsplit(generic_url).path + "?" + urlsplit(
+            generic_url
+        ).query
+
+        self.authenticate(None, None)
+        branded = self.url_open(signup_path)
+        self.assertEqual(branded.status_code, 200)
+        self.assertIn("o_trucalc_login", branded.text)
+        self.assertNotIn("Powered by", branded.text)
+        unbranded = self.url_open(generic_path)
+        self.assertEqual(unbranded.status_code, 200)
+        self.assertNotIn("o_trucalc_login", unbranded.text)
+
+        self.browser_js(signup_path, """
+            const card = document.querySelector('.o_trucalc_login');
+            if (!card) throw Error('Missing scoped TruCalc signup marker');
+            if (getComputedStyle(card).getPropertyValue('--trucalc-primary').trim() !== '#022f5b') throw Error('Missing token');
+            if (getComputedStyle(card.querySelector('.btn-primary')).backgroundColor !== 'rgb(2, 47, 91)') throw Error('Unbranded signup button');
+            if (getComputedStyle(document.body).getPropertyValue('--trucalc-primary')) throw Error('Global token leak');
+            console.log('test successful');
+        """, ready="!!document.querySelector('.o_trucalc_login .oe_signup_form')")
 
     def test_bank_browser_responsive_shell(self):
         order = self.env['trucalc.order'].with_user(self.bank_requestor)._create_bank_draft(

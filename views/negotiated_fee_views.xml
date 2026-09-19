@@ -68,6 +68,6 @@
     </record>
     <menuitem id="menu_trucalc_negotiated_fees" name="Negotiated Fee Schedules"
               parent="menu_trucalc_configuration"
-              action="action_trucalc_negotiated_fees" sequence="30"
+              action="action_trucalc_negotiated_fees" sequence="40"
               groups="trucalc_orders.group_trucalc_admin"/>
 </odoo>

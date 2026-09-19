@@ -1,6 +1,6 @@
 {
     'name': 'TruCalc Orders',
-    'version': '1.27',
+    'version': '1.28',
     'author': 'TruCalc',
     'license': 'LGPL-3',
     'category': 'Services',
@@ -18,6 +18,7 @@
         'data/vendor_authorization_cron.xml',
         'data/document_tags.xml',
         'data/bank_user_invitation_template.xml',
+        'data/internal_user_invitation_template.xml',
         'views/vendor_portal_provision_views.xml',
         'views/order_decline_wizard_views.xml',
         'views/fee_change_request_views.xml',
@@ -37,6 +38,7 @@
         'views/document_tag_views.xml',
         'views/bank_provision_views.xml',
         'views/bank_user_provision_views.xml',
+        'views/internal_user_provision_views.xml',
         'views/bank_views.xml',
         'views/service_area_views.xml',
         'views/negotiated_fee_views.xml',

@@ -70,6 +70,6 @@
     </record>
     <menuitem id="menu_trucalc_service_areas" name="Service Areas"
               parent="menu_trucalc_configuration"
-              action="action_trucalc_service_areas" sequence="20"
+              action="action_trucalc_service_areas" sequence="30"
               groups="trucalc_orders.group_trucalc_admin"/>
 </odoo>

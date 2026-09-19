@@ -21,6 +21,6 @@
         <field name="active" eval="False"/>
     </record>
     <menuitem id="menu_trucalc_document_tags" name="Document Tags" parent="menu_trucalc_configuration"
-              action="action_trucalc_document_tags" sequence="40"
+              action="action_trucalc_document_tags" sequence="50"
               groups="trucalc_orders.group_trucalc_admin"/>
 </odoo>

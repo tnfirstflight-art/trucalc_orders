@@ -7,6 +7,7 @@ from . import ir_rule
 from . import res_users
 from . import res_company
 from . import bank_admin_audit
+from . import internal_user_admin_audit
 from . import ir_ui_menu
 from . import vendor
 from . import document_tag

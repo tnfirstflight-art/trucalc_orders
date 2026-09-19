@@ -1,4 +1,5 @@
 import logging
+import re
 
 from odoo import Command, api, fields, models, tools, _
 from odoo.exceptions import AccessError, UserError, ValidationError
@@ -314,6 +315,511 @@ class ResUsers(models.Model):
             "mail_id": mail.id,
             "state": mail.state,
         }
+
+    @api.model
+    @api.private
+    def _trucalc_internal_role_map(self):
+        return {
+            "administrator": self.env.ref("trucalc_orders.group_trucalc_admin"),
+            "operations": self.env.ref("trucalc_orders.group_trucalc_operations"),
+        }
+
+    @api.private
+    def _trucalc_internal_role_key(self):
+        self.ensure_one()
+        memberships = self._trucalc_persona_membership()["internal"]
+        for key, group in self._trucalc_internal_role_map().items():
+            if group in memberships:
+                return key
+        return False
+
+    @api.model
+    @api.private
+    def _trucalc_normalize_internal_login(self, value):
+        normalized = tools.email_normalize(value or "")
+        if not normalized or normalized != (value or "").strip().casefold():
+            raise ValidationError(_(
+                "Enter one valid email address for the TruCalc internal user."
+            ))
+        return normalized
+
+    @api.model
+    @api.private
+    def _trucalc_format_internal_phone(self, value):
+        phone = (value or "").strip()
+        if not phone:
+            return False
+        if re.fullmatch(r"[0-9().\-\s]+", phone):
+            digits = re.sub(r"\D", "", phone)
+            if len(digits) == 10:
+                return "(%s) %s-%s" % (
+                    digits[:3], digits[3:6], digits[6:],
+                )
+        return phone
+
+    @api.model
+    @api.private
+    def _trucalc_find_internal_user_identity(self, normalized):
+        return self._trucalc_find_bank_user_identity(normalized)
+
+    @api.model
+    @api.private
+    def _trucalc_internal_companies(self):
+        main_company = self.env.ref("base.main_company")
+        banks = self.env["res.company"].sudo().with_context(active_test=False).search([
+            ("trucalc_is_bank", "=", True),
+        ])
+        return main_company | banks
+
+    @api.model
+    @api.private
+    def _trucalc_require_internal_administrator(self):
+        actor = self.env.user
+        membership = actor._trucalc_persona_membership()
+        if (
+            not actor.active or actor.share
+            or membership["internal"] != self.env.ref(
+                "trucalc_orders.group_trucalc_admin"
+            )
+            or membership["bank"] or membership["vendor"]
+            or actor.trucalc_bank_company_id or actor.trucalc_vendor_id
+            or self.env.ref("base.group_user") not in actor.sudo().all_group_ids
+        ):
+            raise AccessError(_(
+                "Only active TruCalc Administrators may manage TruCalc internal users."
+            ))
+        return actor
+
+    @api.private
+    def _trucalc_assert_managed_internal_user(
+        self, require_active=True, require_company_binding=True,
+    ):
+        self.ensure_one()
+        user = self.sudo().with_context(active_test=False).exists()
+        membership = user._trucalc_persona_membership() if user else {}
+        companies = self._trucalc_internal_companies()
+        if (
+            not user or (require_active and not user.active)
+            or len(membership.get("internal", self.env["res.groups"])) != 1
+            or membership.get("bank") or membership.get("vendor")
+            or user.share
+            or self.env.ref("base.group_user") not in user.all_group_ids
+            or user.trucalc_bank_company_id or user.trucalc_vendor_id
+            or (
+                require_company_binding
+                and (
+                    user.company_id != self.env.ref("base.main_company")
+                    or user.company_ids != companies
+                )
+            )
+        ):
+            raise AccessError(_(
+                "The TruCalc internal user is not configured for this controlled action."
+            ))
+        return user
+
+    @api.model
+    @api.private
+    def _trucalc_partner_is_internal_reusable(self, partner, normalized):
+        partner.ensure_one()
+        partner = partner.sudo().with_context(active_test=False)
+        company_partners = self.env["res.company"].sudo().with_context(
+            active_test=False
+        ).search([("trucalc_is_bank", "=", True)]).mapped("partner_id")
+        vendor_collision = self.env["trucalc.vendor"].sudo().with_context(
+            active_test=False
+        ).search([("email", "=ilike", normalized)]).filtered(
+            lambda vendor: tools.email_normalize(vendor.email or "") == normalized
+        )
+        if (
+            not partner.active or partner.user_ids
+            or tools.email_normalize(partner.email or "") != normalized
+            or partner in company_partners
+            or partner.commercial_partner_id in company_partners
+            or partner.company_id.trucalc_is_bank
+            or vendor_collision
+        ):
+            raise self._trucalc_identity_collision()
+        return partner
+
+    @api.model
+    @api.private
+    def _trucalc_provision_internal_user(
+        self, name, login, phone, role, reviewer=False,
+    ):
+        actor = self._trucalc_require_internal_administrator()
+        normalized = self._trucalc_normalize_internal_login(login)
+        clean_name = " ".join((name or "").split())
+        selected = self._trucalc_internal_role_map().get(role)
+        if not clean_name or not selected:
+            raise ValidationError(_("Name and one TruCalc internal role are required."))
+        partner, user = self._trucalc_find_internal_user_identity(normalized)
+        if user:
+            membership = user._trucalc_persona_membership()
+            if (
+                len(membership["internal"]) == 1
+                and not membership["bank"] and not membership["vendor"]
+                and not user.trucalc_bank_company_id and not user.trucalc_vendor_id
+            ):
+                if user.active:
+                    raise ValidationError(_(
+                        "This TruCalc internal user already exists. Use the controlled "
+                        "TruCalc Users actions."
+                    ))
+                raise ValidationError(_(
+                    "This TruCalc internal user is inactive. Use the controlled "
+                    "Reactivate action."
+                ))
+            raise self._trucalc_identity_collision()
+        reused_partner = bool(partner)
+        if partner:
+            partner = self._trucalc_partner_is_internal_reusable(partner, normalized)
+        reviewer_group = self.env.ref("trucalc_orders.group_trucalc_reviewer")
+        groups = selected | (reviewer_group if reviewer else self.env["res.groups"])
+        companies = self._trucalc_internal_companies()
+        main_company = self.env.ref("base.main_company")
+        with self.env.cr.savepoint():
+            values = {
+                "name": clean_name,
+                "login": normalized,
+                "email": normalized,
+                "phone": self._trucalc_format_internal_phone(phone),
+                "active": True,
+                "share": False,
+                "group_ids": [Command.set(groups.ids)],
+                "trucalc_bank_company_id": False,
+                "trucalc_vendor_id": False,
+                "company_id": main_company.id,
+                "company_ids": [Command.set(companies.ids)],
+            }
+            if partner:
+                values["partner_id"] = partner.id
+            user = self.sudo().with_context(no_reset_password=True).create(values)
+            user.invalidate_recordset()
+            user._trucalc_assert_managed_internal_user()
+            if (
+                user._trucalc_internal_role_key() != role
+                or bool(user._trucalc_persona_membership()["reviewer"]) != bool(reviewer)
+                or user.action_id.id != self.env.ref(
+                    "trucalc_orders.action_trucalc_orders"
+                ).id
+            ):
+                raise ValidationError(_(
+                    "TruCalc internal user provisioning did not complete safely "
+                    "(role=%(role)s, reviewer=%(reviewer)s, home_action=%(action)s).",
+                    role=user._trucalc_internal_role_key(),
+                    reviewer=bool(user._trucalc_persona_membership()["reviewer"]),
+                    action=user.action_id.id,
+                ))
+            Audit = self.env["trucalc.internal.user.admin.audit"]
+            Audit._trucalc_log(
+                "user_provisioned", actor, user,
+                new_role=role, new_reviewer=reviewer, new_active=True,
+                reused_identity=reused_partner,
+                metadata={"phone_provided": bool(phone)},
+            )
+            if reused_partner:
+                Audit._trucalc_log(
+                    "existing_partner_reused", actor, user,
+                    new_role=role, new_reviewer=reviewer, new_active=True,
+                    reused_identity=True,
+                )
+        return user
+
+    @api.model
+    @api.private
+    def _trucalc_active_internal_administrators(self):
+        admin = self.env.ref("trucalc_orders.group_trucalc_admin")
+        candidates = self.sudo().search([
+            ("active", "=", True), ("share", "=", False),
+            ("group_ids", "in", admin.id),
+        ])
+        return candidates.filtered(lambda user: (
+            user._trucalc_persona_membership()["internal"] == admin
+            and not user._trucalc_persona_membership()["bank"]
+            and not user._trucalc_persona_membership()["vendor"]
+            and not user.trucalc_bank_company_id and not user.trucalc_vendor_id
+        ))
+
+    @api.private
+    def _trucalc_change_internal_role(self, role):
+        self.ensure_one()
+        actor = self.env["res.users"]._trucalc_require_internal_administrator()
+        target = self._trucalc_assert_managed_internal_user()
+        selected = self._trucalc_internal_role_map().get(role)
+        if not selected:
+            raise ValidationError(_("Select one TruCalc internal role."))
+        prior = target._trucalc_internal_role_key()
+        if prior == role:
+            raise ValidationError(_("The TruCalc internal user already has this role."))
+        if (
+            prior == "administrator" and role != "administrator"
+            and len(self._trucalc_active_internal_administrators()) <= 1
+        ):
+            raise ValidationError(_(
+                "TruCalc must retain at least one active Administrator."
+            ))
+        internal_roles = self.env["res.groups"].browse([
+            group.id for group in self._trucalc_internal_role_map().values()
+        ])
+        direct = target.group_ids - internal_roles
+        companies = self._trucalc_internal_companies()
+        with self.env.cr.savepoint():
+            target.write({
+                "group_ids": [Command.set((direct | selected).ids)],
+                "company_id": self.env.ref("base.main_company").id,
+                "company_ids": [Command.set(companies.ids)],
+            })
+            target.invalidate_recordset()
+            target._trucalc_assert_managed_internal_user()
+            if (
+                target._trucalc_internal_role_key() != role
+                or target.action_id.id != self.env.ref(
+                    "trucalc_orders.action_trucalc_orders"
+                ).id
+            ):
+                raise ValidationError(_("The TruCalc role change did not complete safely."))
+            self.env["trucalc.internal.user.admin.audit"]._trucalc_log(
+                "role_changed", actor, target,
+                prior_role=prior, new_role=role,
+                prior_reviewer=bool(target._trucalc_persona_membership()["reviewer"]),
+                new_reviewer=bool(target._trucalc_persona_membership()["reviewer"]),
+                prior_active=True, new_active=True,
+            )
+        return True
+
+    @api.private
+    def _trucalc_active_review_assignment_count(self):
+        self.ensure_one()
+        return self.env["trucalc.order"].sudo().search_count([
+            ("reviewer_user_id", "=", self.id),
+            ("status", "in", ("reviewer_assigned", "under_review")),
+        ])
+
+    @api.private
+    def _trucalc_set_internal_reviewer(self, enabled):
+        self.ensure_one()
+        actor = self.env["res.users"]._trucalc_require_internal_administrator()
+        target = self._trucalc_assert_managed_internal_user()
+        reviewer_group = self.env.ref("trucalc_orders.group_trucalc_reviewer")
+        prior = bool(target._trucalc_persona_membership()["reviewer"])
+        enabled = bool(enabled)
+        if prior == enabled:
+            raise ValidationError(_(
+                "The TruCalc user already has this Reviewer capability state."
+            ))
+        if not enabled and target._trucalc_active_review_assignment_count():
+            raise ValidationError(_(
+                "Reassign the user's active reviews before removing Reviewer capability."
+            ))
+        command = Command.link(reviewer_group.id) if enabled else Command.unlink(
+            reviewer_group.id
+        )
+        with self.env.cr.savepoint():
+            target.write({"group_ids": [command]})
+            target.invalidate_recordset()
+            target._trucalc_assert_managed_internal_user()
+            if bool(target._trucalc_persona_membership()["reviewer"]) != enabled:
+                raise ValidationError(_(
+                    "The Reviewer capability change did not complete safely."
+                ))
+            self.env["trucalc.internal.user.admin.audit"]._trucalc_log(
+                "reviewer_added" if enabled else "reviewer_removed",
+                actor, target,
+                prior_role=target._trucalc_internal_role_key(),
+                new_role=target._trucalc_internal_role_key(),
+                prior_reviewer=prior, new_reviewer=enabled,
+                prior_active=True, new_active=True,
+            )
+        return True
+
+    @api.private
+    def _trucalc_open_activity_count(self):
+        self.ensure_one()
+        return self.env["mail.activity"].sudo().search_count([
+            ("user_id", "=", self.id),
+        ])
+
+    @api.private
+    def _trucalc_deactivate_internal_user(self, acknowledge_open_activities=False):
+        self.ensure_one()
+        actor = self.env["res.users"]._trucalc_require_internal_administrator()
+        target = self._trucalc_assert_managed_internal_user()
+        if target == actor:
+            raise ValidationError(_("You cannot deactivate your own TruCalc account."))
+        if (
+            target._trucalc_internal_role_key() == "administrator"
+            and len(self._trucalc_active_internal_administrators()) <= 1
+        ):
+            raise ValidationError(_(
+                "TruCalc must retain at least one active Administrator."
+            ))
+        if target._trucalc_active_review_assignment_count():
+            raise ValidationError(_(
+                "Reassign the user's active reviews before deactivating the user."
+            ))
+        activity_count = target._trucalc_open_activity_count()
+        if activity_count and not acknowledge_open_activities:
+            raise ValidationError(_(
+                "Acknowledge the user's open Odoo activities before deactivation."
+            ))
+        role = target._trucalc_internal_role_key()
+        reviewer = bool(target._trucalc_persona_membership()["reviewer"])
+        companies = target.company_ids
+        groups = target.group_ids
+        partner = target.partner_id
+        with self.env.cr.savepoint():
+            target.write({"active": False})
+            target.invalidate_recordset()
+            target._trucalc_assert_managed_internal_user(
+                require_active=False, require_company_binding=True,
+            )
+            if (
+                target.active or target.group_ids != groups
+                or target.company_ids != companies or target.partner_id != partner
+            ):
+                raise ValidationError(_(
+                    "TruCalc internal user deactivation did not complete safely."
+                ))
+            self.env["trucalc.internal.user.admin.audit"]._trucalc_log(
+                "user_deactivated", actor, target,
+                prior_role=role, new_role=role,
+                prior_reviewer=reviewer, new_reviewer=reviewer,
+                prior_active=True, new_active=False,
+                metadata={
+                    "open_activity_count": activity_count,
+                    "open_activities_acknowledged": bool(activity_count),
+                },
+            )
+        return True
+
+    @api.private
+    def _trucalc_reactivate_internal_user(self):
+        self.ensure_one()
+        actor = self.env["res.users"]._trucalc_require_internal_administrator()
+        target = self._trucalc_assert_managed_internal_user(
+            require_active=False, require_company_binding=False,
+        )
+        if target.active:
+            raise ValidationError(_("The TruCalc internal user is already active."))
+        normalized = self._trucalc_normalize_internal_login(target.login)
+        partner, collision = self._trucalc_find_internal_user_identity(normalized)
+        if collision != target or partner != target.partner_id:
+            raise self._trucalc_identity_collision()
+        role = target._trucalc_internal_role_key()
+        reviewer = bool(target._trucalc_persona_membership()["reviewer"])
+        companies = self._trucalc_internal_companies()
+        main_company = self.env.ref("base.main_company")
+        if (
+            target.company_id != main_company
+            or bool(target.company_ids - companies)
+        ):
+            raise self._trucalc_identity_collision()
+        with self.env.cr.savepoint():
+            target.write({
+                "active": True,
+                "share": False,
+                "trucalc_bank_company_id": False,
+                "trucalc_vendor_id": False,
+                "company_id": main_company.id,
+                "company_ids": [Command.set(companies.ids)],
+            })
+            target.invalidate_recordset()
+            target._trucalc_assert_managed_internal_user()
+            if target.action_id.id != self.env.ref(
+                "trucalc_orders.action_trucalc_orders"
+            ).id:
+                raise ValidationError(_(
+                    "TruCalc internal user reactivation did not complete safely."
+                ))
+            self.env["trucalc.internal.user.admin.audit"]._trucalc_log(
+                "user_reactivated", actor, target,
+                prior_role=role, new_role=role,
+                prior_reviewer=reviewer, new_reviewer=reviewer,
+                prior_active=False, new_active=True,
+            )
+        return True
+
+    @api.private
+    def _trucalc_send_internal_invitation(self):
+        self.ensure_one()
+        actor = self.env["res.users"]._trucalc_require_internal_administrator()
+        target = self._trucalc_assert_managed_internal_user()
+        normalized = self._trucalc_normalize_internal_login(target.login)
+        partner, collision = self._trucalc_find_internal_user_identity(normalized)
+        if collision != target or partner != target.partner_id:
+            raise self._trucalc_identity_collision()
+        template = self.env.ref(
+            "trucalc_orders.mail_template_internal_user_invitation"
+        )
+        main_company = self.env.ref("base.main_company")
+        if not main_company.email:
+            raise UserError(_("The TruCalc sender email is not configured."))
+        Audit = self.env["trucalc.internal.user.admin.audit"]
+        prior_attempt = bool(Audit.sudo().search_count([
+            ("target_user_id", "=", target.id),
+            ("event_type", "in", (
+                "invitation_sent", "invitation_resent", "invitation_failed",
+            )),
+        ]))
+        try:
+            with self.env.cr.savepoint():
+                target.partner_id.sudo().signup_prepare(signup_type="signup")
+                mail_id = template.sudo().with_context(
+                    dbname=self.env.cr.dbname,
+                    lang=target.lang or self.env.lang,
+                    allowed_company_ids=[main_company.id],
+                ).send_mail(
+                    target.id, force_send=True, raise_exception=False,
+                    email_values={
+                        "auto_delete": False,
+                        "email_from": main_company.email_formatted,
+                        "email_to": target.email,
+                        "recipient_ids": [],
+                        "partner_ids": [],
+                    },
+                )
+                if not mail_id:
+                    raise UserError(_(
+                        "The TruCalc invitation could not be sent. No invitation "
+                        "attempt was retained."
+                    ))
+                mail = self.env["mail.mail"].sudo().browse(mail_id).exists()
+                if not mail:
+                    raise UserError(_(
+                        "The TruCalc invitation could not be retained for inspection."
+                    ))
+                target._trucalc_assert_managed_internal_user()
+                sent = mail.state == "sent"
+                Audit._trucalc_log(
+                    (
+                        "invitation_resent" if prior_attempt
+                        else "invitation_sent"
+                    ) if sent else "invitation_failed",
+                    actor, target,
+                    prior_role=target._trucalc_internal_role_key(),
+                    new_role=target._trucalc_internal_role_key(),
+                    prior_reviewer=bool(
+                        target._trucalc_persona_membership()["reviewer"]
+                    ),
+                    new_reviewer=bool(
+                        target._trucalc_persona_membership()["reviewer"]
+                    ),
+                    prior_active=True, new_active=True,
+                    mail=mail,
+                    metadata={
+                        "template": template.get_external_id().get(template.id),
+                        "resend": prior_attempt,
+                    },
+                )
+        except Exception as exc:
+            if isinstance(exc, (AccessError, ValidationError, UserError)):
+                raise
+            raise UserError(_(
+                "The TruCalc invitation could not be sent. No invitation success "
+                "was recorded."
+            )) from exc
+        return {"sent": sent, "mail_id": mail.id, "state": mail.state}
 
     @api.model
     def _get_invalidation_fields(self):
