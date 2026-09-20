@@ -1531,3 +1531,113 @@ class TestInternalUXPassABrowser(HttpCase):
             ready="!!document.querySelector('.o_trucalc_order_identity')",
             timeout=90,
         )
+
+
+@tagged("post_install", "-at_install", "trucalc_internal_company_selector")
+class TestInternalCompanySelectorBrowser(HttpCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.password = "internal-company-selector"
+        cls.main = cls.env.ref("base.main_company")
+        cls.bank = cls.env["res.company"].with_context(
+            trucalc_test_bank_fixture=True
+        ).create({
+            "name": "Internal Company Selector Bank",
+            "currency_id": cls.main.currency_id.id,
+            "trucalc_is_bank": True,
+            "trucalc_bank_active": True,
+        })
+        cls.companies = cls.main | cls.env["res.company"].with_context(
+            active_test=False
+        ).search([("trucalc_is_bank", "=", True)])
+        cls.clean_users = [
+            cls._user("admin", ["group_trucalc_admin"]),
+            cls._user("operations", ["group_trucalc_operations"]),
+            cls._user(
+                "admin-reviewer",
+                ["group_trucalc_admin", "group_trucalc_reviewer"],
+            ),
+            cls._user(
+                "operations-reviewer",
+                ["group_trucalc_operations", "group_trucalc_reviewer"],
+            ),
+        ]
+        cls.generic = cls._user("generic", [], generic=True)
+        cls.system = cls._user(
+            "system",
+            ["group_trucalc_admin"],
+            system=True,
+        )
+
+    @classmethod
+    def _user(cls, suffix, group_names, generic=False, system=False):
+        group_ids = [
+            cls.env.ref("trucalc_orders.%s" % name).id
+            for name in group_names
+        ]
+        if generic:
+            group_ids.append(cls.env.ref("base.group_user").id)
+        if system:
+            group_ids.append(cls.env.ref("base.group_system").id)
+        return cls.env["res.users"].with_context(
+            no_reset_password=True
+        ).create({
+            "name": "Internal Company Selector %s" % suffix,
+            "login": "internal-company-selector-%s" % suffix,
+            "email": "internal-company-selector-%s@example.test" % suffix,
+            "password": cls.password,
+            "company_id": cls.main.id,
+            "company_ids": [Command.set(cls.companies.ids)],
+            "group_ids": [Command.set(group_ids)],
+        })
+
+    def _assert_desktop_selector(self, user, expected):
+        self.browser_size = "1366x768"
+        self.browser_js(
+            "/odoo",
+            """
+                (async () => {
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    const visible = !!document.querySelector('.o_switch_company_menu');
+                    if (visible !== %s) {
+                        throw Error(`Unexpected desktop company-selector state: ${visible}`);
+                    }
+                    console.log('test successful');
+                })();
+            """ % json.dumps(expected),
+            login=user.login,
+            ready="!!document.querySelector('.o_main_navbar')",
+            timeout=90,
+        )
+
+    def _assert_mobile_selector(self, user, expected):
+        self.browser_size = "390x844"
+        self.browser_js(
+            "/odoo",
+            """
+                (async () => {
+                    document.querySelector('.o_mobile_menu_toggle').click();
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    const visible = !!document.querySelector('.o_burger_menu_companies');
+                    if (visible !== %s) {
+                        throw Error(`Unexpected mobile company-selector state: ${visible}`);
+                    }
+                    console.log('test successful');
+                })();
+            """ % json.dumps(expected),
+            login=user.login,
+            ready="!!document.querySelector('.o_mobile_menu_toggle')",
+            timeout=90,
+        )
+
+    def test_selector_visibility_is_scoped_by_persona_on_desktop(self):
+        for user in self.clean_users:
+            with self.subTest(user=user.login):
+                self._assert_desktop_selector(user, False)
+        for user in (self.generic, self.system):
+            with self.subTest(user=user.login):
+                self._assert_desktop_selector(user, True)
+
+    def test_selector_visibility_is_scoped_on_mobile(self):
+        self._assert_mobile_selector(self.clean_users[-1], False)

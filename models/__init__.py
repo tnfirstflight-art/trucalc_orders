@@ -4,6 +4,7 @@ from . import negotiated_fee
 from . import evaluation_order
 from . import order_lifecycle_event
 from . import ir_rule
+from . import ir_http
 from . import res_users
 from . import res_company
 from . import bank_admin_audit

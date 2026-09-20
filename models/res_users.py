@@ -333,6 +333,27 @@ class ResUsers(models.Model):
                 return key
         return False
 
+    @api.private
+    def _trucalc_should_hide_company_selector(self):
+        """Return whether the standard company chooser is noise for this user."""
+        self.ensure_one()
+        user = self.sudo().with_context(active_test=False)
+        membership = user._trucalc_persona_membership()
+        effective_groups = user.all_group_ids
+        return bool(
+            user.active
+            and not user.share
+            and len(membership["internal"]) == 1
+            and not membership["bank"]
+            and not membership["vendor"]
+            and not user.trucalc_bank_company_id
+            and not user.trucalc_vendor_id
+            and self.env.ref("base.group_user") in effective_groups
+            and self.env.ref("base.group_system") not in effective_groups
+            and user.company_id == self.env.ref("base.main_company")
+            and user.company_ids == user._trucalc_internal_companies()
+        )
+
     @api.model
     @api.private
     def _trucalc_normalize_internal_login(self, value):

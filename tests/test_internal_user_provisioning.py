@@ -171,6 +171,44 @@ class TestInternalUserProvisioning(TransactionCase):
             self.assertEqual(audit.new_role, role)
             self.assertEqual(audit.new_reviewer, reviewer)
 
+    def test_company_selector_scope_preserves_company_memberships(self):
+        admin_reviewer = self._internal_user(
+            "selector-admin-reviewer", "administrator", reviewer=True,
+        )
+        clean_users = (self.admin, self.ops, admin_reviewer, self.reviewer)
+        company_state = {
+            user.id: (user.company_id.id, tuple(user.company_ids.ids))
+            for user in clean_users
+        }
+        for user in clean_users:
+            self.assertTrue(user._trucalc_should_hide_company_selector())
+            self.assertEqual(
+                (user.company_id.id, tuple(user.company_ids.ids)),
+                company_state[user.id],
+            )
+
+        generic = self._plain_user(
+            "selector-generic", self.env.ref("base.group_user"),
+        )
+        generic.company_ids = [Command.set(self._companies().ids)]
+        system = self.env["res.users"].with_context(
+            no_reset_password=True
+        ).create({
+            "name": "Internal Users selector-system",
+            "login": "internal-users-selector-system@example.test",
+            "email": "internal-users-selector-system@example.test",
+            "company_id": self.main.id,
+            "company_ids": [Command.set(self._companies().ids)],
+            "group_ids": [Command.set([
+                self.roles["administrator"].id,
+                self.env.ref("base.group_system").id,
+            ])],
+        })
+        for user in (
+            generic, system, self.portal, self.vendor_user,
+        ):
+            self.assertFalse(user._trucalc_should_hide_company_selector())
+
     def test_internal_phone_us_formatting_and_safe_preservation(self):
         cases = (
             ("6625551212", "(662) 555-1212"),
