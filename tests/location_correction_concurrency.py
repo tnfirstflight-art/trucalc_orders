@@ -74,7 +74,7 @@ def setup():
         "property_address": "1 Concurrency Way",
         "city": "Informational City", "zip_code": "38600",
         "loan_number": "LOCATION-CONCURRENCY", "service_type": "evaluation",
-        "property_type": "commercial",
+        "property_type": "single_family",
         "due_date": fields.Date.add(fields.Date.today(), days=14),
         "inspection_contact_name": "Concurrency Contact",
         "inspection_contact_phone": "9015550100",

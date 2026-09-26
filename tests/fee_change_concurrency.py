@@ -47,7 +47,7 @@ def setup(pending):
     values = {
         'borrower': 'Concurrency fixture', 'property_address': '41 Fixture Way',
         'city': 'Fixture City', 'zip_code': '38600', 'loan_number': 'CONCURRENCY',
-        'service_type': 'evaluation', 'property_type': 'commercial',
+        'service_type': 'evaluation', 'property_type': 'single_family',
         'due_date': fields.Date.to_string(fields.Date.add(fields.Date.today(), days=14)),
         'inspection_contact_name': 'Fixture Contact', 'inspection_contact_phone': '9015550100',
         'inspection_contact_email': 'fixture@example.test', 'notes': '',

@@ -74,7 +74,7 @@ def setup(staged=False):
         "property_address": "1 Race Way",
         "city": "Informational City", "zip_code": "38600",
         "loan_number": "LOCATION-B-RACE", "service_type": "evaluation",
-        "property_type": "commercial",
+        "property_type": "single_family",
         "due_date": fields.Date.add(fields.Date.today(), days=14),
         "inspection_contact_name": "Race Contact",
         "inspection_contact_phone": "9015550100",

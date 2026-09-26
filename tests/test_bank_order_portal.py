@@ -221,6 +221,14 @@ class TestBankOrderPortal(HttpCase):
             form_node = etree.HTML(form.text).xpath(
                 "//form[contains(@class, 'o_trucalc_bank_draft_form')]"
             )[0]
+            property_options = form_node.xpath(
+                ".//select[@name='property_type']/option"
+            )
+            self.assertEqual([
+                (option.get("value"), " ".join(option.itertext()).strip())
+                for option in property_options
+            ], [("single_family", "Single Family")])
+            self.assertEqual(property_options[0].get("selected"), "True")
             matrix = json.loads(form_node.get("data-service-areas"))
             expected_area = {
                 "id": self.service_area.id,
@@ -366,6 +374,45 @@ class TestBankOrderPortal(HttpCase):
             self.assertEqual(
                 self.url_open("/my/trucalc/bank/orders/new").status_code, 404
             )
+
+    def test_tampered_non_single_family_submission_fails_closed(self):
+        self._login(self.bank_requestor)
+        before = self.env["trucalc.order"].sudo().search_count([])
+        values = self._complete_draft_values(property_type="commercial")
+        values["csrf_token"] = self._csrf_token()
+        rejected_create = self.url_open(
+            "/my/trucalc/bank/orders/new", data=values,
+        )
+        self.assertEqual(rejected_create.status_code, 200)
+        self.assertIn(
+            "Bank New Requests currently support Single Family only",
+            rejected_create.text,
+        )
+        self.assertEqual(
+            self.env["trucalc.order"].sudo().search_count([]), before,
+        )
+
+        draft = self.env["trucalc.order"].with_user(
+            self.bank_requestor
+        )._create_bank_draft({
+            "borrower": "Tamper Boundary",
+            "property_address": "77 Tamper Way",
+        }, self.bank_requestor)
+        values.update({
+            "csrf_token": self._csrf_token(), "draft_action": "send",
+        })
+        rejected_send = self.url_open(
+            "/my/trucalc/bank/orders/%s/draft/send" % draft.order_number,
+            data=values,
+        )
+        self.assertEqual(rejected_send.status_code, 200)
+        self.assertIn(
+            "Bank New Requests currently support Single Family only",
+            rejected_send.text,
+        )
+        draft.invalidate_recordset()
+        self.assertEqual(draft.status, "draft")
+        self.assertEqual(draft.property_type, "single_family")
 
     def test_draft_portal_visibility_is_creator_and_same_bank_admin_only(self):
         draft = self.env["trucalc.order"].with_user(

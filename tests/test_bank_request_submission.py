@@ -80,10 +80,66 @@ class TestBankRequestSubmission(TransactionCase):
             self.assertEqual(order.requestor_company_id, self.bank_company)
             self.assertEqual(order.requestor_id, actor)
             self.assertEqual(order.create_uid, actor)
+            self.assertEqual(order.property_type, "single_family")
             self.assertFalse(order.service_area_id)
             self.assertTrue(order.message_ids.filtered(
                 lambda message: "Bank Draft Created" in (message.body or "")
             ))
+
+    def test_pilot_property_type_boundary_preserves_internal_architecture(self):
+        selection = dict(self.env["trucalc.order"]._fields["property_type"].selection)
+        self.assertEqual(set(selection), {
+            "single_family", "duplex", "triplex", "quadplex", "condo",
+            "land", "commercial",
+        })
+        self.assertEqual(
+            self.env["trucalc.order"]._bank_request_property_types(),
+            [("single_family", "Single Family")],
+        )
+        internal = self.env["trucalc.order"].with_user(self.admin).create({
+            "borrower": "Internal Commercial Architecture",
+            "property_address": "90 Internal Architecture Way",
+            "service_type": "evaluation",
+            "property_type": "commercial",
+            "due_date": fields.Date.add(fields.Date.today(), days=7),
+        })
+        self.assertEqual(internal.property_type, "commercial")
+
+    def test_non_single_family_bank_create_update_and_stale_send_fail_closed(self):
+        model = self.env["trucalc.order"].with_user(self.requestor)
+        before = self.env["trucalc.order"].search_count([])
+        with self.assertRaisesRegex(
+            ValidationError, "currently support Single Family only"
+        ):
+            model._create_bank_draft(
+                self._values(property_type="commercial"), self.requestor,
+            )
+        self.assertEqual(self.env["trucalc.order"].search_count([]), before)
+
+        draft = self._create(self.requestor, self._values())
+        with self.assertRaisesRegex(
+            ValidationError, "currently support Single Family only"
+        ):
+            self._update(
+                draft, self.requestor,
+                self._values(property_type="duplex"),
+            )
+        self.assertEqual(draft.property_type, "single_family")
+
+        self.env.cr.execute(
+            "UPDATE trucalc_order SET property_type = 'commercial' WHERE id = %s",
+            (draft.id,),
+        )
+        draft.invalidate_recordset(["property_type"])
+        with self.assertRaisesRegex(
+            ValidationError, "currently support Single Family only"
+        ):
+            self._send(
+                draft, self.requestor,
+                self._values(property_type="commercial"),
+            )
+        self.assertEqual(draft.status, "draft")
+        self.assertEqual(draft.property_type, "commercial")
 
     def test_controlled_update_and_send_are_authoritative(self):
         order = self._create(self.requestor)

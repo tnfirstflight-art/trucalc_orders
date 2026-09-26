@@ -438,6 +438,8 @@ class TruCalcVendorPortal(CustomerPortal):
                 ]._format_inspection_contact_phone(
                     form_values["inspection_contact_phone"]
                 ) or ""
+        elif not order:
+            form_values = {"property_type": "single_family"}
         bank = request.env.user._trucalc_bank_identity()
         matrix = []
         for area in service_areas:
@@ -463,9 +465,9 @@ class TruCalcVendorPortal(CustomerPortal):
             "order": order,
             "service_areas": service_areas,
             "service_area_matrix": json.dumps(matrix),
-            "property_types": request.env["trucalc.order"]._fields[
-                "property_type"
-            ].selection,
+            "property_types": request.env[
+                "trucalc.order"
+            ]._bank_request_property_types(),
             "form_values": form_values or {},
             "submission_error": submission_error,
             "filterby": False,

@@ -72,7 +72,7 @@ class TestPricingArchitecture(TransactionCase):
             "zip_code": "38600",
             "loan_number": "PRICE-1",
             "service_type": "evaluation",
-            "property_type": "commercial",
+            "property_type": "single_family",
             "due_date": fields.Date.to_string(
                 fields.Date.add(fields.Date.today(), days=10)
             ),

@@ -55,7 +55,7 @@ class BankInvoiceFixtures:
     def _priced_order(self):
         values = {"borrower": "Invoice Borrower", "property_address": "42 Invoice Street",
             "city": "Invoice City", "zip_code": "38600", "loan_number": "LOAN-4E2",
-            "service_type": "evaluation", "property_type": "commercial",
+            "service_type": "evaluation", "property_type": "single_family",
             "due_date": str(fields.Date.today() + timedelta(days=14)),
             "inspection_contact_name": "Invoice Contact", "inspection_contact_phone": "9015550100",
             "inspection_contact_email": "invoice@example.test", "notes": "PRIVATE INTERNAL NOTE",

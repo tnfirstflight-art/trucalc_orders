@@ -714,7 +714,7 @@
                         <div class="form-control-plaintext" data-service-fee="">Not configured</div>
                         <div class="form-text">Informational until the request is sent.</div>
                     </div>
-                    <div class="col-md-6"><label class="form-label">Property Type</label><select name="property_type" class="form-select"><option value="">Select a Property Type</option><option t-foreach="property_types" t-as="item" t-att-value="item[0]" t-att-selected="form_values.get('property_type') == item[0]"><t t-out="item[1]"/></option></select></div>
+                    <div class="col-md-6"><label class="form-label">Property Type</label><select name="property_type" class="form-select" required="required"><option t-foreach="property_types" t-as="item" t-att-value="item[0]" t-att-selected="form_values.get('property_type') == item[0]"><t t-out="item[1]"/></option></select></div>
                     <div class="col-md-6"><label class="form-label">Client Due Date</label><input type="date" name="due_date" class="form-control" t-att-min="today" t-att-value="form_values.get('due_date', '')"/></div>
                     <div class="col-md-4"><label class="form-label">Inspection Contact Person</label><input name="inspection_contact_name" class="form-control" maxlength="255" t-att-value="form_values.get('inspection_contact_name', '')"/></div>
                     <div class="col-md-4"><label class="form-label">Inspection Contact Phone</label><input name="inspection_contact_phone" class="form-control" maxlength="64" t-att-value="form_values.get('inspection_contact_phone', '')"/></div>

@@ -113,7 +113,7 @@ class TestLocationCorrectionA(TransactionCase):
             "zip_code": "38103",
             "loan_number": "LOCATION-A",
             "service_type": "evaluation",
-            "property_type": "commercial",
+            "property_type": "single_family",
             "due_date": fields.Date.add(fields.Date.today(), days=10),
             "inspection_contact_name": "Location Contact",
             "inspection_contact_phone": "9015550100",

@@ -17,6 +17,7 @@ BANK_REQUEST_FIELDS = frozenset({
 BANK_ORDER_CREATE_FIELDS = BANK_REQUEST_FIELDS - {
     "service_state_id", "service_county",
 }
+BANK_PILOT_PROPERTY_TYPE = "single_family"
 CURRENT_FEE_FIELDS = frozenset({
     "current_agreed_fee", "current_fee_change_request_id",
     "fee_workflow_revision", "fee_change_request_ids",
@@ -1759,6 +1760,15 @@ class EvaluationOrder(models.Model):
 
     @api.model
     @api.private
+    def _bank_request_property_types(self):
+        """Return the prospective property types exposed to Bank requestors."""
+        return [
+            item for item in self._fields["property_type"].selection
+            if item[0] == BANK_PILOT_PROPERTY_TYPE
+        ]
+
+    @api.model
+    @api.private
     def _prepare_bank_request_values(self, values, actor, final=False):
         if not isinstance(values, dict) or set(values) - BANK_REQUEST_FIELDS:
             raise AccessError(_("The Bank request contains unauthorized Order fields."))
@@ -1794,10 +1804,16 @@ class EvaluationOrder(models.Model):
         property_type = clean_text(
             "property_type", "Property Type", 64, required=final,
         )
+        if not property_type and not final:
+            property_type = BANK_PILOT_PROPERTY_TYPE
         if property_type and property_type not in dict(
             self._fields["property_type"].selection
         ):
             raise ValidationError(_("Select a valid Property Type."))
+        if property_type and property_type != BANK_PILOT_PROPERTY_TYPE:
+            raise ValidationError(_(
+                "Bank New Requests currently support Single Family only."
+            ))
         prepared["property_type"] = property_type
 
         service_type = clean_text(
