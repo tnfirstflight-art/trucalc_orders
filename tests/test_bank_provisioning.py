@@ -116,6 +116,123 @@ class TestBankProvisioning(TransactionCase):
         for user in (self.internal, self.plain_portal, self.vendor_user):
             self.assertNotIn(bank, user.company_ids)
 
+    def test_administrator_reads_banks_with_only_primary_company_activated(self):
+        active_bank = self._create_bank("Primary Context Active")
+        inactive_bank = self._create_bank("Primary Context Inactive")
+        inactive_bank.with_user(self.admin).action_trucalc_deactivate_bank()
+        self.admin.sudo().write({
+            "company_ids": [Command.set(
+                self.env["res.users"]._trucalc_internal_companies().ids
+            )],
+        })
+        action = self.env.ref("trucalc_orders.action_trucalc_banks")
+        Company = self.env["res.company"].with_user(self.admin).with_context(
+            active_test=False,
+            allowed_company_ids=[self.main.id],
+        )
+        AllCompanies = self.env["res.company"].with_user(self.admin).with_context(
+            active_test=False,
+            allowed_company_ids=self.admin.company_ids.ids,
+        )
+
+        self.assertTrue((active_bank | inactive_bank) <= self.admin.company_ids)
+        self.assertTrue(self.admin._trucalc_should_hide_company_selector())
+        self.assertTrue(
+            (active_bank | inactive_bank)
+            <= AllCompanies.search(literal_eval(action.domain))
+        )
+        self.assertTrue(
+            (active_bank | inactive_bank)
+            <= Company.search(literal_eval(action.domain))
+        )
+        active_banks = Company.search(
+            literal_eval(action.domain)
+            + [("trucalc_bank_active", "=", True)]
+        )
+        self.assertIn(active_bank, active_banks)
+        self.assertNotIn(inactive_bank, active_banks)
+        inactive_banks = Company.search(
+            literal_eval(action.domain)
+            + [("trucalc_bank_active", "=", False)]
+        )
+        self.assertIn(inactive_bank, inactive_banks)
+        self.assertNotIn(active_bank, inactive_banks)
+        self.assertEqual(
+            Company.browse(active_bank.id).read([
+                "name", "trucalc_is_bank", "trucalc_bank_active",
+            ]),
+            [{
+                "id": active_bank.id,
+                "name": active_bank.name,
+                "trucalc_is_bank": True,
+                "trucalc_bank_active": True,
+            }],
+        )
+
+    def test_bank_company_read_rule_is_narrow_and_read_only(self):
+        rule = self.env.ref(
+            "trucalc_orders.rule_trucalc_admin_bank_companies_read"
+        )
+        self.assertFalse(rule["global"])
+        self.assertEqual(rule.groups, self.groups["group_trucalc_admin"])
+        self.assertEqual(
+            literal_eval(rule.domain_force),
+            [("trucalc_is_bank", "=", True)],
+        )
+        self.assertTrue(rule.perm_read)
+        self.assertFalse(rule.perm_write)
+        self.assertFalse(rule.perm_create)
+        self.assertFalse(rule.perm_unlink)
+
+        bank = self._create_bank("Read Rule")
+        unrelated = self.env["res.company"].sudo().create({
+            "name": "5A1 Unrelated Non-Bank Company",
+        })
+        Company = self.env["res.company"].with_user(self.admin).with_context(
+            active_test=False,
+            allowed_company_ids=[self.main.id],
+        )
+        self.assertIn(bank, Company.search([]))
+        self.assertNotIn(unrelated, Company.search([]))
+        with self.assertRaises(AccessError):
+            Company.browse(unrelated.id).read(["name"])
+
+        with self.assertRaises(AccessError):
+            Company.create({"name": "5A1 Raw Company Create"})
+        with self.assertRaises(AccessError):
+            Company.browse(unrelated.id).write({"name": "5A1 Raw Company Write"})
+        with self.assertRaises(AccessError):
+            Company.browse(unrelated.id).unlink()
+
+    def test_bank_company_read_rule_does_not_broaden_portal_companies(self):
+        bank_a = self._create_bank("Portal Scope A")
+        bank_b = self._create_bank("Portal Scope B")
+        bank_user = self._user(
+            "portal-scope",
+            [self.groups["group_bank_admin"]],
+            bank=bank_a,
+        )
+        BankCompany = self.env["res.company"].with_user(bank_user).with_context(
+            active_test=False,
+            allowed_company_ids=[bank_a.id],
+        )
+        self.assertEqual(
+            BankCompany.search([("trucalc_is_bank", "=", True)]),
+            bank_a,
+        )
+        with self.assertRaises(AccessError):
+            BankCompany.browse(bank_b.id).read(["name"])
+
+        VendorCompany = self.env["res.company"].with_user(
+            self.vendor_user
+        ).with_context(
+            active_test=False,
+            allowed_company_ids=[self.vendor_user.company_id.id],
+        )
+        self.assertFalse(
+            VendorCompany.search([("trucalc_is_bank", "=", True)])
+        )
+
     def test_unauthorized_personas_cannot_create_or_use_wizard(self):
         bank = self._create_bank("Unauthorized Fixture")
         bank_user = self._user(

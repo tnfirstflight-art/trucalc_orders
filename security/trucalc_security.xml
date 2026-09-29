@@ -96,6 +96,23 @@
     </record>
 
 
+    <!-- Managed TruCalc Administrators operate from the main company while
+         their company selector is intentionally hidden.  Odoo's standard
+         employee rule only exposes companies activated in the request
+         context, so grant the controlled role read-only visibility of Bank
+         company identities without broadening company mutation rights. -->
+    <record id="rule_trucalc_admin_bank_companies_read" model="ir.rule">
+        <field name="name">TruCalc Administrator Bank Companies Read</field>
+        <field name="model_id" ref="base.model_res_company"/>
+        <field name="domain_force">[('trucalc_is_bank', '=', True)]</field>
+        <field name="groups" eval="[(4, ref('group_trucalc_admin'))]"/>
+        <field name="perm_read" eval="True"/>
+        <field name="perm_write" eval="False"/>
+        <field name="perm_create" eval="False"/>
+        <field name="perm_unlink" eval="False"/>
+    </record>
+
+
     <record id="rule_company_orders" model="ir.rule">
         <field name="name">Operations Submitted Company Orders</field>
         <field name="model_id" ref="model_trucalc_order"/>
