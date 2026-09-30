@@ -44,7 +44,7 @@ class TestBankUX(TestBankOrderPortal):
             self.assertEqual(account.status_code, 200)
             self.assertNotIn('o_trucalc_bank_shell', account.text)
             self.assertNotIn('o_trucalc_bank_header', account.text)
-            self.assertIn('o_brand_promotion', account.text)
+            self.assertNotIn('o_brand_promotion', account.text)
             self.assertEqual(self.url_open('/my/account', allow_redirects=False).status_code, 200)
         for actor in (self.plain_portal, self.admin, self.legacy_internal_bank_user):
             self._login(actor)
@@ -98,7 +98,7 @@ class TestBankUX(TestBankOrderPortal):
         account = self.url_open('/my/home', allow_redirects=False)
         self.assertEqual(account.status_code, 200)
         self.assertNotIn('o_trucalc_vendor_shell', account.text)
-        self.assertIn('o_brand_promotion', account.text)
+        self.assertNotIn('o_brand_promotion', account.text)
         response = self.url_open('/my/trucalc/orders', allow_redirects=False)
         self.assertEqual(response.status_code, 200)
         self.assertIn('o_trucalc_vendor_shell', response.text)
