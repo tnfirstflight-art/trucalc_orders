@@ -382,7 +382,7 @@ class TestDownstreamLifecycleSecurity(TransactionCase):
         odoobot = self.env.ref("base.partner_root")
         self.assertEqual(
             odoobot.with_user(self.reviewer).read(["name"])[0]["name"],
-            "OdooBot",
+            "TruCalc Assistant",
         )
 
         message = reviewer_order.message_post(
