@@ -19,6 +19,7 @@ class TruCalcBankUserProvision(models.TransientModel):
     )
     name = fields.Char(required=True)
     login = fields.Char(string="Email / Login", required=True)
+    phone = fields.Char(string="Phone Number")
     role = fields.Selection(ROLE_SELECTION, required=True, default="requestor")
     active = fields.Boolean(default=True)
 
@@ -64,16 +65,11 @@ class TruCalcBankUserProvision(models.TransientModel):
             raise AccessError(_("The Bank provisioning context is invalid."))
         user = self.env["res.users"]._trucalc_provision_bank_user(
             self.bank_company_id, self.name, self.login, self.role, self.active,
+            phone=self.phone,
         )
-        return {
-            "type": "ir.actions.client", "tag": "display_notification",
-            "params": {
-                "title": _("Bank User Created"),
-                "message": _("%s was created without sending an invitation.") % user.name,
-                "type": "success", "sticky": False,
-                "next": {"type": "ir.actions.act_window_close"},
-            },
-        }
+        return self.env["trucalc.bank.user.management"]._trucalc_open(
+            user.trucalc_bank_company_id
+        )
 
 
 class TruCalcBankUserRoleChange(models.TransientModel):
@@ -90,6 +86,97 @@ class TruCalcBankUserRoleChange(models.TransientModel):
         return {"type": "ir.actions.client", "tag": "reload"}
 
 
+class TruCalcBankUserEdit(models.TransientModel):
+    _name = "trucalc.bank.user.edit"
+    _description = "Edit TruCalc Bank User"
+
+    owner_user_id = fields.Many2one("res.users", required=True, readonly=True)
+    bank_company_id = fields.Many2one("res.company", required=True, readonly=True)
+    target_user_id = fields.Many2one("res.users", required=True, readonly=True)
+    login = fields.Char(string="Email / Login", readonly=True)
+    name = fields.Char(required=True)
+    phone = fields.Char(string="Phone Number")
+
+    _editable_fields = frozenset({"name", "phone"})
+
+    @api.model
+    def default_get(self, fields_list):
+        actor = self.env["res.company"]._trucalc_require_bank_administrator()
+        values = super().default_get(fields_list)
+        values["owner_user_id"] = actor.id
+        target_id = self.env.context.get("trucalc_locked_target_user_id")
+        bank_id = self.env.context.get("trucalc_locked_bank_company_id")
+        if target_id and bank_id:
+            bank = self.env["res.company"].browse(
+                bank_id
+            )._trucalc_bank_identity_record(require_active=False)
+            target = self.env["res.users"].browse(
+                target_id
+            )._trucalc_assert_managed_bank_user(bank)
+            values.update({
+                "bank_company_id": bank.id,
+                "target_user_id": target.id,
+                "login": target.login,
+                "name": target.name,
+                "phone": target.phone,
+            })
+        return values
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        actor = self.env["res.company"]._trucalc_require_bank_administrator()
+        bank_id = self.env.context.get("trucalc_locked_bank_company_id")
+        target_id = self.env.context.get("trucalc_locked_target_user_id")
+        if not bank_id or not target_id:
+            raise AccessError(_("The Bank User edit context is invalid."))
+        bank = self.env["res.company"].browse(
+            bank_id
+        )._trucalc_bank_identity_record(require_active=False)
+        target = self.env["res.users"].browse(
+            target_id
+        )._trucalc_assert_managed_bank_user(bank)
+        for values in vals_list:
+            if (
+                values.get("bank_company_id", bank.id) != bank.id
+                or values.get("target_user_id", target.id) != target.id
+            ):
+                raise AccessError(_("The Bank User edit context is invalid."))
+            values.update({
+                "owner_user_id": actor.id,
+                "bank_company_id": bank.id,
+                "target_user_id": target.id,
+                "login": target.login,
+            })
+        return super().create(vals_list)
+
+    def write(self, values):
+        actor = self.env["res.company"]._trucalc_require_bank_administrator()
+        if set(values) - self._editable_fields:
+            raise AccessError(_("The Bank User edit context is invalid."))
+        if any(wizard.owner_user_id != actor for wizard in self):
+            raise AccessError(_("The Bank User edit context is invalid."))
+        return super().write(values)
+
+    def action_save(self):
+        self.ensure_one()
+        actor = self.env["res.company"]._trucalc_require_bank_administrator()
+        locked_bank_id = self.env.context.get("trucalc_locked_bank_company_id")
+        locked_target_id = self.env.context.get("trucalc_locked_target_user_id")
+        if (
+            self.owner_user_id != actor
+            or not locked_bank_id or not locked_target_id
+            or self.bank_company_id.id != locked_bank_id
+            or self.target_user_id.id != locked_target_id
+        ):
+            raise AccessError(_("The Bank User edit context is invalid."))
+        self.target_user_id._trucalc_edit_bank_identity(
+            self.bank_company_id, self.name, self.phone,
+        )
+        return self.env["trucalc.bank.user.management"]._trucalc_open(
+            self.bank_company_id
+        )
+
+
 class TruCalcBankUserManagement(models.TransientModel):
     _name = "trucalc.bank.user.management"
     _description = "Managed TruCalc Bank User"
@@ -100,6 +187,7 @@ class TruCalcBankUserManagement(models.TransientModel):
     target_user_id = fields.Many2one("res.users", required=True, readonly=True)
     name = fields.Char(compute="_compute_projection", compute_sudo=True)
     login = fields.Char(string="Email / Login", compute="_compute_projection", compute_sudo=True)
+    phone = fields.Char(string="Phone Number", compute="_compute_projection", compute_sudo=True)
     role = fields.Selection(ROLE_SELECTION, compute="_compute_projection", compute_sudo=True)
     user_active = fields.Boolean(string="Active", compute="_compute_projection", compute_sudo=True)
     invitation_state = fields.Selection([
@@ -115,6 +203,7 @@ class TruCalcBankUserManagement(models.TransientModel):
             user = row.target_user_id.sudo().with_context(active_test=False)
             row.name = user.name
             row.login = user.login
+            row.phone = user.phone
             row.role = user._trucalc_bank_role_key()
             row.user_active = user.active
             if not user.active:
@@ -168,6 +257,28 @@ class TruCalcBankUserManagement(models.TransientModel):
                 "default_bank_company_id": self.bank_company_id.id,
                 "default_target_user_id": target.id,
                 "default_role": target._trucalc_bank_role_key(),
+            },
+        }
+
+    def action_edit(self):
+        target = self._controlled_target()
+        return {
+            "type": "ir.actions.act_window", "name": _("Edit Bank User"),
+            "res_model": "trucalc.bank.user.edit", "view_mode": "form",
+            "views": [(
+                self.env.ref(
+                    "trucalc_orders.view_trucalc_bank_user_edit_form"
+                ).id,
+                "form",
+            )],
+            "target": "new", "context": {
+                "default_bank_company_id": self.bank_company_id.id,
+                "default_target_user_id": target.id,
+                "default_login": target.login,
+                "default_name": target.name,
+                "default_phone": target.phone,
+                "trucalc_locked_bank_company_id": self.bank_company_id.id,
+                "trucalc_locked_target_user_id": target.id,
             },
         }
 

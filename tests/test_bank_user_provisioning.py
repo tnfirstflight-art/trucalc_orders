@@ -58,13 +58,16 @@ class TestBankUserProvisioning(TransactionCase):
             })
         return cls.env["res.users"].with_context(no_reset_password=True).create(values)
 
-    def _wizard(self, suffix, role="requestor", bank=False, active=True, actor=False):
+    def _wizard(
+        self, suffix, role="requestor", bank=False, active=True, actor=False,
+        phone=False,
+    ):
         actor = actor or self.admin
         return self.env["trucalc.bank.user.provision"].with_user(actor).create({
             "bank_company_id": (bank or self.bank).id,
             "name": "5A2 Provisioned %s" % suffix,
             "login": "5a2-provisioned-%s@example.test" % suffix,
-            "role": role, "active": active,
+            "phone": phone, "role": role, "active": active,
         })
 
     def _assert_exact(self, user, bank, role, active=True):
@@ -165,6 +168,243 @@ class TestBankUserProvisioning(TransactionCase):
                 "login": "5a2-switched-bank@example.test",
                 "role": "requestor",
             })
+
+    def test_creation_phone_and_fresh_post_create_projection(self):
+        stale_action = self.bank.with_user(
+            self.admin
+        ).action_trucalc_view_bank_users()
+        stale_rows = self.env["trucalc.bank.user.management"].with_user(
+            self.admin
+        ).search(stale_action["domain"])
+
+        wizard = self._wizard("phone-refresh", phone="  +1 (615) 555-0134 ext. 9  ")
+        fresh_action = wizard.action_save()
+        target = self.env["res.users"].sudo().search([
+            ("login", "=", "5a2-provisioned-phone-refresh@example.test"),
+        ])
+        self.assertEqual(target.phone, "+1 (615) 555-0134 ext. 9")
+        self.assertEqual(target.partner_id.phone, target.phone)
+        self.assertNotIn(target, stale_rows.target_user_id)
+        fresh_rows = self.env["trucalc.bank.user.management"].with_user(
+            self.admin
+        ).search(fresh_action["domain"])
+        self.assertIn(target, fresh_rows.target_user_id)
+        self.assertEqual(fresh_action["res_model"], "trucalc.bank.user.management")
+        self.assertEqual(fresh_action["context"]["active_bank_company_id"], self.bank.id)
+
+        blank = self._wizard("blank-phone")
+        blank.action_save()
+        blank_target = self.env["res.users"].sudo().search([
+            ("login", "=", "5a2-provisioned-blank-phone@example.test"),
+        ])
+        self.assertFalse(blank_target.phone)
+
+    def test_controlled_edit_name_phone_audit_and_immutable_fields(self):
+        target = self._user(
+            "identity-edit", [self.roles["requestor"]], bank=self.bank,
+        )
+        target.phone = "615-555-0100"
+        invariant = {
+            "login": target.login,
+            "email": target.email,
+            "role": target._trucalc_bank_role_key(),
+            "active": target.active,
+            "share": target.share,
+            "bank": target.trucalc_bank_company_id,
+            "company": target.company_id,
+            "companies": target.company_ids,
+            "groups": target.group_ids,
+            "vendor": target.trucalc_vendor_id,
+            "signup_type": target.partner_id.signup_type,
+        }
+        management_action = self.bank.with_user(
+            self.admin
+        ).action_trucalc_view_bank_users()
+        row = self.env["trucalc.bank.user.management"].with_user(
+            self.admin
+        ).search(management_action["domain"]).filtered(
+            lambda item: item.target_user_id == target
+        )
+        self.assertEqual(row.phone, "615-555-0100")
+        edit_action = row.action_edit()
+        self.assertEqual(edit_action["res_model"], "trucalc.bank.user.edit")
+        self.assertEqual(edit_action["target"], "new")
+        Edit = self.env["trucalc.bank.user.edit"].with_user(
+            self.admin
+        ).with_context(**edit_action["context"])
+        defaults = Edit.default_get([
+            "owner_user_id", "bank_company_id", "target_user_id", "login",
+            "name", "phone",
+        ])
+        self.assertEqual(defaults["owner_user_id"], self.admin.id)
+        self.assertEqual(defaults["bank_company_id"], self.bank.id)
+        self.assertEqual(defaults["target_user_id"], target.id)
+        self.assertEqual(defaults["login"], target.login)
+        wizard = Edit.create({
+            "bank_company_id": self.bank.id,
+            "target_user_id": target.id,
+            "login": "attempted-change@example.test",
+            "name": "  Updated   Bank User  ",
+            "phone": "  +44 20 7946 0958 x42  ",
+        })
+        fresh_action = wizard.action_save()
+        target.invalidate_recordset()
+        self.assertEqual(target.name, "Updated Bank User")
+        self.assertEqual(target.phone, "+44 20 7946 0958 x42")
+        self.assertEqual(target.partner_id.phone, target.phone)
+        fresh_rows = self.env["trucalc.bank.user.management"].with_user(
+            self.admin
+        ).search(fresh_action["domain"])
+        self.assertIn(target, fresh_rows.target_user_id)
+        for field_name, value in invariant.items():
+            self.assertEqual(
+                {
+                    "login": target.login,
+                    "email": target.email,
+                    "role": target._trucalc_bank_role_key(),
+                    "active": target.active,
+                    "share": target.share,
+                    "bank": target.trucalc_bank_company_id,
+                    "company": target.company_id,
+                    "companies": target.company_ids,
+                    "groups": target.group_ids,
+                    "vendor": target.trucalc_vendor_id,
+                    "signup_type": target.partner_id.signup_type,
+                }[field_name],
+                value,
+            )
+        audit = self.env["trucalc.bank.admin.audit"].sudo().search([
+            ("event_type", "=", "bank_user_identity_updated"),
+            ("target_user_id", "=", target.id),
+        ])
+        self.assertEqual(len(audit), 1)
+        self.assertEqual(audit.actor_user_id, self.admin)
+        self.assertEqual(audit.bank_company_id, self.bank)
+        self.assertEqual(audit.metadata["changed_fields"], ["name", "phone"])
+        self.assertEqual(audit.metadata["changes"]["name"], {
+            "old": "5A2 identity-edit", "new": "Updated Bank User",
+        })
+        self.assertEqual(audit.metadata["changes"]["phone"], {
+            "old": "615-555-0100", "new": "+44 20 7946 0958 x42",
+        })
+
+    def test_controlled_edit_noop_clear_and_denial_boundaries(self):
+        target = self._user(
+            "identity-boundaries", [self.roles["view_only"]], bank=self.bank,
+        )
+        target.phone = "615-555-0199"
+        context = {
+            "default_bank_company_id": self.bank.id,
+            "default_target_user_id": target.id,
+            "trucalc_locked_bank_company_id": self.bank.id,
+            "trucalc_locked_target_user_id": target.id,
+        }
+        Edit = self.env["trucalc.bank.user.edit"].with_user(
+            self.admin
+        ).with_context(**context)
+        noop = Edit.create({"name": target.name, "phone": target.phone})
+        noop.action_save()
+        self.assertFalse(self.env["trucalc.bank.admin.audit"].sudo().search_count([
+            ("event_type", "=", "bank_user_identity_updated"),
+            ("target_user_id", "=", target.id),
+        ]))
+        clear = Edit.create({"name": target.name, "phone": "   "})
+        clear.action_save()
+        target.invalidate_recordset()
+        self.assertFalse(target.phone)
+        audit = self.env["trucalc.bank.admin.audit"].sudo().search([
+            ("event_type", "=", "bank_user_identity_updated"),
+            ("target_user_id", "=", target.id),
+        ])
+        self.assertEqual(audit.metadata["changed_fields"], ["phone"])
+        self.assertEqual(audit.metadata["changes"]["phone"]["new"], False)
+
+        blank = Edit.create({"name": "   ", "phone": False})
+        with self.assertRaises(ValidationError):
+            blank.action_save()
+        locked = Edit.create({"name": target.name, "phone": False})
+        for forged_values in (
+            {"owner_user_id": self.ops.id},
+            {"bank_company_id": self.other_bank.id},
+            {"target_user_id": self.portal.id},
+            {"login": "forged@example.test"},
+        ):
+            with self.assertRaises(AccessError):
+                locked.write(forged_values)
+        with self.assertRaises(AccessError):
+            locked.with_context({}).action_save()
+        with self.assertRaises(AccessError):
+            self.env["trucalc.bank.user.edit"].with_user(
+                self.ops
+            ).with_context(**context).create({
+                "name": target.name, "phone": False,
+            })
+        cross_bank_context = dict(context)
+        cross_bank_context.update({
+            "default_bank_company_id": self.other_bank.id,
+            "trucalc_locked_bank_company_id": self.other_bank.id,
+        })
+        with self.assertRaises(AccessError):
+            self.env["trucalc.bank.user.edit"].with_user(
+                self.admin
+            ).with_context(**cross_bank_context).create({
+                "name": target.name, "phone": False,
+            })
+
+    def test_equivalent_administrators_get_owned_fresh_rows_and_can_edit(self):
+        admin_two = self._user("admin-two", [self.group_admin])
+        admin_two.sudo().write({
+            "company_id": self.main.id,
+            "company_ids": [Command.set((self.main | self.bank | self.other_bank).ids)],
+        })
+        self.admin.sudo().write({
+            "company_id": self.main.id,
+            "company_ids": [Command.set((self.main | self.bank | self.other_bank).ids)],
+        })
+        target = self._user(
+            "equivalent-admin", [self.roles["requestor"]], bank=self.bank,
+        )
+        action_one = self.bank.with_user(self.admin).with_context(
+            allowed_company_ids=[self.main.id],
+        ).action_trucalc_view_bank_users()
+        action_two = self.bank.with_user(admin_two).with_context(
+            allowed_company_ids=admin_two.company_ids.ids,
+        ).action_trucalc_view_bank_users()
+        rows_one = self.env["trucalc.bank.user.management"].with_user(
+            self.admin
+        ).search(action_one["domain"])
+        rows_two = self.env["trucalc.bank.user.management"].with_user(
+            admin_two
+        ).search(action_two["domain"])
+        self.assertEqual(rows_one.target_user_id, rows_two.target_user_id)
+        self.assertTrue(all(row.owner_user_id == self.admin for row in rows_one))
+        self.assertTrue(all(row.owner_user_id == admin_two for row in rows_two))
+        self.assertFalse(
+            self.env["trucalc.bank.user.management"].with_user(
+                self.admin
+            ).search_count([("id", "in", rows_two.ids)])
+        )
+
+        for index, actor in enumerate((self.admin, admin_two), start=1):
+            wizard = self._wizard(
+                "admin-%s" % index, actor=actor, phone="615-555-010%s" % index,
+            )
+            fresh_action = wizard.action_save()
+            created = self.env["res.users"].sudo().search([
+                ("login", "=", "5a2-provisioned-admin-%s@example.test" % index),
+            ])
+            fresh_rows = self.env["trucalc.bank.user.management"].with_user(
+                actor
+            ).search(fresh_action["domain"])
+            self.assertIn(created, fresh_rows.target_user_id)
+            created.with_user(actor)._trucalc_edit_bank_identity(
+                self.bank, "Admin %s Edited" % index, "615-555-020%s" % index,
+            )
+            created.invalidate_recordset()
+            self.assertEqual(created.name, "Admin %s Edited" % index)
+            self.assertEqual(created.phone, "615-555-020%s" % index)
+
+        self.assertEqual(target.trucalc_bank_company_id, self.bank)
 
     def test_missing_bank_launch_has_no_partial_identity_or_audit(self):
         before = {
@@ -474,8 +714,30 @@ class TestBankUserProvisioning(TransactionCase):
         arch = etree.fromstring(
             self.env.ref("trucalc_orders.view_trucalc_bank_user_management_list").arch
         )
+        self.assertTrue(arch.xpath(".//field[@name='phone']"))
+        self.assertEqual(
+            len(arch.xpath(".//button[@name='action_edit'][@string='Edit']")),
+            1,
+        )
         self.assertFalse(set(arch.xpath(".//field/@name")) & {
-            "password", "group_ids", "company_id", "company_ids", "trucalc_vendor_id",
+            "password", "group_ids", "company_id", "company_ids",
+            "trucalc_bank_company_id", "trucalc_vendor_id",
+        })
+        edit_arch = etree.fromstring(
+            self.env.ref("trucalc_orders.view_trucalc_bank_user_edit_form").arch
+        )
+        self.assertEqual(
+            set(edit_arch.xpath(".//field/@name")),
+            {
+                "owner_user_id", "bank_company_id", "target_user_id", "login",
+                "name", "phone",
+            },
+        )
+        self.assertTrue(edit_arch.xpath(".//field[@name='login']"))
+        self.assertFalse(set(edit_arch.xpath(".//field/@name")) & {
+            "password", "group_ids", "company_id", "company_ids", "role",
+            "share", "active", "invitation_state", "trucalc_bank_company_id",
+            "trucalc_vendor_id",
         })
         with self.assertRaises(AccessError):
             self.other_bank.with_user(self.ops).action_trucalc_view_bank_users()

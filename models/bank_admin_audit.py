@@ -12,6 +12,7 @@ class TruCalcBankAdminAudit(models.Model):
         ("bank_activated", "Bank Activated"),
         ("bank_deactivated", "Bank Deactivated"),
         ("bank_user_created", "Bank User Created"),
+        ("bank_user_identity_updated", "Bank User Identity Updated"),
         ("role_changed", "Bank User Role Changed"),
         ("user_deactivated", "Bank User Deactivated"),
         ("user_reactivated", "Bank User Reactivated"),

@@ -53,6 +53,11 @@ class ResUsers(models.Model):
 
     @api.model
     @api.private
+    def _trucalc_clean_bank_phone(self, value):
+        return (value or "").strip() or False
+
+    @api.model
+    @api.private
     def _trucalc_identity_collision(self):
         return ValidationError(_(
             "This email cannot be provisioned automatically. Resolve the identity "
@@ -126,7 +131,9 @@ class ResUsers(models.Model):
 
     @api.model
     @api.private
-    def _trucalc_provision_bank_user(self, bank, name, login, role, active=True):
+    def _trucalc_provision_bank_user(
+        self, bank, name, login, role, active=True, phone=False,
+    ):
         actor = self.env["res.company"]._trucalc_require_bank_administrator()
         bank = bank._trucalc_bank_identity_record()
         normalized = self._trucalc_normalize_login(login)
@@ -153,6 +160,7 @@ class ResUsers(models.Model):
                 "name": clean_name,
                 "login": normalized,
                 "email": normalized,
+                "phone": self._trucalc_clean_bank_phone(phone),
                 "active": bool(active),
                 "share": True,
                 "group_ids": [Command.set([role_group.id])],
@@ -172,9 +180,48 @@ class ResUsers(models.Model):
             self.env["trucalc.bank.admin.audit"]._trucalc_log(
                 "bank_user_created", actor, bank, target_user=user,
                 prior_status=False, new_status="active" if active else "inactive",
-                metadata={"role": role, "reused_identity": bool(partner)},
+                metadata={
+                    "role": role,
+                    "reused_identity": bool(partner),
+                    "phone_provided": bool(self._trucalc_clean_bank_phone(phone)),
+                },
             )
         return user
+
+    @api.private
+    def _trucalc_edit_bank_identity(self, bank, name, phone=False):
+        self.ensure_one()
+        actor = self.env["res.company"]._trucalc_require_bank_administrator()
+        target = self._trucalc_assert_managed_bank_user(bank)
+        clean_name = " ".join((name or "").split())
+        if not clean_name:
+            raise ValidationError(_("Bank User Name is required."))
+        clean_phone = self._trucalc_clean_bank_phone(phone)
+        prior = {"name": target.name, "phone": target.phone or False}
+        updated = {"name": clean_name, "phone": clean_phone}
+        changes = {
+            field_name: {"old": prior[field_name], "new": updated[field_name]}
+            for field_name in updated
+            if prior[field_name] != updated[field_name]
+        }
+        if not changes:
+            return False
+        with self.env.cr.savepoint():
+            target.write(updated)
+            target.invalidate_recordset()
+            target = target._trucalc_assert_managed_bank_user(bank)
+            if target.name != clean_name or (target.phone or False) != clean_phone:
+                raise ValidationError(_(
+                    "The Bank user identity update did not complete safely."
+                ))
+            self.env["trucalc.bank.admin.audit"]._trucalc_log(
+                "bank_user_identity_updated", actor, bank, target_user=target,
+                metadata={
+                    "changed_fields": sorted(changes),
+                    "changes": changes,
+                },
+            )
+        return True
 
     @api.private
     def _trucalc_change_bank_role(self, bank, role):
