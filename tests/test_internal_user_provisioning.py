@@ -403,8 +403,15 @@ class TestInternalUserProvisioning(TransactionCase):
             "user_id": target.id,
             "summary": "Transfer after deactivation",
         })
-        with self.assertRaises(ValidationError):
+        with self.assertRaisesRegex(
+            ValidationError, "user's open activities"
+        ):
             target.with_user(self.admin)._trucalc_deactivate_internal_user()
+        wizard = self.env["trucalc.internal.user.deactivate"].with_user(
+            self.admin
+        ).create({"target_user_id": target.id})
+        with self.assertRaisesRegex(ValidationError, "open activities"):
+            wizard.action_confirm()
         groups = target.group_ids
         companies = target.company_ids
         partner = target.partner_id

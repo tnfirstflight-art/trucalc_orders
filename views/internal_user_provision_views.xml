@@ -60,7 +60,7 @@
                     <field name="target_user_id" options="{'no_open': True}"/>
                     <field name="open_activity_count" readonly="1"/>
                     <div class="alert alert-warning" role="alert" invisible="not open_activity_count">
-                        This user has open Odoo activities. They will remain assigned and will not be discarded or rewritten.
+                        This user has open activities. They will remain assigned and will not be discarded or rewritten.
                     </div>
                     <field name="acknowledge_open_activities"
                            invisible="not open_activity_count"

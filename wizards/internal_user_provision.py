@@ -98,7 +98,7 @@ class TruCalcInternalUserDeactivate(models.TransientModel):
         self.ensure_one()
         if self.open_activity_count and not self.acknowledge_open_activities:
             raise ValidationError(_(
-                "Acknowledge the open Odoo activities before deactivation."
+                "Acknowledge the open activities before deactivation."
             ))
         self.target_user_id._trucalc_deactivate_internal_user(
             acknowledge_open_activities=self.acknowledge_open_activities,

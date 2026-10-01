@@ -177,6 +177,8 @@ class TestBankInvoice(BankInvoiceFixtures, TransactionCase):
             invoice.action_void()
 
     def test_real_pdf_snapshot_net_thirty_and_no_order_write(self):
+        current_identity = "TruCalc Valuation Solutions"
+        self.env.ref("base.main_company").name = current_identity
         order = self._ready_invoice_order(approve_fee=True)
         self.env.flush_all()
         self.env.cr.execute("SELECT to_jsonb(o) FROM trucalc_order o WHERE id=%s", (order.id,))
@@ -204,6 +206,8 @@ class TestBankInvoice(BankInvoiceFixtures, TransactionCase):
         reader = PdfReader(BytesIO(pdf))
         self.assertEqual(len(reader.pages), 1)
         text = reader.pages[0].extract_text().replace("\t", " ")
+        self.assertEqual(invoice.printed_values["issuer_name"], current_identity)
+        self.assertIn(current_identity, text)
         for value in (order.order_number, "650", "Invoice Borrower", "LOAN-4E2", "Remit Payment To", self.bank.name):
             self.assertIn(value, text)
         for value in ("PRIVATE FEE REASON", "PRIVATE INTERNAL NOTE", "Vendor", "Reviewer", "Negotiated", "Base Fee"):

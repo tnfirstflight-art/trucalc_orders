@@ -210,7 +210,7 @@ class TestDownstreamLifecycleSecurity(TransactionCase):
         self.assertIn(role_privilege.id, category["privilege_ids"])
         self.assertIn(reviewer_privilege.id, category["privilege_ids"])
 
-    def test_standard_odoo_role_is_clearly_labeled(self):
+    def test_standard_system_role_is_clearly_labeled(self):
         role_field = self.env["res.users"]._fields["role"]
         self.assertEqual(
             role_field.selection,
@@ -223,7 +223,14 @@ class TestDownstreamLifecycleSecurity(TransactionCase):
             "//page[@name='access_rights']//field[@name='role']"
         )
         self.assertEqual(len(role_nodes), 1)
-        self.assertEqual(role_nodes[0].get("string"), "Odoo Access Level")
+        self.assertEqual(role_nodes[0].get("string"), "System Access Level")
+
+        deactivate_arch = etree.fromstring(self.env.ref(
+            "trucalc_orders.view_trucalc_internal_user_deactivate_form"
+        ).arch_db.encode())
+        deactivate_copy = " ".join(deactivate_arch.itertext())
+        self.assertIn("open activities", deactivate_copy)
+        self.assertNotIn("Odoo", deactivate_copy)
 
     def test_reviewer_reads_only_own_eligible_status_orders(self):
         assigned = self._ready_for_assignment(self.cross_company_reviewer)

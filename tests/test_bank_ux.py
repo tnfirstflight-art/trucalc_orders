@@ -65,6 +65,7 @@ class TestBankUX(TestBankOrderPortal):
     def test_bank_shell_identity(self):
         self._login(self.bank_admin)
         issuer = self.env.ref('base.main_company').name
+        self.assertEqual(issuer, "TruCalc Valuation Solutions")
         for path in ('/my/trucalc/bank/orders', '/my/trucalc/bank/orders/new',
                      '/my/trucalc/bank/orders/%s/documents' % self.order_a.order_number):
             response = self.url_open(path)
@@ -114,7 +115,7 @@ class TestBankUX(TestBankOrderPortal):
     def test_asset_scope_contract(self):
         root = Path(__file__).resolve().parents[1]
         manifest = ast.literal_eval((root / '__manifest__.py').read_text())
-        self.assertEqual(manifest['version'], '1.29')
+        self.assertEqual(manifest['version'], '1.30')
         self.assertNotIn('web._assets_primary_variables', manifest['assets'])
         self.assertFalse(any('trucalc_tokens' in p or 'bank_portal.scss' in p or 'trucalc_login' in p
                              for p in manifest['assets']['web.assets_backend']))

@@ -117,6 +117,7 @@ class TestVendorUX(TestVendorOrderPortal):
         )
         self._login(self.vendor_user_a)
         issuer = self.env.ref("base.main_company").name
+        self.assertEqual(issuer, "TruCalc Valuation Solutions")
         for path in (
             "/my/trucalc/orders",
             "/my/trucalc/orders/%s" % order.order_number,

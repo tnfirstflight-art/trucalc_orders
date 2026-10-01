@@ -682,7 +682,7 @@ class ResUsers(models.Model):
         activity_count = target._trucalc_open_activity_count()
         if activity_count and not acknowledge_open_activities:
             raise ValidationError(_(
-                "Acknowledge the user's open Odoo activities before deactivation."
+                "Acknowledge the user's open activities before deactivation."
             ))
         role = target._trucalc_internal_role_key()
         reviewer = bool(target._trucalc_persona_membership()["reviewer"])
