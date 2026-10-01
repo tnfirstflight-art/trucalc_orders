@@ -28,7 +28,7 @@ class TestBankUX(TestBankOrderPortal):
         self.assertNotIn('Manage Databases', response.text)
         self.assertNotIn('Powered by', response.text)
         self.assertTrue(card[0].xpath('.//input[@name="redirect"][@value="/odoo?"]'))
-        self.assertEqual(self.url_open('/web/database/manager').status_code, 200)
+        self.assertEqual(self.url_open('/web/database/manager').status_code, 404)
         # Other callers of login_layout do not acquire the login-only marker.
         reset = self.url_open('/web/reset_password').text
         self.assertNotIn('o_trucalc_login', reset)
