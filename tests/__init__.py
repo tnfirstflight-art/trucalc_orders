@@ -23,6 +23,7 @@ from . import test_order_completion
 from . import test_fee_change_request
 from . import test_bank_invoice
 from . import test_bank_ux
+from . import test_company_identity_migration
 from . import test_bank_navigation
 from . import test_vendor_ux
 from . import test_vendor_navigation
