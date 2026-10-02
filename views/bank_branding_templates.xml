@@ -15,13 +15,14 @@
 
     <template id="internal_signup_branding" inherit_id="auth_signup.signup"
               name="TruCalc Internal User Signup Branding">
+        <xpath expr="//form[hasclass('oe_signup_form')]" position="attributes">
+            <attribute name="action">/web/signup</attribute>
+        </xpath>
+        <xpath expr="//form[hasclass('oe_signup_form')]/input[@name='csrf_token']" position="after">
+            <input type="hidden" name="db" t-att-value="request.db"/>
+        </xpath>
         <xpath expr="//t[@t-call='web.login_layout']" position="inside">
-            <t t-set="trucalc_signup_partner"
-               t-value="token and request.env['res.partner'].sudo()._get_partner_from_token(token)"/>
-            <t t-set="trucalc_signup_user"
-               t-value="trucalc_signup_partner and trucalc_signup_partner.user_ids[:1]"/>
-            <t t-set="trucalc_login"
-               t-value="bool(trucalc_signup_user and len(trucalc_signup_user._trucalc_persona_membership()['internal']) == 1 and not trucalc_signup_user._trucalc_persona_membership()['bank'] and not trucalc_signup_user._trucalc_persona_membership()['vendor'] and not trucalc_signup_user.trucalc_bank_company_id and not trucalc_signup_user.trucalc_vendor_id)"/>
+            <t t-set="trucalc_login" t-value="trucalc_internal_signup"/>
             <t t-set="disable_footer" t-value="trucalc_login"/>
         </xpath>
     </template>
