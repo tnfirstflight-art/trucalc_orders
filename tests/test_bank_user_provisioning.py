@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from lxml import etree
 
-from odoo import Command
+from odoo import Command, fields
 from odoo.addons.mail.models.mail_mail import MailMail
 from odoo.exceptions import AccessError, ValidationError
 from odoo.tests import TransactionCase, tagged
@@ -83,6 +83,24 @@ class TestBankUserProvisioning(TransactionCase):
         self.assertEqual(user.trucalc_bank_company_id, bank)
         self.assertEqual(user.company_id, bank)
         self.assertEqual(user.company_ids, bank)
+
+    def _email_change_wizard(
+        self, target, new_login, bank=False, actor=False, acknowledge=False,
+    ):
+        bank = bank or self.bank
+        actor = actor or self.admin
+        context = {
+            "default_bank_company_id": bank.id,
+            "default_target_user_id": target.id,
+            "trucalc_locked_bank_company_id": bank.id,
+            "trucalc_locked_target_user_id": target.id,
+        }
+        return self.env["trucalc.bank.user.email.change"].with_user(
+            actor
+        ).with_context(**context).create({
+            "new_login": new_login,
+            "acknowledge_invitation_invalidation": acknowledge,
+        })
 
     def test_wizard_provisions_all_roles_without_invitation_or_password(self):
         for role in self.roles:
@@ -351,6 +369,240 @@ class TestBankUserProvisioning(TransactionCase):
                 "name": target.name, "phone": False,
             })
 
+    def test_active_user_email_change_preserves_identity_password_and_order(self):
+        target = self._user(
+            "email-active", [self.roles["requestor"]], bank=self.bank,
+        )
+        target.with_context(no_reset_password=True).write({
+            "password": "Pass-C-active-password",
+        })
+        target.with_user(target)._update_last_login()
+        order = self.env["trucalc.order"].sudo().create({
+            "borrower": "Pass C Identity",
+            "property_address": "34 Preserved History Way",
+            "due_date": fields.Date.add(fields.Date.today(), days=7),
+            "company_id": self.bank.id,
+            "requestor_company_id": self.bank.id,
+            "requestor_id": target.id,
+        })
+        self.env.cr.execute(
+            "SELECT password FROM res_users WHERE id = %s", [target.id],
+        )
+        password_hash = self.env.cr.fetchone()[0]
+        user_id = target.id
+        partner_id = target.partner_id.id
+        invariant = {
+            "bank": target.trucalc_bank_company_id,
+            "role": target._trucalc_bank_role_key(),
+            "company": target.company_id,
+            "companies": target.company_ids,
+            "groups": target.group_ids,
+            "active": target.active,
+            "share": target.share,
+            "vendor": target.trucalc_vendor_id,
+        }
+
+        wizard = self._email_change_wizard(
+            target, "  Pass-C.Active@Example.TEST  ",
+        )
+        wizard.action_save()
+        target.invalidate_recordset()
+        self.assertEqual(target.id, user_id)
+        self.assertEqual(target.partner_id.id, partner_id)
+        self.assertEqual(target.login, "pass-c.active@example.test")
+        self.assertEqual(target.email, target.login)
+        self.assertEqual(order.requestor_id, target)
+        self.assertEqual(order.requestor_company_id, self.bank)
+        self.env.cr.execute(
+            "SELECT password FROM res_users WHERE id = %s", [target.id],
+        )
+        self.assertEqual(self.env.cr.fetchone()[0], password_hash)
+        self._assert_exact(target, self.bank, "requestor")
+        self.assertEqual({
+            "bank": target.trucalc_bank_company_id,
+            "role": target._trucalc_bank_role_key(),
+            "company": target.company_id,
+            "companies": target.company_ids,
+            "groups": target.group_ids,
+            "active": target.active,
+            "share": target.share,
+            "vendor": target.trucalc_vendor_id,
+        }, invariant)
+        audit = self.env["trucalc.bank.admin.audit"].sudo().search([
+            ("event_type", "=", "bank_user_email_updated"),
+            ("target_user_id", "=", target.id),
+        ])
+        self.assertEqual(len(audit), 1)
+        self.assertEqual(audit.actor_user_id, self.admin)
+        self.assertEqual(audit.bank_company_id, self.bank)
+        self.assertEqual(audit.prior_status, "5a2-email-active@example.test")
+        self.assertEqual(audit.new_status, "pass-c.active@example.test")
+        self.assertEqual(audit.metadata, {
+            "old_login": "5a2-email-active@example.test",
+            "old_email": "5a2-email-active@example.test",
+            "new_login": "pass-c.active@example.test",
+            "new_email": "pass-c.active@example.test",
+            "invitation_state": "confirmed",
+            "pending_invite_invalidated": False,
+        })
+        self.assertNotIn("token", str(audit.metadata).casefold())
+        self.assertNotIn("password", str(audit.metadata).casefold())
+
+    def test_pending_invitation_change_invalidates_old_and_requires_reinvite(self):
+        self.main.name = "TruCalc Evaluations"
+        self.main.email = "trucalc@example.test"
+        target = self._user(
+            "email-pending", [self.roles["administrator"]], bank=self.bank,
+        )
+        target.partner_id.signup_prepare(signup_type="signup")
+        old_token = target.partner_id._generate_signup_token()
+        denied = self._email_change_wizard(
+            target, "pass-c.pending@example.test", acknowledge=False,
+        )
+        with self.assertRaises(ValidationError):
+            denied.action_save()
+        self.assertEqual(target.login, "5a2-email-pending@example.test")
+        self.assertEqual(
+            target.partner_id._get_partner_from_token(old_token), target.partner_id,
+        )
+
+        wizard = self._email_change_wizard(
+            target, "pass-c.pending@example.test", acknowledge=True,
+        )
+        wizard.action_save()
+        target.invalidate_recordset()
+        self.assertEqual(target.login, "pass-c.pending@example.test")
+        self.assertEqual(target.email, target.login)
+        self.assertFalse(target.partner_id.signup_type)
+        self.assertFalse(target.partner_id._get_partner_from_token(old_token))
+
+        def successful_delivery(mails, auto_commit=False, raise_exception=False,
+                                post_send_callback=None):
+            mails.write({"state": "sent", "failure_type": False})
+            return True
+
+        with patch.object(MailMail, "send", autospec=True, side_effect=successful_delivery):
+            result = target.with_user(self.admin)._trucalc_send_bank_invitation(
+                self.bank
+            )
+        self.assertTrue(result["sent"])
+        mail = self.env["mail.mail"].sudo().browse(result["mail_id"])
+        self.assertEqual(mail.email_to, "pass-c.pending@example.test")
+        signup_links = etree.HTML(mail.body_html).xpath(
+            "//a[contains(@href, '/web/signup')]/@href"
+        )
+        self.assertEqual(len(signup_links), 1)
+        new_token = parse_qs(urlparse(signup_links[0]).query)["token"][0]
+        self.assertNotEqual(new_token, old_token)
+        self.assertEqual(
+            target.partner_id._get_partner_from_token(new_token), target.partner_id,
+        )
+        self.assertFalse(target.partner_id._get_partner_from_token(old_token))
+        self.assertTrue(target.partner_id.signup_type.startswith("signup:"))
+        audit = self.env["trucalc.bank.admin.audit"].sudo().search([
+            ("event_type", "=", "bank_user_email_updated"),
+            ("target_user_id", "=", target.id),
+        ])
+        self.assertEqual(audit.metadata["invitation_state"], "pending")
+        self.assertTrue(audit.metadata["pending_invite_invalidated"])
+
+    def test_never_invited_email_change_and_collision_validation_are_atomic(self):
+        target = self._user(
+            "email-never", [self.roles["view_only"]], bank=self.bank,
+        )
+        self._email_change_wizard(
+            target, "  Pass-C.Never@Example.TEST  ",
+        ).action_save()
+        target.invalidate_recordset()
+        self.assertEqual(target.login, "pass-c.never@example.test")
+        self.assertEqual(target.email, target.login)
+        self.assertFalse(target.partner_id.signup_type)
+        audit = self.env["trucalc.bank.admin.audit"].sudo().search([
+            ("event_type", "=", "bank_user_email_updated"),
+            ("target_user_id", "=", target.id),
+        ])
+        self.assertEqual(audit.metadata["invitation_state"], "never_invited")
+        self.assertFalse(audit.metadata["pending_invite_invalidated"])
+
+        collision = self._user(
+            "email-collision", [self.roles["requestor"]], bank=self.bank,
+        )
+        original = (target.login, target.email)
+        cases = (
+            collision.login,
+            " ",
+            "not-an-email",
+            "two@example.test,three@example.test",
+        )
+        for value in cases:
+            with self.assertRaises(ValidationError):
+                self._email_change_wizard(target, value).action_save()
+            target.invalidate_recordset()
+            self.assertEqual((target.login, target.email), original)
+        duplicate_partner = self.env["res.partner"].create({
+            "name": "Pass C Existing Contact",
+            "email": "pass-c-contact@example.test",
+        })
+        with self.assertRaises(ValidationError):
+            self._email_change_wizard(
+                target, duplicate_partner.email,
+            ).action_save()
+        target.invalidate_recordset()
+        self.assertEqual((target.login, target.email), original)
+        self.assertEqual(self.env["trucalc.bank.admin.audit"].sudo().search_count([
+            ("event_type", "=", "bank_user_email_updated"),
+            ("target_user_id", "=", target.id),
+        ]), 1)
+
+    def test_email_change_locked_context_and_permissions(self):
+        target = self._user(
+            "email-boundary", [self.roles["requestor"]], bank=self.bank,
+        )
+        action = self.bank.with_user(
+            self.admin
+        ).action_trucalc_view_bank_users()
+        row = self.env["trucalc.bank.user.management"].with_user(
+            self.admin
+        ).search(action["domain"]).filtered(
+            lambda item: item.target_user_id == target
+        )
+        change_action = row.action_change_email()
+        self.assertEqual(
+            change_action["res_model"], "trucalc.bank.user.email.change"
+        )
+        EmailChange = self.env["trucalc.bank.user.email.change"].with_user(
+            self.admin
+        ).with_context(**change_action["context"])
+        defaults = EmailChange.default_get([
+            "owner_user_id", "bank_company_id", "target_user_id",
+            "current_login", "pending_invitation",
+        ])
+        self.assertEqual(defaults["owner_user_id"], self.admin.id)
+        self.assertEqual(defaults["bank_company_id"], self.bank.id)
+        self.assertEqual(defaults["target_user_id"], target.id)
+        self.assertEqual(defaults["current_login"], target.login)
+        self.assertFalse(defaults["pending_invitation"])
+        wizard = EmailChange.create({"new_login": "pass-c-safe@example.test"})
+        for values in (
+            {"owner_user_id": self.ops.id},
+            {"bank_company_id": self.other_bank.id},
+            {"target_user_id": self.portal.id},
+            {"current_login": "forged@example.test"},
+            {"pending_invitation": True},
+        ):
+            with self.assertRaises(AccessError):
+                wizard.write(values)
+        with self.assertRaises(AccessError):
+            wizard.with_context({}).action_save()
+        with self.assertRaises(AccessError):
+            self._email_change_wizard(
+                target, "denied@example.test", actor=self.ops,
+            )
+        with self.assertRaises(AccessError):
+            self._email_change_wizard(
+                target, "cross-bank@example.test", bank=self.other_bank,
+            )
+
     def test_equivalent_administrators_get_owned_fresh_rows_and_can_edit(self):
         admin_two = self._user("admin-two", [self.group_admin])
         admin_two.sudo().write({
@@ -578,7 +830,7 @@ class TestBankUserProvisioning(TransactionCase):
         target.invalidate_recordset()
         row.invalidate_recordset()
         self._assert_exact(target, self.bank, "requestor")
-        self.assertEqual(target.partner_id.signup_type, "signup")
+        self.assertTrue(target.partner_id.signup_type.startswith("signup:"))
         self.assertEqual(row.invitation_state, "pending")
         self.assertFalse(self.env["trucalc.bank.admin.audit"].sudo().search_count([
             ("event_type", "=", "invitation_sent"),
@@ -646,7 +898,7 @@ class TestBankUserProvisioning(TransactionCase):
             mails.mapped("state"), ["exception", "sent", "sent", "exception"]
         )
         self.assertTrue(all(not mail.auto_delete for mail in mails))
-        for mail in mails:
+        for index, mail in enumerate(mails):
             self.assertEqual(mail.email_to, target.email)
             self.assertEqual(mail.email_from, self.main.email_formatted)
             self.assertIn("TruCalc", mail.email_from)
@@ -657,10 +909,13 @@ class TestBankUserProvisioning(TransactionCase):
             )
             self.assertEqual(len(signup_links), 1)
             signup_token = parse_qs(urlparse(signup_links[0]).query)["token"][0]
-            self.assertEqual(
-                target.partner_id.sudo()._get_partner_from_token(signup_token),
-                target.partner_id,
+            resolved = target.partner_id.sudo()._get_partner_from_token(
+                signup_token
             )
+            if index == len(mails) - 1:
+                self.assertEqual(resolved, target.partner_id)
+            else:
+                self.assertFalse(resolved)
         for actor in (self.ops, self.reviewer, self.portal, self.vendor_user):
             with self.assertRaises(AccessError):
                 target.with_user(actor)._trucalc_send_bank_invitation(self.bank)
@@ -738,6 +993,26 @@ class TestBankUserProvisioning(TransactionCase):
             "password", "group_ids", "company_id", "company_ids", "role",
             "share", "active", "invitation_state", "trucalc_bank_company_id",
             "trucalc_vendor_id",
+        })
+        self.assertEqual(
+            len(arch.xpath(
+                ".//button[@name='action_change_email'][@string='Change Email']"
+            )),
+            1,
+        )
+        email_arch = etree.fromstring(
+            self.env.ref(
+                "trucalc_orders.view_trucalc_bank_user_email_change_form"
+            ).arch
+        )
+        self.assertEqual(set(email_arch.xpath(".//field/@name")), {
+            "owner_user_id", "pending_invitation", "bank_company_id",
+            "target_user_id", "current_login", "new_login",
+            "acknowledge_invitation_invalidation",
+        })
+        self.assertFalse(set(email_arch.xpath(".//field/@name")) & {
+            "password", "group_ids", "company_id", "company_ids", "role",
+            "share", "active", "trucalc_bank_company_id", "trucalc_vendor_id",
         })
         with self.assertRaises(AccessError):
             self.other_bank.with_user(self.ops).action_trucalc_view_bank_users()

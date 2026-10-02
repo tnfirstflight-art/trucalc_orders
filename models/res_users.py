@@ -1,5 +1,6 @@
 import logging
 import re
+import uuid
 
 from odoo import Command, api, fields, models, tools, _
 from odoo.exceptions import AccessError, UserError, ValidationError
@@ -89,6 +90,30 @@ class ResUsers(models.Model):
         ):
             raise self._trucalc_identity_collision()
         return partners, users
+
+    @api.model
+    @api.private
+    def _trucalc_assert_bank_email_available(self, normalized, target):
+        target.ensure_one()
+        Users = self.sudo().with_context(active_test=False)
+        Partners = self.env["res.partner"].sudo().with_context(active_test=False)
+        users = Users.search([
+            ("id", "!=", target.id),
+            "|", ("login", "=ilike", normalized),
+            ("partner_id.email", "=ilike", normalized),
+        ]).filtered(lambda item: (
+            tools.email_normalize(item.login or "") == normalized
+            or tools.email_normalize(item.partner_id.email or "") == normalized
+        ))
+        partners = Partners.search([
+            ("id", "!=", target.partner_id.id),
+            ("email", "=ilike", normalized),
+        ]).filtered(
+            lambda item: tools.email_normalize(item.email or "") == normalized
+        )
+        if users or partners:
+            raise self._trucalc_identity_collision()
+        return True
 
     @api.private
     def _trucalc_assert_plain_portal_reusable(self):
@@ -224,6 +249,71 @@ class ResUsers(models.Model):
         return True
 
     @api.private
+    def _trucalc_change_bank_email(self, bank, login):
+        self.ensure_one()
+        actor = self.env["res.company"]._trucalc_require_bank_administrator()
+        target = self._trucalc_assert_managed_bank_user(bank)
+        normalized = self._trucalc_normalize_login(login)
+        old_login = target.login
+        old_email = target.email or False
+        if (
+            tools.email_normalize(old_login or "") == normalized
+            and tools.email_normalize(old_email or "") == normalized
+        ):
+            raise ValidationError(_("The Bank user already uses this email address."))
+
+        partner_id = target.partner_id.id
+        user_id = target.id
+        invitation_state = (
+            "pending" if target.partner_id.signup_type
+            else "confirmed" if target.login_date
+            else "never_invited"
+        )
+        pending_invite = invitation_state == "pending"
+        with self.env.cr.savepoint():
+            self.env.cr.execute(
+                "SELECT id FROM res_users WHERE id = %s FOR UPDATE", [user_id],
+            )
+            self.env.cr.execute(
+                "SELECT id FROM res_partner WHERE id = %s FOR UPDATE", [partner_id],
+            )
+            target.invalidate_recordset()
+            target = target._trucalc_assert_managed_bank_user(bank)
+            self._trucalc_assert_bank_email_available(normalized, target)
+            target.with_context(no_reset_password=True).write({
+                "login": normalized,
+                "email": normalized,
+            })
+            if pending_invite:
+                target.partner_id.sudo().signup_cancel()
+            target.invalidate_recordset()
+            target.partner_id.invalidate_recordset()
+            target = target._trucalc_assert_managed_bank_user(bank)
+            if (
+                target.id != user_id
+                or target.partner_id.id != partner_id
+                or target.login != normalized
+                or target.email != normalized
+                or (pending_invite and target.partner_id.signup_type)
+            ):
+                raise ValidationError(_(
+                    "The Bank user email update did not complete safely."
+                ))
+            self.env["trucalc.bank.admin.audit"]._trucalc_log(
+                "bank_user_email_updated", actor, bank, target_user=target,
+                prior_status=old_login, new_status=normalized,
+                metadata={
+                    "old_login": old_login,
+                    "old_email": old_email,
+                    "new_login": normalized,
+                    "new_email": normalized,
+                    "invitation_state": invitation_state,
+                    "pending_invite_invalidated": pending_invite,
+                },
+            )
+        return True
+
+    @api.private
     def _trucalc_change_bank_role(self, bank, role):
         self.ensure_one()
         actor = self.env["res.company"]._trucalc_require_bank_administrator()
@@ -313,7 +403,9 @@ class ResUsers(models.Model):
             raise UserError(_("The TruCalc sender email is not configured."))
         try:
             with self.env.cr.savepoint():
-                target.partner_id.sudo().signup_prepare(signup_type="signup")
+                target.partner_id.sudo().signup_prepare(
+                    signup_type="signup:%s" % uuid.uuid4().hex,
+                )
                 mail_id = template.sudo().with_context(
                     dbname=self.env.cr.dbname,
                     lang=target.lang or self.env.lang,

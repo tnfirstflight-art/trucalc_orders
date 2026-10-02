@@ -177,6 +177,113 @@ class TruCalcBankUserEdit(models.TransientModel):
         )
 
 
+class TruCalcBankUserEmailChange(models.TransientModel):
+    _name = "trucalc.bank.user.email.change"
+    _description = "Change TruCalc Bank User Email"
+
+    owner_user_id = fields.Many2one("res.users", required=True, readonly=True)
+    bank_company_id = fields.Many2one("res.company", required=True, readonly=True)
+    target_user_id = fields.Many2one("res.users", required=True, readonly=True)
+    current_login = fields.Char(string="Current Email / Login", readonly=True)
+    new_login = fields.Char(string="New Email / Login", required=True)
+    pending_invitation = fields.Boolean(readonly=True)
+    acknowledge_invitation_invalidation = fields.Boolean(
+        string="I understand that a new invitation must be sent",
+    )
+
+    _editable_fields = frozenset({
+        "new_login", "acknowledge_invitation_invalidation",
+    })
+
+    @api.model
+    def default_get(self, fields_list):
+        actor = self.env["res.company"]._trucalc_require_bank_administrator()
+        values = super().default_get(fields_list)
+        target_id = self.env.context.get("trucalc_locked_target_user_id")
+        bank_id = self.env.context.get("trucalc_locked_bank_company_id")
+        if not target_id or not bank_id:
+            raise AccessError(_("The Bank User email-change context is invalid."))
+        bank = self.env["res.company"].browse(
+            bank_id
+        )._trucalc_bank_identity_record(require_active=False)
+        target = self.env["res.users"].browse(
+            target_id
+        )._trucalc_assert_managed_bank_user(bank)
+        values.update({
+            "owner_user_id": actor.id,
+            "bank_company_id": bank.id,
+            "target_user_id": target.id,
+            "current_login": target.login,
+            "pending_invitation": bool(target.partner_id.signup_type),
+        })
+        return values
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        actor = self.env["res.company"]._trucalc_require_bank_administrator()
+        bank_id = self.env.context.get("trucalc_locked_bank_company_id")
+        target_id = self.env.context.get("trucalc_locked_target_user_id")
+        if not bank_id or not target_id:
+            raise AccessError(_("The Bank User email-change context is invalid."))
+        bank = self.env["res.company"].browse(
+            bank_id
+        )._trucalc_bank_identity_record(require_active=False)
+        target = self.env["res.users"].browse(
+            target_id
+        )._trucalc_assert_managed_bank_user(bank)
+        for values in vals_list:
+            if (
+                values.get("bank_company_id", bank.id) != bank.id
+                or values.get("target_user_id", target.id) != target.id
+                or values.get("owner_user_id", actor.id) != actor.id
+            ):
+                raise AccessError(_("The Bank User email-change context is invalid."))
+            values.update({
+                "owner_user_id": actor.id,
+                "bank_company_id": bank.id,
+                "target_user_id": target.id,
+                "current_login": target.login,
+                "pending_invitation": bool(target.partner_id.signup_type),
+            })
+        return super().create(vals_list)
+
+    def write(self, values):
+        actor = self.env["res.company"]._trucalc_require_bank_administrator()
+        if set(values) - self._editable_fields:
+            raise AccessError(_("The Bank User email-change context is invalid."))
+        if any(wizard.owner_user_id != actor for wizard in self):
+            raise AccessError(_("The Bank User email-change context is invalid."))
+        return super().write(values)
+
+    def action_save(self):
+        self.ensure_one()
+        actor = self.env["res.company"]._trucalc_require_bank_administrator()
+        locked_bank_id = self.env.context.get("trucalc_locked_bank_company_id")
+        locked_target_id = self.env.context.get("trucalc_locked_target_user_id")
+        if (
+            self.owner_user_id != actor
+            or not locked_bank_id or not locked_target_id
+            or self.bank_company_id.id != locked_bank_id
+            or self.target_user_id.id != locked_target_id
+        ):
+            raise AccessError(_("The Bank User email-change context is invalid."))
+        target = self.target_user_id._trucalc_assert_managed_bank_user(
+            self.bank_company_id
+        )
+        if (
+            target.partner_id.signup_type
+            and not self.acknowledge_invitation_invalidation
+        ):
+            raise ValidationError(_(
+                "Confirm that the pending invitation will be invalidated and a "
+                "new invitation must be sent."
+            ))
+        target._trucalc_change_bank_email(self.bank_company_id, self.new_login)
+        return self.env["trucalc.bank.user.management"]._trucalc_open(
+            self.bank_company_id
+        )
+
+
 class TruCalcBankUserManagement(models.TransientModel):
     _name = "trucalc.bank.user.management"
     _description = "Managed TruCalc Bank User"
@@ -277,6 +384,25 @@ class TruCalcBankUserManagement(models.TransientModel):
                 "default_login": target.login,
                 "default_name": target.name,
                 "default_phone": target.phone,
+                "trucalc_locked_bank_company_id": self.bank_company_id.id,
+                "trucalc_locked_target_user_id": target.id,
+            },
+        }
+
+    def action_change_email(self):
+        target = self._controlled_target()
+        return {
+            "type": "ir.actions.act_window", "name": _("Change Bank User Email"),
+            "res_model": "trucalc.bank.user.email.change", "view_mode": "form",
+            "views": [(
+                self.env.ref(
+                    "trucalc_orders.view_trucalc_bank_user_email_change_form"
+                ).id,
+                "form",
+            )],
+            "target": "new", "context": {
+                "default_bank_company_id": self.bank_company_id.id,
+                "default_target_user_id": target.id,
                 "trucalc_locked_bank_company_id": self.bank_company_id.id,
                 "trucalc_locked_target_user_id": target.id,
             },

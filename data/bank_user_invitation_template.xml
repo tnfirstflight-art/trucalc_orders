@@ -15,7 +15,7 @@
     <p>Hello <t t-out="object.name or ''">Bank User</t>,</p>
     <p>A TruCalc Administrator has created your secure Bank portal account. Use the button below to choose your password and activate access.</p>
     <div style="margin:16px 0px 16px 0px;text-align:center">
-      <a t-att-href="object.partner_id._get_signup_url()"
+      <a t-att-href="object.partner_id.with_context(signup_force_type_in_url='signup')._get_signup_url()"
          style="display:inline-block;padding:10px;text-decoration:none;font-size:12px;background-color:#022f5b;color:#FFFFFF;border-radius:5px">
         <strong>Set Your TruCalc Password</strong>
       </a>
