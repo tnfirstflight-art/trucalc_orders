@@ -10,6 +10,8 @@ class TruCalcInternalUserAdminAudit(models.Model):
     event_type = fields.Selection([
         ("user_provisioned", "Internal User Provisioned"),
         ("existing_partner_reused", "Existing Partner Reused"),
+        ("identity_updated", "Internal User Identity Updated"),
+        ("email_updated", "Internal User Email Updated"),
         ("role_changed", "Internal User Role Changed"),
         ("reviewer_added", "Reviewer Capability Added"),
         ("reviewer_removed", "Reviewer Capability Removed"),

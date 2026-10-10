@@ -148,6 +148,28 @@ class TestInternalUserProvisioning(TransactionCase):
         })
         return order
 
+    def _manage_wizard(self, target, actor=False):
+        actor = actor or self.admin
+        action = self.env[
+            "trucalc.internal.user.management"
+        ].with_user(actor)._trucalc_open()
+        row = self.env["trucalc.internal.user.management"].with_user(
+            actor
+        ).search(action["domain"]).filtered(
+            lambda item: item.target_user_id == target
+        )
+        self.assertEqual(len(row), 1)
+        manage_action = row.action_manage()
+        self.assertEqual(
+            manage_action["res_model"], "trucalc.internal.user.manage",
+        )
+        self.assertEqual(manage_action["target"], "new")
+        return self.env["trucalc.internal.user.manage"].with_user(
+            actor
+        ).with_context(**manage_action["context"]).browse(
+            manage_action["res_id"]
+        )
+
     def test_provisions_both_roles_reviewer_phone_companies_and_home(self):
         for role, reviewer in (
             ("administrator", False), ("administrator", True),
@@ -237,8 +259,10 @@ class TestInternalUserProvisioning(TransactionCase):
             "trucalc.internal.user.management"
         ].with_user(self.admin)._trucalc_open_user(raw_existing)
         projection = self.env[
-            "trucalc.internal.user.management"
-        ].with_user(self.admin).browse(action["res_id"])
+            "trucalc.internal.user.manage"
+        ].with_user(self.admin).with_context(**action["context"]).browse(
+            action["res_id"]
+        )
         self.assertEqual(projection.phone, "(662) 555-1212")
 
     def test_partner_reuse_and_identity_collisions_fail_closed(self):
@@ -604,6 +628,152 @@ class TestInternalUserProvisioning(TransactionCase):
                 "normalized_identity": target.login,
             })
 
+    def test_unified_manage_atomic_save_noop_and_history_preservation(self):
+        target = self._provision(
+            "unified-save", "operations", reviewer=True,
+            phone="6155550100",
+        )
+        target.with_context(no_reset_password=True).write({
+            "password": "Unified-A3-Existing-Password",
+        })
+        target.partner_id.sudo().signup_prepare(signup_type="signup:unified-a3")
+        historical = self._order(target, "completed")
+        user_id, partner_id, order_id = target.id, target.partner_id.id, historical.id
+        companies = target.company_ids
+        self.env.cr.execute("SELECT password FROM res_users WHERE id=%s", [target.id])
+        password_hash = self.env.cr.fetchone()[0]
+        mail_ids = self.env["mail.mail"].sudo().search([]).ids
+
+        wizard = self._manage_wizard(target)
+        self.assertEqual(wizard.phone, "(615) 555-0100")
+        self.assertEqual(wizard.account_state, "invitation_pending")
+        wizard.write({
+            "name": "  Unified   Internal User  ",
+            "login": "Unified.A3@Example.TEST",
+            "phone": "+1 (615) 555-0198 extension 44",
+            "role": "administrator",
+            "reviewer": False,
+            "acknowledge_account_link_invalidation": True,
+        })
+        fresh_action = wizard.action_save()
+        target.invalidate_recordset()
+        target.partner_id.invalidate_recordset()
+        historical.invalidate_recordset()
+        self.assertEqual(
+            (target.id, target.partner_id.id, historical.id),
+            (user_id, partner_id, order_id),
+        )
+        self.assertEqual(target.name, "Unified Internal User")
+        self.assertEqual(target.login, "unified.a3@example.test")
+        self.assertEqual(target.email, target.login)
+        self.assertEqual(target.phone, "(615) 555-0198 ext. 44")
+        self.assertFalse(target.partner_id.signup_type)
+        self.assertEqual(target.company_ids, companies)
+        self.assertEqual(historical.reviewer_user_id, target)
+        self._assert_managed(target, "administrator", reviewer=False)
+        self.env.cr.execute("SELECT password FROM res_users WHERE id=%s", [target.id])
+        self.assertEqual(self.env.cr.fetchone()[0], password_hash)
+        self.assertFalse(self.env["mail.mail"].sudo().search([
+            ("id", "not in", mail_ids),
+        ]))
+        fresh_rows = self.env["trucalc.internal.user.management"].with_user(
+            self.admin
+        ).search(fresh_action["domain"])
+        self.assertIn(target, fresh_rows.target_user_id)
+        events = self.env["trucalc.internal.user.admin.audit"].sudo().search([
+            ("target_user_id", "=", target.id),
+        ]).mapped("event_type")
+        self.assertIn("identity_updated", events)
+        self.assertIn("email_updated", events)
+        self.assertIn("role_changed", events)
+        self.assertIn("reviewer_removed", events)
+
+        noop = self._manage_wizard(target)
+        audit_count = self.env[
+            "trucalc.internal.user.admin.audit"
+        ].sudo().search_count([("target_user_id", "=", target.id)])
+        noop.action_save()
+        self.assertEqual(self.env[
+            "trucalc.internal.user.admin.audit"
+        ].sudo().search_count([("target_user_id", "=", target.id)]), audit_count)
+
+    def test_unified_manage_rolls_back_and_rejects_forgery(self):
+        target = self._provision("unified-rollback", "operations", reviewer=True)
+        collision = self._provision("unified-collision", "operations")
+        active_review = self._order(target, "under_review")
+        wizard = self._manage_wizard(target)
+        original = (
+            target.name, target.login, target.phone,
+            target._trucalc_internal_role_key(),
+            bool(target._trucalc_persona_membership()["reviewer"]),
+        )
+        wizard.write({
+            "name": "Must Roll Back", "login": collision.login,
+            "phone": "615-555-0111", "role": "administrator",
+            "reviewer": False,
+        })
+        with self.assertRaises(ValidationError):
+            wizard.action_save()
+        target.invalidate_recordset()
+        self.assertEqual((
+            target.name, target.login, target.phone,
+            target._trucalc_internal_role_key(),
+            bool(target._trucalc_persona_membership()["reviewer"]),
+        ), original)
+        self.assertEqual(active_review.reviewer_user_id, target)
+        self.assertFalse(self._audit_count(target, "identity_updated"))
+        for values in (
+            {"owner_user_id": self.ops.id},
+            {"management_row_id": False},
+            {"internal_company_id": self.unrelated.id},
+            {"target_user_id": collision.id},
+            {"user_active": False},
+        ):
+            with self.assertRaises(AccessError):
+                wizard.write(values)
+        for actor in (self.ops, self.reviewer, self.portal, self.vendor_user):
+            with self.assertRaises(AccessError):
+                wizard.with_user(actor).action_save()
+
+    def test_unified_manage_guards_account_actions_and_internal_roster(self):
+        self.main.email = "trucalc-internal@example.test"
+        target = self._provision("unified-actions", "operations")
+        wizard = self._manage_wizard(target)
+        wizard.name = "Unsaved Name"
+        with self.assertRaisesRegex(ValidationError, "Save or discard"):
+            wizard.action_send_invitation()
+        self.assertFalse(target.partner_id.signup_type)
+        wizard.name = target.name
+
+        def queued(mails, auto_commit=False, raise_exception=False,
+                   post_send_callback=None):
+            return True
+
+        with patch.object(MailMail, "send", autospec=True, side_effect=queued):
+            result = wizard.action_send_invitation()
+        self.assertEqual(result["params"]["type"], "warning")
+        target.invalidate_recordset()
+        pending = self._manage_wizard(target)
+        self.assertEqual(pending.account_state, "invitation_pending")
+        with self.assertRaises(ValidationError):
+            pending.action_send_invitation()
+        pending.action_deactivate()
+        target.invalidate_recordset()
+        self.assertFalse(target.active)
+        inactive = self._manage_wizard(target)
+        self.assertEqual(inactive.account_state, "inactive")
+        inactive.action_reactivate()
+        target.invalidate_recordset()
+        self.assertTrue(target.active)
+
+        self_manage = self._manage_wizard(self.admin)
+        self_manage.role = "operations"
+        with self.assertRaisesRegex(ValidationError, "your own"):
+            self_manage.action_save()
+        self_manage = self._manage_wizard(self.admin)
+        with self.assertRaisesRegex(ValidationError, "your own"):
+            self_manage.action_deactivate()
+
     def test_ui_menu_order_surface_and_no_generic_user_acl(self):
         configuration = self.env.ref("trucalc_orders.menu_trucalc_configuration")
         self.assertEqual(
@@ -623,6 +793,13 @@ class TestInternalUserProvisioning(TransactionCase):
             "trucalc.internal.user.management"
         ].with_user(self.admin)._trucalc_open()
         self.assertEqual(action["res_model"], "trucalc.internal.user.management")
+        self.assertEqual(action["view_mode"], "list")
+        self.assertEqual(action["views"], [(
+            self.env.ref(
+                "trucalc_orders.view_trucalc_internal_user_management_list"
+            ).id,
+            "list",
+        )])
         for actor in (self.ops, self.reviewer, self.portal, self.vendor_user):
             with self.assertRaises(AccessError):
                 self.env[
@@ -635,6 +812,7 @@ class TestInternalUserProvisioning(TransactionCase):
         for view_xmlid in (
             "view_trucalc_internal_user_provision_form",
             "view_trucalc_internal_user_management_form",
+            "view_trucalc_internal_user_manage_form",
         ):
             arch = etree.fromstring(self.env.ref(
                 "trucalc_orders.%s" % view_xmlid
@@ -643,3 +821,28 @@ class TestInternalUserProvisioning(TransactionCase):
                 "password", "new_password", "group_ids", "company_id",
                 "company_ids", "trucalc_bank_company_id", "trucalc_vendor_id",
             })
+        list_arch = etree.fromstring(self.env.ref(
+            "trucalc_orders.view_trucalc_internal_user_management_list"
+        ).arch)
+        self.assertEqual(len(list_arch.xpath(
+            ".//field[@name='name'][@widget='trucalc_internal_user_manage_link']"
+        )), 1)
+        self.assertFalse(list_arch.xpath(".//button[@type='object']"))
+        manage_arch = etree.fromstring(self.env.ref(
+            "trucalc_orders.view_trucalc_internal_user_manage_form"
+        ).arch)
+        self.assertTrue(manage_arch.xpath(
+            ".//button[@name='action_save'][@string='Save Changes']"
+        ))
+        self.assertEqual(set(manage_arch.xpath(
+            ".//group[@string='Account Actions']/button/@name"
+        )), {
+            "action_send_invitation", "action_resend_invitation",
+            "action_send_password_reset", "action_reactivate",
+            "action_deactivate",
+        })
+        self.assertFalse(set(manage_arch.xpath(".//field/@name")) & {
+            "password", "new_password", "group_ids", "company_id",
+            "company_ids", "share", "trucalc_bank_company_id",
+            "trucalc_vendor_id",
+        })

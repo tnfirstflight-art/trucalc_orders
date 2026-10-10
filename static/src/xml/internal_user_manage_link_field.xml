@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="trucalc_orders.InternalUserManageLinkField">
+        <button t-if="canManage" type="button"
+                class="o_trucalc_internal_user_manage_link btn btn-link p-0 border-0 text-start"
+                t-on-click.stop="openManagement" t-esc="formattedValue"/>
+        <span t-else="" t-esc="formattedValue"/>
+    </t>
+</templates>

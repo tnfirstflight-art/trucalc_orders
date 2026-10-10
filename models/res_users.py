@@ -706,6 +706,11 @@ class ResUsers(models.Model):
 
     @api.model
     @api.private
+    def _trucalc_assert_internal_email_available(self, normalized, target):
+        return self._trucalc_assert_bank_email_available(normalized, target)
+
+    @api.model
+    @api.private
     def _trucalc_internal_companies(self):
         main_company = self.env.ref("base.main_company")
         banks = self.env["res.company"].sudo().with_context(active_test=False).search([
@@ -759,6 +764,113 @@ class ResUsers(models.Model):
                 "The TruCalc internal user is not configured for this controlled action."
             ))
         return user
+
+    @api.private
+    def _trucalc_edit_internal_identity(self, name, phone=False):
+        self.ensure_one()
+        actor = self.env["res.users"]._trucalc_require_internal_administrator()
+        target = self._trucalc_assert_managed_internal_user()
+        target = target._trucalc_lock_target()._trucalc_assert_managed_internal_user()
+        clean_name = " ".join((name or "").split())
+        if not clean_name:
+            raise ValidationError(_("TruCalc User Name is required."))
+        clean_phone = self._trucalc_format_internal_phone(phone)
+        prior = {"name": target.name, "phone": target.phone or False}
+        if self._trucalc_format_internal_phone(prior["phone"]) == clean_phone:
+            clean_phone = prior["phone"]
+        updated = {"name": clean_name, "phone": clean_phone}
+        changes = {
+            field_name: {"old": prior[field_name], "new": updated[field_name]}
+            for field_name in updated
+            if prior[field_name] != updated[field_name]
+        }
+        if not changes:
+            return False
+        role = target._trucalc_internal_role_key()
+        reviewer = bool(target._trucalc_persona_membership()["reviewer"])
+        with self.env.cr.savepoint():
+            target.write(updated)
+            target.invalidate_recordset()
+            target = target._trucalc_assert_managed_internal_user()
+            if target.name != clean_name or (target.phone or False) != clean_phone:
+                raise ValidationError(_(
+                    "The TruCalc user identity update did not complete safely."
+                ))
+            self.env["trucalc.internal.user.admin.audit"]._trucalc_log(
+                "identity_updated", actor, target,
+                prior_role=role, new_role=role,
+                prior_reviewer=reviewer, new_reviewer=reviewer,
+                prior_active=True, new_active=True,
+                metadata={
+                    "changed_fields": sorted(changes),
+                    "changes": changes,
+                },
+            )
+        return True
+
+    @api.private
+    def _trucalc_change_internal_email(self, login):
+        self.ensure_one()
+        actor = self.env["res.users"]._trucalc_require_internal_administrator()
+        target = self._trucalc_assert_managed_internal_user()
+        normalized = self._trucalc_normalize_internal_login(login)
+        old_normalized = self._trucalc_normalize_internal_login(target.login)
+        self._trucalc_advisory_lock(
+            "identity:%s" % old_normalized,
+            "identity:%s" % normalized,
+        )
+        target = target._trucalc_lock_target()._trucalc_assert_managed_internal_user()
+        old_login = target.login
+        old_email = target.email or False
+        if (
+            tools.email_normalize(old_login or "") == normalized
+            and tools.email_normalize(old_email or "") == normalized
+        ):
+            raise ValidationError(_(
+                "The TruCalc user already uses this email address."
+            ))
+        user_id = target.id
+        partner_id = target.partner_id.id
+        account_state = target._trucalc_internal_account_state()
+        outstanding_link = bool(target.partner_id.signup_type)
+        role = target._trucalc_internal_role_key()
+        reviewer = bool(target._trucalc_persona_membership()["reviewer"])
+        with self.env.cr.savepoint():
+            self._trucalc_assert_internal_email_available(normalized, target)
+            target.with_context(
+                no_reset_password=True,
+                trucalc_suppress_security_update_mail=True,
+            ).write({"login": normalized, "email": normalized})
+            if outstanding_link:
+                target.partner_id.sudo().signup_cancel()
+            target.invalidate_recordset()
+            target.partner_id.invalidate_recordset()
+            target = target._trucalc_assert_managed_internal_user()
+            if (
+                target.id != user_id
+                or target.partner_id.id != partner_id
+                or target.login != normalized
+                or target.email != normalized
+                or (outstanding_link and target.partner_id.signup_type)
+            ):
+                raise ValidationError(_(
+                    "The TruCalc user email update did not complete safely."
+                ))
+            self.env["trucalc.internal.user.admin.audit"]._trucalc_log(
+                "email_updated", actor, target,
+                prior_role=role, new_role=role,
+                prior_reviewer=reviewer, new_reviewer=reviewer,
+                prior_active=True, new_active=True,
+                metadata={
+                    "old_login": old_login,
+                    "old_email": old_email,
+                    "new_login": normalized,
+                    "new_email": normalized,
+                    "account_state": account_state,
+                    "outstanding_account_link_invalidated": outstanding_link,
+                },
+            )
+        return True
 
     @api.model
     @api.private
