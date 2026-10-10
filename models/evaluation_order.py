@@ -6,6 +6,7 @@ from odoo.exceptions import AccessError, ValidationError
 from markupsafe import Markup, escape
 
 from .vendor_fee import SERVICE_SELECTION
+from ..utils.phone import format_phone, normalize_phone, phone_parts
 
 
 BANK_REQUEST_FIELDS = frozenset({
@@ -1434,69 +1435,24 @@ class EvaluationOrder(models.Model):
 
     @api.model
     def _inspection_contact_phone_parts(self, value):
-        phone = value if isinstance(value, str) else ""
-        phone = re.sub(r"[\x00-\x1f\x7f]+", " ", phone)
-        phone = re.sub(r"\s+", " ", phone).strip()
-        extension = False
-        extension_match = re.search(
-            r"(?i)\s*(?:ext\.?|x)\s*[:#.-]?\s*(\d{1,10})\s*$", phone
-        )
-        base_phone = phone
-        if extension_match:
-            extension = extension_match.group(1)
-            base_phone = phone[:extension_match.start()].strip()
-        digits = "".join(re.findall(r"\d", base_phone))
-        us_digits = digits
-        if len(us_digits) == 11 and us_digits.startswith("1"):
-            us_digits = us_digits[1:]
-        explicit_non_us_country = base_phone.startswith("+") and not (
-            len(digits) == 11 and digits.startswith("1")
-        )
-        return phone, base_phone, digits, us_digits, extension, explicit_non_us_country
+        return phone_parts(value)
 
     @api.model
     def _format_inspection_contact_phone(self, value):
-        (
-            phone, _base_phone, _digits, us_digits, extension,
-            explicit_non_us_country,
-        ) = self._inspection_contact_phone_parts(value)
-        if not phone:
-            return False
-        if len(us_digits) == 10 and not explicit_non_us_country:
-            formatted = "(%s) %s-%s" % (
-                us_digits[:3], us_digits[3:6], us_digits[6:],
-            )
-            if extension:
-                formatted += " ext. %s" % extension
-            return formatted
-        return phone
+        return format_phone(value)
 
     @api.model
     def _normalize_inspection_contact_phone(self, value, required=False):
-        (
-            phone, base_phone, digits, us_digits, extension,
-            explicit_non_us_country,
-        ) = self._inspection_contact_phone_parts(value)
-        if required and not phone:
-            raise ValidationError(_("Inspection Contact Phone is required."))
-        if not phone:
-            return False
-        if len(phone) > 64:
-            raise ValidationError(_(
-                "Inspection Contact Phone may not exceed 64 characters."
-            ))
-
-        if len(us_digits) == 10 and not explicit_non_us_country:
-            normalized = us_digits
-            if extension:
-                normalized += " ext %s" % extension
-            return normalized
-        if len(digits) < 7:
-            raise ValidationError(_("Enter a usable Inspection Contact Phone."))
-        normalized = base_phone
-        if extension:
-            normalized += " ext %s" % extension
-        return normalized
+        try:
+            return normalize_phone(value, required=required)
+        except ValueError as error:
+            if str(error) == "required":
+                raise ValidationError(_("Inspection Contact Phone is required.")) from error
+            if str(error) == "too_long":
+                raise ValidationError(_(
+                    "Inspection Contact Phone may not exceed 64 characters."
+                )) from error
+            raise ValidationError(_("Enter a usable Inspection Contact Phone.")) from error
 
     @api.model_create_multi
     def create(self, vals_list):
@@ -2800,17 +2756,20 @@ class EvaluationOrder(models.Model):
     def action_assign_reviewer(self, reviewer_user=False, review_due_date=False):
         self._require_intake_manager()
         self.ensure_one()
-        self._lock_for_bid_lifecycle()
-        if self.status != "report_received":
-            raise ValidationError(_(
-                "A Reviewer may be assigned only after controlled report receipt."
-            ))
         reviewer_user = (
             reviewer_user.sudo().exists()
             if reviewer_user else self.reviewer_user_id.sudo().exists()
         )
         if len(reviewer_user) != 1:
             raise ValidationError(_("Select an internal Reviewer before assignment."))
+        self.env["res.users"]._trucalc_advisory_lock(
+            "reviewer:%s" % reviewer_user.id,
+        )
+        self._lock_for_bid_lifecycle()
+        if self.status != "report_received":
+            raise ValidationError(_(
+                "A Reviewer may be assigned only after controlled report receipt."
+            ))
         reviewer_user._trucalc_reviewer_identity()
         review_due_date = self._validated_review_due_date(review_due_date)
         return self._transition_status(
@@ -2833,6 +2792,9 @@ class EvaluationOrder(models.Model):
         reviewer_user = reviewer_user.sudo().exists()
         if len(reviewer_user) != 1:
             raise ValidationError(_("Select an internal Reviewer."))
+        self.env["res.users"]._trucalc_advisory_lock(
+            "reviewer:%s" % reviewer_user.id,
+        )
         reviewer_user._trucalc_reviewer_identity()
         self._lock_for_bid_lifecycle()
         order = self.sudo()

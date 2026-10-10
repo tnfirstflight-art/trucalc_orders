@@ -86,6 +86,7 @@
                                     <field name="target_user_id" optional="show"/>
                                     <field name="prior_status" optional="hide"/>
                                     <field name="new_status" optional="hide"/>
+                                    <field name="mail_state" optional="hide"/>
                                 </list>
                             </field>
                         </page>

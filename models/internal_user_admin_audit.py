@@ -18,6 +18,12 @@ class TruCalcInternalUserAdminAudit(models.Model):
         ("invitation_sent", "Internal User Invitation Sent"),
         ("invitation_resent", "Internal User Invitation Resent"),
         ("invitation_failed", "Internal User Invitation Failed"),
+        ("invitation_queued", "Internal User Invitation Queued"),
+        ("invitation_resend_queued", "Internal User Invitation Resend Queued"),
+        ("invitation_resend_failed", "Internal User Invitation Resend Failed"),
+        ("password_reset_sent", "Internal User Password Reset Sent"),
+        ("password_reset_queued", "Internal User Password Reset Queued"),
+        ("password_reset_failed", "Internal User Password Reset Failed"),
     ], required=True, readonly=True, index=True)
     event_at = fields.Datetime(required=True, readonly=True, index=True)
     actor_user_id = fields.Many2one(

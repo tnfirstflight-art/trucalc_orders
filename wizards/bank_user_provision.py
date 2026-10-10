@@ -313,11 +313,12 @@ class TruCalcBankUserManagement(models.TransientModel):
             row.phone = user.phone
             row.role = user._trucalc_bank_role_key()
             row.user_active = user.active
-            if not user.active:
+            state = user._trucalc_bank_account_state(row.bank_company_id)
+            if state == "inactive":
                 row.invitation_state = "inactive"
-            elif user.partner_id.signup_type:
+            elif state in ("invitation_pending", "invitation_expired"):
                 row.invitation_state = "pending"
-            elif user.login_date:
+            elif state in ("confirmed", "reset_pending"):
                 row.invitation_state = "confirmed"
             else:
                 row.invitation_state = "not_invited"
@@ -417,17 +418,31 @@ class TruCalcBankUserManagement(models.TransientModel):
         return {"type": "ir.actions.client", "tag": "reload"}
 
     def action_send_invitation(self):
-        result = self._controlled_target()._trucalc_send_bank_invitation(
-            self.bank_company_id
+        target = self._controlled_target()
+        state = target._trucalc_bank_account_state(self.bank_company_id)
+        result = (
+            target._trucalc_resend_bank_invitation(self.bank_company_id)
+            if state in ("invitation_pending", "invitation_expired")
+            else target._trucalc_send_bank_invitation(self.bank_company_id)
         )
+        if result["queued"]:
+            return {
+                "type": "ir.actions.client", "tag": "display_notification",
+                "params": {
+                    "title": _("Invitation Queued"),
+                    "message": _("The invitation is queued; delivery is not yet confirmed."),
+                    "type": "warning", "sticky": True,
+                    "next": {"type": "ir.actions.client", "tag": "reload"},
+                },
+            }
         if not result["sent"]:
             return {
                 "type": "ir.actions.client", "tag": "display_notification",
                 "params": {
                     "title": _("Invitation Delivery Failed"),
                     "message": _(
-                        "Outbound invitation email %(mail_id)s was rendered and retained, "
-                        "but delivery was not confirmed. Resend remains available."
+                        "Outbound invitation email %(mail_id)s was retained, but delivery "
+                        "failed. Resend remains available."
                     ) % {"mail_id": result["mail_id"]},
                     "type": "danger", "sticky": True,
                     "next": {"type": "ir.actions.client", "tag": "reload"},

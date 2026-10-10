@@ -1,12 +1,30 @@
 import logging
-import re
 import uuid
+from datetime import timedelta
 
 from odoo import Command, api, fields, models, tools, _
 from odoo.exceptions import AccessError, UserError, ValidationError
 
+from ..utils.phone import format_phone
+
 
 _logger = logging.getLogger(__name__)
+
+
+class ResPartner(models.Model):
+    _inherit = "res.partner"
+
+    def _generate_signup_token(self, expiration=None):
+        """Keep one-time reset nonces on Odoo's reset-token validity window."""
+        self.ensure_one()
+        if (
+            expiration is None
+            and (self.sudo().signup_type or "").startswith("reset:")
+        ):
+            expiration = int(self.env["ir.config_parameter"].sudo().get_param(
+                "auth_signup.reset_password.validity.hours", 4,
+            ))
+        return super()._generate_signup_token(expiration=expiration)
 
 
 class ResUsers(models.Model):
@@ -25,6 +43,114 @@ class ResUsers(models.Model):
         index=True,
         help="Vendor organization this user is authorized to represent in TruCalc.",
     )
+
+    @api.model
+    @api.private
+    def _trucalc_advisory_lock(self, *keys):
+        """Serialize narrow controlled mutations using stable PostgreSQL keys."""
+        normalized = sorted({str(key) for key in keys if key is not None})
+        for key in normalized:
+            self.env.cr.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                ["trucalc_orders:%s" % key],
+            )
+
+    @api.private
+    def _trucalc_lock_target(self):
+        self.ensure_one()
+        user = self.sudo().with_context(active_test=False).exists()
+        if len(user) != 1:
+            raise AccessError(_("The managed user no longer exists."))
+        self.env.cr.execute("SELECT id FROM res_users WHERE id = %s FOR UPDATE", [user.id])
+        self.env.cr.execute(
+            "SELECT id FROM res_partner WHERE id = %s FOR UPDATE",
+            [user.partner_id.id],
+        )
+        user.invalidate_recordset()
+        user.partner_id.invalidate_recordset()
+        return user
+
+    @api.model
+    @api.private
+    def _trucalc_token_metadata(self, kind, mail, template, *, resend=False):
+        parameter = (
+            "auth_signup.reset_password.validity.hours"
+            if kind == "reset"
+            else "auth_signup.signup.validity.hours"
+        )
+        default_hours = 4 if kind == "reset" else 144
+        hours = int(self.env["ir.config_parameter"].sudo().get_param(
+            parameter, default_hours,
+        ))
+        sent_at = fields.Datetime.now()
+        outcome = (
+            "sent" if mail.state == "sent"
+            else "queued" if mail.state == "outgoing"
+            else "failed"
+        )
+        return {
+            "account_action": kind,
+            "link_kind": kind,
+            "resend": bool(resend),
+            "delivery_outcome": outcome,
+            "sent_at": fields.Datetime.to_string(sent_at),
+            "expires_at": fields.Datetime.to_string(sent_at + timedelta(hours=hours)),
+            "validity_hours": hours,
+            "template": template.get_external_id().get(template.id),
+        }
+
+    @api.private
+    def _trucalc_account_state_from_audit(
+        self, audit_model, invitation_events, reset_events,
+    ):
+        """Return authoritative setup state without exposing signed tokens."""
+        self.ensure_one()
+        user = self.sudo().with_context(active_test=False)
+        if not user.active:
+            return "inactive"
+        token_type = user.partner_id.sudo().signup_type or ""
+        events = tuple(invitation_events) + tuple(reset_events)
+        latest = self.env[audit_model].sudo().search([
+            ("target_user_id", "=", user.id),
+            ("event_type", "in", events),
+        ], order="event_at desc, id desc", limit=1)
+        expires_at = False
+        metadata = (latest.metadata or {}) if latest else {}
+        if metadata.get("expires_at"):
+            try:
+                expires_at = fields.Datetime.to_datetime(metadata["expires_at"])
+            except (TypeError, ValueError):
+                expires_at = False
+        token_is_current = bool(token_type) and (
+            not expires_at or expires_at > fields.Datetime.now()
+        )
+        if user.login_date:
+            if token_type.startswith("reset:") and token_is_current:
+                return "reset_pending"
+            return "confirmed"
+        invitation_history = bool(latest and latest.event_type in invitation_events)
+        if token_type.startswith("signup"):
+            return "invitation_pending" if token_is_current else "invitation_expired"
+        if invitation_history:
+            return "invitation_expired"
+        return "never_invited"
+
+    @api.model
+    @api.private
+    def _trucalc_assert_account_action(self, state, action):
+        allowed = {
+            "invite": {"never_invited"},
+            "resend_invite": {"invitation_pending", "invitation_expired"},
+            "reset": {"confirmed", "reset_pending"},
+        }
+        if state not in allowed[action]:
+            messages = {
+                "invite": _("Send Invitation is available only for an active user who has never been invited."),
+                "resend_invite": _("Resend Invitation is available only while account setup is pending or expired."),
+                "reset": _("Send Password Reset is available only for an active confirmed user."),
+            }
+            raise ValidationError(messages[action])
+        return True
 
     @api.model
     @api.private
@@ -55,7 +181,7 @@ class ResUsers(models.Model):
     @api.model
     @api.private
     def _trucalc_clean_bank_phone(self, value):
-        return (value or "").strip() or False
+        return format_phone(value)
 
     @api.model
     @api.private
@@ -162,6 +288,7 @@ class ResUsers(models.Model):
         actor = self.env["res.company"]._trucalc_require_bank_administrator()
         bank = bank._trucalc_bank_identity_record()
         normalized = self._trucalc_normalize_login(login)
+        self._trucalc_advisory_lock("identity:%s" % normalized)
         clean_name = " ".join((name or "").split())
         role_group = self._trucalc_bank_role_map().get(role)
         if not clean_name or not role_group:
@@ -218,11 +345,15 @@ class ResUsers(models.Model):
         self.ensure_one()
         actor = self.env["res.company"]._trucalc_require_bank_administrator()
         target = self._trucalc_assert_managed_bank_user(bank)
+        target = target._trucalc_lock_target()._trucalc_assert_managed_bank_user(bank)
         clean_name = " ".join((name or "").split())
         if not clean_name:
             raise ValidationError(_("Bank User Name is required."))
         clean_phone = self._trucalc_clean_bank_phone(phone)
         prior = {"name": target.name, "phone": target.phone or False}
+        if format_phone(prior["phone"]) == clean_phone:
+            # Do not rewrite equivalent legacy storage solely for presentation.
+            clean_phone = prior["phone"]
         updated = {"name": clean_name, "phone": clean_phone}
         changes = {
             field_name: {"old": prior[field_name], "new": updated[field_name]}
@@ -254,6 +385,12 @@ class ResUsers(models.Model):
         actor = self.env["res.company"]._trucalc_require_bank_administrator()
         target = self._trucalc_assert_managed_bank_user(bank)
         normalized = self._trucalc_normalize_login(login)
+        old_normalized = self._trucalc_normalize_login(target.login)
+        self._trucalc_advisory_lock(
+            "identity:%s" % old_normalized,
+            "identity:%s" % normalized,
+        )
+        target = target._trucalc_lock_target()._trucalc_assert_managed_bank_user(bank)
         old_login = target.login
         old_email = target.email or False
         if (
@@ -264,27 +401,15 @@ class ResUsers(models.Model):
 
         partner_id = target.partner_id.id
         user_id = target.id
-        invitation_state = (
-            "pending" if target.partner_id.signup_type
-            else "confirmed" if target.login_date
-            else "never_invited"
-        )
-        pending_invite = invitation_state == "pending"
+        invitation_state = target._trucalc_bank_account_state(bank)
+        outstanding_link = bool(target.partner_id.signup_type)
         with self.env.cr.savepoint():
-            self.env.cr.execute(
-                "SELECT id FROM res_users WHERE id = %s FOR UPDATE", [user_id],
-            )
-            self.env.cr.execute(
-                "SELECT id FROM res_partner WHERE id = %s FOR UPDATE", [partner_id],
-            )
-            target.invalidate_recordset()
-            target = target._trucalc_assert_managed_bank_user(bank)
             self._trucalc_assert_bank_email_available(normalized, target)
             target.with_context(no_reset_password=True).write({
                 "login": normalized,
                 "email": normalized,
             })
-            if pending_invite:
+            if outstanding_link:
                 target.partner_id.sudo().signup_cancel()
             target.invalidate_recordset()
             target.partner_id.invalidate_recordset()
@@ -294,7 +419,7 @@ class ResUsers(models.Model):
                 or target.partner_id.id != partner_id
                 or target.login != normalized
                 or target.email != normalized
-                or (pending_invite and target.partner_id.signup_type)
+                or (outstanding_link and target.partner_id.signup_type)
             ):
                 raise ValidationError(_(
                     "The Bank user email update did not complete safely."
@@ -308,7 +433,8 @@ class ResUsers(models.Model):
                     "new_login": normalized,
                     "new_email": normalized,
                     "invitation_state": invitation_state,
-                    "pending_invite_invalidated": pending_invite,
+                    "pending_invite_invalidated": outstanding_link,
+                    "outstanding_account_link_invalidated": outstanding_link,
                 },
             )
         return True
@@ -318,6 +444,7 @@ class ResUsers(models.Model):
         self.ensure_one()
         actor = self.env["res.company"]._trucalc_require_bank_administrator()
         target = self._trucalc_assert_managed_bank_user(bank)
+        target = target._trucalc_lock_target()._trucalc_assert_managed_bank_user(bank)
         selected = self._trucalc_bank_role_map().get(role)
         if not selected:
             raise ValidationError(_("Select one Bank role."))
@@ -348,6 +475,7 @@ class ResUsers(models.Model):
         self.ensure_one()
         actor = self.env["res.company"]._trucalc_require_bank_administrator()
         target = self._trucalc_assert_managed_bank_user(bank)
+        target = target._trucalc_lock_target()._trucalc_assert_managed_bank_user(bank)
         with self.env.cr.savepoint():
             target.write({"active": False})
             target.invalidate_recordset()
@@ -369,6 +497,10 @@ class ResUsers(models.Model):
         if target.active:
             raise ValidationError(_("The Bank user is already active."))
         normalized = self._trucalc_normalize_login(target.login)
+        self._trucalc_advisory_lock("identity:%s" % normalized)
+        target = target._trucalc_lock_target()._trucalc_assert_managed_bank_user(
+            bank, require_active=False,
+        )
         partner, collision = self._trucalc_find_bank_user_identity(normalized)
         if collision != target or partner != target.partner_id:
             raise self._trucalc_identity_collision()
@@ -389,22 +521,47 @@ class ResUsers(models.Model):
         return True
 
     @api.private
-    def _trucalc_send_bank_invitation(self, bank):
+    def _trucalc_bank_account_state(self, bank):
+        self.ensure_one()
+        self._trucalc_assert_managed_bank_user(bank, require_active=False)
+        return self._trucalc_account_state_from_audit(
+            "trucalc.bank.admin.audit",
+            (
+                "invitation_sent", "invitation_resent", "invitation_queued",
+                "invitation_resend_queued", "invitation_failed",
+                "invitation_resend_failed",
+            ),
+            ("password_reset_sent", "password_reset_queued", "password_reset_failed"),
+        )
+
+    @api.private
+    def _trucalc_send_bank_account_email(self, bank, action):
         self.ensure_one()
         actor = self.env["res.company"]._trucalc_require_bank_administrator()
         target = self._trucalc_assert_managed_bank_user(bank)
         normalized = self._trucalc_normalize_login(target.login)
+        self._trucalc_advisory_lock("identity:%s" % normalized)
+        target = target._trucalc_lock_target()._trucalc_assert_managed_bank_user(bank)
         partner, collision = self._trucalc_find_bank_user_identity(normalized)
         if collision != target or partner != target.partner_id:
             raise self._trucalc_identity_collision()
-        template = self.env.ref("trucalc_orders.mail_template_bank_user_invitation")
+        state = target._trucalc_bank_account_state(bank)
+        self._trucalc_assert_account_action(state, action)
+        reset = action == "reset"
+        resend = action == "resend_invite"
+        template = self.env.ref(
+            "trucalc_orders.mail_template_bank_user_password_reset"
+            if reset else "trucalc_orders.mail_template_bank_user_invitation"
+        )
         main_company = self.env.ref("base.main_company")
         if not main_company.email:
             raise UserError(_("The TruCalc sender email is not configured."))
         try:
             with self.env.cr.savepoint():
                 target.partner_id.sudo().signup_prepare(
-                    signup_type="signup:%s" % uuid.uuid4().hex,
+                    signup_type="%s:%s" % (
+                        "reset" if reset else "signup", uuid.uuid4().hex,
+                    ),
                 )
                 mail_id = template.sudo().with_context(
                     dbname=self.env.cr.dbname,
@@ -424,36 +581,58 @@ class ResUsers(models.Model):
                 )
                 if not mail_id:
                     raise UserError(_(
-                        "The TruCalc invitation could not be sent. No successful invitation was recorded."
+                        "The TruCalc account email could not be created."
                     ))
                 mail = self.env["mail.mail"].sudo().browse(mail_id).exists()
                 if not mail:
                     raise UserError(_(
-                        "The TruCalc invitation could not be retained for inspection. "
-                        "No successful invitation was recorded."
+                        "The TruCalc account email could not be retained for inspection."
                     ))
                 target._trucalc_assert_managed_bank_user(bank)
-                sent = mail.state == "sent"
-                if sent:
-                    self.env["trucalc.bank.admin.audit"]._trucalc_log(
-                        "invitation_sent", actor, bank, target_user=target,
-                        new_status="pending",
-                        metadata={
-                            "template": template.get_external_id().get(template.id),
-                            "mail_id": mail.id,
-                        },
-                    )
+                metadata = self._trucalc_token_metadata(
+                    "reset" if reset else "invitation", mail, template,
+                    resend=resend,
+                )
+                outcome = metadata["delivery_outcome"]
+                if reset:
+                    event_type = "password_reset_%s" % outcome
+                elif resend:
+                    event_type = {
+                        "sent": "invitation_resent",
+                        "queued": "invitation_resend_queued",
+                        "failed": "invitation_resend_failed",
+                    }[outcome]
+                else:
+                    event_type = "invitation_%s" % outcome
+                self.env["trucalc.bank.admin.audit"]._trucalc_log(
+                    event_type, actor, bank, target_user=target,
+                    new_status=("reset_pending" if reset else "invitation_pending"),
+                    mail=mail, metadata=metadata,
+                )
         except Exception as exc:
             if isinstance(exc, (AccessError, ValidationError, UserError)):
                 raise
             raise UserError(_(
-                "The TruCalc invitation could not be sent. No successful invitation was recorded."
+                "The TruCalc account email could not be sent."
             )) from exc
         return {
-            "sent": sent,
+            "sent": mail.state == "sent",
+            "queued": mail.state == "outgoing",
             "mail_id": mail.id,
             "state": mail.state,
         }
+
+    @api.private
+    def _trucalc_send_bank_invitation(self, bank):
+        return self._trucalc_send_bank_account_email(bank, "invite")
+
+    @api.private
+    def _trucalc_resend_bank_invitation(self, bank):
+        return self._trucalc_send_bank_account_email(bank, "resend_invite")
+
+    @api.private
+    def _trucalc_send_bank_password_reset(self, bank):
+        return self._trucalc_send_bank_account_email(bank, "reset")
 
     @api.model
     @api.private
@@ -506,16 +685,7 @@ class ResUsers(models.Model):
     @api.model
     @api.private
     def _trucalc_format_internal_phone(self, value):
-        phone = (value or "").strip()
-        if not phone:
-            return False
-        if re.fullmatch(r"[0-9().\-\s]+", phone):
-            digits = re.sub(r"\D", "", phone)
-            if len(digits) == 10:
-                return "(%s) %s-%s" % (
-                    digits[:3], digits[3:6], digits[6:],
-                )
-        return phone
+        return format_phone(value)
 
     @api.model
     @api.private
@@ -609,6 +779,7 @@ class ResUsers(models.Model):
     ):
         actor = self._trucalc_require_internal_administrator()
         normalized = self._trucalc_normalize_internal_login(login)
+        self._trucalc_advisory_lock("identity:%s" % normalized)
         clean_name = " ".join((name or "").split())
         selected = self._trucalc_internal_role_map().get(role)
         if not clean_name or not selected:
@@ -705,13 +876,17 @@ class ResUsers(models.Model):
     def _trucalc_change_internal_role(self, role):
         self.ensure_one()
         actor = self.env["res.users"]._trucalc_require_internal_administrator()
+        self._trucalc_advisory_lock("internal-admin-roster")
         target = self._trucalc_assert_managed_internal_user()
+        target = target._trucalc_lock_target()._trucalc_assert_managed_internal_user()
         selected = self._trucalc_internal_role_map().get(role)
         if not selected:
             raise ValidationError(_("Select one TruCalc internal role."))
         prior = target._trucalc_internal_role_key()
         if prior == role:
             raise ValidationError(_("The TruCalc internal user already has this role."))
+        if target == actor and prior == "administrator" and role != "administrator":
+            raise ValidationError(_("You cannot remove your own TruCalc Administrator role."))
         if (
             prior == "administrator" and role != "administrator"
             and len(self._trucalc_active_internal_administrators()) <= 1
@@ -761,6 +936,8 @@ class ResUsers(models.Model):
         self.ensure_one()
         actor = self.env["res.users"]._trucalc_require_internal_administrator()
         target = self._trucalc_assert_managed_internal_user()
+        self._trucalc_advisory_lock("reviewer:%s" % target.id)
+        target = target._trucalc_lock_target()._trucalc_assert_managed_internal_user()
         reviewer_group = self.env.ref("trucalc_orders.group_trucalc_reviewer")
         prior = bool(target._trucalc_persona_membership()["reviewer"])
         enabled = bool(enabled)
@@ -804,7 +981,10 @@ class ResUsers(models.Model):
     def _trucalc_deactivate_internal_user(self, acknowledge_open_activities=False):
         self.ensure_one()
         actor = self.env["res.users"]._trucalc_require_internal_administrator()
+        self._trucalc_advisory_lock("internal-admin-roster")
         target = self._trucalc_assert_managed_internal_user()
+        self._trucalc_advisory_lock("reviewer:%s" % target.id)
+        target = target._trucalc_lock_target()._trucalc_assert_managed_internal_user()
         if target == actor:
             raise ValidationError(_("You cannot deactivate your own TruCalc account."))
         if (
@@ -863,6 +1043,10 @@ class ResUsers(models.Model):
         if target.active:
             raise ValidationError(_("The TruCalc internal user is already active."))
         normalized = self._trucalc_normalize_internal_login(target.login)
+        self._trucalc_advisory_lock("identity:%s" % normalized)
+        target = target._trucalc_lock_target()._trucalc_assert_managed_internal_user(
+            require_active=False, require_company_binding=False,
+        )
         partner, collision = self._trucalc_find_internal_user_identity(normalized)
         if collision != target or partner != target.partner_id:
             raise self._trucalc_identity_collision()
@@ -901,30 +1085,49 @@ class ResUsers(models.Model):
         return True
 
     @api.private
-    def _trucalc_send_internal_invitation(self):
+    def _trucalc_internal_account_state(self):
+        self.ensure_one()
+        self._trucalc_assert_managed_internal_user(
+            require_active=False, require_company_binding=False,
+        )
+        return self._trucalc_account_state_from_audit(
+            "trucalc.internal.user.admin.audit",
+            (
+                "invitation_sent", "invitation_resent", "invitation_queued",
+                "invitation_resend_queued", "invitation_failed",
+                "invitation_resend_failed",
+            ),
+            ("password_reset_sent", "password_reset_queued", "password_reset_failed"),
+        )
+
+    @api.private
+    def _trucalc_send_internal_account_email(self, action):
         self.ensure_one()
         actor = self.env["res.users"]._trucalc_require_internal_administrator()
         target = self._trucalc_assert_managed_internal_user()
         normalized = self._trucalc_normalize_internal_login(target.login)
+        self._trucalc_advisory_lock("identity:%s" % normalized)
+        target = target._trucalc_lock_target()._trucalc_assert_managed_internal_user()
         partner, collision = self._trucalc_find_internal_user_identity(normalized)
         if collision != target or partner != target.partner_id:
             raise self._trucalc_identity_collision()
+        state = target._trucalc_internal_account_state()
+        self._trucalc_assert_account_action(state, action)
+        reset = action == "reset"
+        resend = action == "resend_invite"
         template = self.env.ref(
-            "trucalc_orders.mail_template_internal_user_invitation"
+            "trucalc_orders.mail_template_internal_user_password_reset"
+            if reset else "trucalc_orders.mail_template_internal_user_invitation"
         )
         main_company = self.env.ref("base.main_company")
         if not main_company.email:
             raise UserError(_("The TruCalc sender email is not configured."))
         Audit = self.env["trucalc.internal.user.admin.audit"]
-        prior_attempt = bool(Audit.sudo().search_count([
-            ("target_user_id", "=", target.id),
-            ("event_type", "in", (
-                "invitation_sent", "invitation_resent", "invitation_failed",
-            )),
-        ]))
         try:
             with self.env.cr.savepoint():
-                target.partner_id.sudo().signup_prepare(signup_type="signup")
+                target.partner_id.sudo().signup_prepare(signup_type="%s:%s" % (
+                    "reset" if reset else "signup", uuid.uuid4().hex,
+                ))
                 mail_id = template.sudo().with_context(
                     dbname=self.env.cr.dbname,
                     lang=target.lang or self.env.lang,
@@ -941,21 +1144,31 @@ class ResUsers(models.Model):
                 )
                 if not mail_id:
                     raise UserError(_(
-                        "The TruCalc invitation could not be sent. No invitation "
-                        "attempt was retained."
+                        "The TruCalc account email could not be created."
                     ))
                 mail = self.env["mail.mail"].sudo().browse(mail_id).exists()
                 if not mail:
                     raise UserError(_(
-                        "The TruCalc invitation could not be retained for inspection."
+                        "The TruCalc account email could not be retained for inspection."
                     ))
                 target._trucalc_assert_managed_internal_user()
-                sent = mail.state == "sent"
+                metadata = self._trucalc_token_metadata(
+                    "reset" if reset else "invitation", mail, template,
+                    resend=resend,
+                )
+                outcome = metadata["delivery_outcome"]
+                if reset:
+                    event_type = "password_reset_%s" % outcome
+                elif resend:
+                    event_type = {
+                        "sent": "invitation_resent",
+                        "queued": "invitation_resend_queued",
+                        "failed": "invitation_resend_failed",
+                    }[outcome]
+                else:
+                    event_type = "invitation_%s" % outcome
                 Audit._trucalc_log(
-                    (
-                        "invitation_resent" if prior_attempt
-                        else "invitation_sent"
-                    ) if sent else "invitation_failed",
+                    event_type,
                     actor, target,
                     prior_role=target._trucalc_internal_role_key(),
                     new_role=target._trucalc_internal_role_key(),
@@ -967,19 +1180,30 @@ class ResUsers(models.Model):
                     ),
                     prior_active=True, new_active=True,
                     mail=mail,
-                    metadata={
-                        "template": template.get_external_id().get(template.id),
-                        "resend": prior_attempt,
-                    },
+                    metadata=metadata,
                 )
         except Exception as exc:
             if isinstance(exc, (AccessError, ValidationError, UserError)):
                 raise
             raise UserError(_(
-                "The TruCalc invitation could not be sent. No invitation success "
-                "was recorded."
+                "The TruCalc account email could not be sent."
             )) from exc
-        return {"sent": sent, "mail_id": mail.id, "state": mail.state}
+        return {
+            "sent": mail.state == "sent", "queued": mail.state == "outgoing",
+            "mail_id": mail.id, "state": mail.state,
+        }
+
+    @api.private
+    def _trucalc_send_internal_invitation(self):
+        return self._trucalc_send_internal_account_email("invite")
+
+    @api.private
+    def _trucalc_resend_internal_invitation(self):
+        return self._trucalc_send_internal_account_email("resend_invite")
+
+    @api.private
+    def _trucalc_send_internal_password_reset(self):
+        return self._trucalc_send_internal_account_email("reset")
 
     @api.model
     def _get_invalidation_fields(self):

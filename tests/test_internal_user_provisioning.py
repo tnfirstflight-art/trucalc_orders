@@ -217,7 +217,7 @@ class TestInternalUserProvisioning(TransactionCase):
             ("662 555 1212", "(662) 555-1212"),
             (False, False),
             ("+44 20 7946 0958", "+44 20 7946 0958"),
-            ("6625551212 ext 7", "6625551212 ext 7"),
+            ("6625551212 ext 7", "(662) 555-1212 ext. 7"),
         )
         for index, (value, expected) in enumerate(cases):
             user = self._provision(
@@ -378,6 +378,10 @@ class TestInternalUserProvisioning(TransactionCase):
                 target.with_user(self.admin)._trucalc_change_internal_role(
                     "operations"
                 )
+        other_admin = self._provision("self-demotion-backstop", "administrator", False)
+        self.assertTrue(other_admin.active)
+        with self.assertRaisesRegex(ValidationError, "your own"):
+            self.admin.with_user(self.admin)._trucalc_change_internal_role("operations")
 
     def test_reviewer_toggle_blocks_active_work_but_allows_history(self):
         target = self._provision("review-toggle", "operations", True)
@@ -510,7 +514,7 @@ class TestInternalUserProvisioning(TransactionCase):
         ):
             sent = target.with_user(
                 self.admin
-            )._trucalc_send_internal_invitation()
+            )._trucalc_resend_internal_invitation()
         self.assertTrue(sent["sent"])
         self.assertTrue(self.env["trucalc.internal.user.admin.audit"].sudo().search_count([
             ("target_user_id", "=", target.id),
@@ -519,6 +523,61 @@ class TestInternalUserProvisioning(TransactionCase):
         for actor in (self.ops, self.reviewer, self.portal, self.vendor_user):
             with self.assertRaises(AccessError):
                 target.with_user(actor)._trucalc_send_internal_invitation()
+
+    def test_confirmed_internal_invitation_rejected_and_reset_is_distinct(self):
+        self.main.email = "trucalc-internal@example.test"
+        target = self._provision("confirmed-reset", "operations", False)
+        target.with_context(no_reset_password=True).write({"password": "Existing-Password"})
+        target.with_user(target)._update_last_login()
+        self.env.cr.execute("SELECT password FROM res_users WHERE id = %s", [target.id])
+        password_hash = self.env.cr.fetchone()[0]
+        with self.assertRaisesRegex(ValidationError, "never been invited"):
+            target.with_user(self.admin)._trucalc_send_internal_invitation()
+
+        def queued(mails, auto_commit=False, raise_exception=False,
+                   post_send_callback=None):
+            return True
+
+        with patch.object(MailMail, "send", autospec=True, side_effect=queued):
+            result = target.with_user(
+                self.admin
+            )._trucalc_send_internal_password_reset()
+        self.assertTrue(result["queued"])
+        self.assertFalse(result["sent"])
+        mail = self.env["mail.mail"].sudo().browse(result["mail_id"])
+        self.assertIn("Reset Your TruCalc Password", mail.body_html)
+        self.assertIn("/web/reset_password", mail.body_html)
+        self.env.cr.execute("SELECT password FROM res_users WHERE id = %s", [target.id])
+        self.assertEqual(self.env.cr.fetchone()[0], password_hash)
+        audit = self.env["trucalc.internal.user.admin.audit"].sudo().search([
+            ("target_user_id", "=", target.id),
+            ("event_type", "=", "password_reset_queued"),
+        ])
+        self.assertEqual(audit.mail_state, "outgoing")
+        self.assertEqual(audit.metadata["delivery_outcome"], "queued")
+
+    def test_expired_internal_invitation_is_resend_eligible(self):
+        self.main.email = "trucalc-internal@example.test"
+        target = self._provision("expired-invite", "operations", False)
+        self.env["ir.config_parameter"].sudo().set_param(
+            "auth_signup.signup.validity.hours", -1,
+        )
+
+        def sent(mails, auto_commit=False, raise_exception=False,
+                 post_send_callback=None):
+            mails.write({"state": "sent", "failure_type": False})
+            return True
+
+        with patch.object(MailMail, "send", autospec=True, side_effect=sent):
+            target.with_user(self.admin)._trucalc_send_internal_invitation()
+        self.assertEqual(
+            target._trucalc_internal_account_state(), "invitation_expired",
+        )
+        with patch.object(MailMail, "send", autospec=True, side_effect=sent):
+            result = target.with_user(
+                self.admin
+            )._trucalc_resend_internal_invitation()
+        self.assertTrue(result["sent"])
 
     def test_audit_is_immutable_and_attribution_is_restricted(self):
         target = self._provision("audit", "operations", False)

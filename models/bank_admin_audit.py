@@ -18,6 +18,14 @@ class TruCalcBankAdminAudit(models.Model):
         ("user_deactivated", "Bank User Deactivated"),
         ("user_reactivated", "Bank User Reactivated"),
         ("invitation_sent", "Bank User Invitation Sent"),
+        ("invitation_resent", "Bank User Invitation Resent"),
+        ("invitation_queued", "Bank User Invitation Queued"),
+        ("invitation_resend_queued", "Bank User Invitation Resend Queued"),
+        ("invitation_failed", "Bank User Invitation Failed"),
+        ("invitation_resend_failed", "Bank User Invitation Resend Failed"),
+        ("password_reset_sent", "Bank User Password Reset Sent"),
+        ("password_reset_queued", "Bank User Password Reset Queued"),
+        ("password_reset_failed", "Bank User Password Reset Failed"),
         (
             "bank_user_deactivated_by_bank_deactivation",
             "Bank User Deactivated by Bank Deactivation",
@@ -36,13 +44,15 @@ class TruCalcBankAdminAudit(models.Model):
     normalized_identity = fields.Char(readonly=True)
     prior_status = fields.Char(readonly=True)
     new_status = fields.Char(readonly=True)
+    mail_id = fields.Many2one("mail.mail", readonly=True, ondelete="set null")
+    mail_state = fields.Char(readonly=True)
     metadata = fields.Json(readonly=True)
 
     @api.model
     @api.private
     def _trucalc_log(
         self, event_type, actor, bank, target_user=False,
-        prior_status=False, new_status=False, metadata=None,
+        prior_status=False, new_status=False, mail=False, metadata=None,
     ):
         actor.ensure_one()
         bank.ensure_one()
@@ -63,6 +73,8 @@ class TruCalcBankAdminAudit(models.Model):
             ),
             "prior_status": prior_status,
             "new_status": new_status,
+            "mail_id": mail.id if mail else False,
+            "mail_state": mail.state if mail else False,
             "metadata": metadata or {},
         })
 

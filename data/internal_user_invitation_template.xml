@@ -15,13 +15,40 @@
     <p>Hello <t t-out="object.name or ''">TruCalc User</t>,</p>
     <p>A TruCalc Administrator has created your secure internal TruCalc account. Use the button below to choose your password.</p>
     <div style="margin:16px 0;text-align:center">
-      <a t-att-href="object.partner_id._get_signup_url()"
+      <a t-att-href="object.partner_id.with_context(signup_force_type_in_url='signup')._get_signup_url()"
          style="display:inline-block;padding:10px;text-decoration:none;font-size:12px;background-color:#022f5b;color:#FFFFFF;border-radius:5px">
         <strong>Set Your TruCalc Password</strong>
       </a>
     </div>
     <p>Your sign-in email is <strong><t t-out="object.login or ''">user@example.com</t></strong>.</p>
     <p style="color:#607080;font-size:12px">If you were not expecting this invitation, do not use the link and contact TruCalc support.</p>
+    <p>— The TruCalc Team</p>
+  </div>
+</div>
+            </field>
+            <field name="lang">{{ object.lang }}</field>
+            <field name="auto_delete" eval="False"/>
+        </record>
+        <record id="mail_template_internal_user_password_reset" model="mail.template">
+            <field name="name">TruCalc: Internal User Password Reset</field>
+            <field name="model_id" ref="base.model_res_users"/>
+            <field name="subject">Reset your TruCalc password</field>
+            <field name="email_from">{{ object.env.ref('base.main_company').email_formatted }}</field>
+            <field name="use_default_to" eval="True"/>
+            <field name="description">Signed password-reset message for internal TruCalc personnel</field>
+            <field name="body_html" type="html">
+<div style="margin:0;padding:24px;background:#f5f7fa;font-family:Arial,sans-serif;color:#243447">
+  <div style="max-width:600px;margin:auto;background:#fff;padding:32px;border-radius:8px">
+    <h2 style="margin-top:0;color:#143a5a">Reset your TruCalc password</h2>
+    <p>Hello <t t-out="object.name or ''">TruCalc User</t>,</p>
+    <p>A TruCalc Administrator requested a password-reset link for your established account.</p>
+    <div style="margin:16px 0;text-align:center">
+      <a t-att-href="object.partner_id.with_context(signup_force_type_in_url='reset')._get_signup_url()"
+         style="display:inline-block;padding:10px;text-decoration:none;font-size:12px;background-color:#022f5b;color:#FFFFFF;border-radius:5px">
+        <strong>Reset Your TruCalc Password</strong>
+      </a>
+    </div>
+    <p>If you did not expect this request, ignore this email and contact TruCalc support.</p>
     <p>— The TruCalc Team</p>
   </div>
 </div>

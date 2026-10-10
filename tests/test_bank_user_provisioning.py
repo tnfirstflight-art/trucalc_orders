@@ -200,7 +200,7 @@ class TestBankUserProvisioning(TransactionCase):
         target = self.env["res.users"].sudo().search([
             ("login", "=", "5a2-provisioned-phone-refresh@example.test"),
         ])
-        self.assertEqual(target.phone, "+1 (615) 555-0134 ext. 9")
+        self.assertEqual(target.phone, "(615) 555-0134 ext. 9")
         self.assertEqual(target.partner_id.phone, target.phone)
         self.assertNotIn(target, stale_rows.target_user_id)
         fresh_rows = self.env["trucalc.bank.user.management"].with_user(
@@ -444,6 +444,7 @@ class TestBankUserProvisioning(TransactionCase):
             "new_email": "pass-c.active@example.test",
             "invitation_state": "confirmed",
             "pending_invite_invalidated": False,
+            "outstanding_account_link_invalidated": False,
         })
         self.assertNotIn("token", str(audit.metadata).casefold())
         self.assertNotIn("password", str(audit.metadata).casefold())
@@ -503,7 +504,7 @@ class TestBankUserProvisioning(TransactionCase):
             ("event_type", "=", "bank_user_email_updated"),
             ("target_user_id", "=", target.id),
         ])
-        self.assertEqual(audit.metadata["invitation_state"], "pending")
+        self.assertEqual(audit.metadata["invitation_state"], "invitation_pending")
         self.assertTrue(audit.metadata["pending_invite_invalidated"])
 
     def test_never_invited_email_change_and_collision_validation_are_atomic(self):
@@ -654,7 +655,7 @@ class TestBankUserProvisioning(TransactionCase):
             )
             created.invalidate_recordset()
             self.assertEqual(created.name, "Admin %s Edited" % index)
-            self.assertEqual(created.phone, "615-555-020%s" % index)
+            self.assertEqual(created.phone, "(615) 555-020%s" % index)
 
         self.assertEqual(target.trucalc_bank_company_id, self.bank)
 
@@ -832,10 +833,12 @@ class TestBankUserProvisioning(TransactionCase):
         self._assert_exact(target, self.bank, "requestor")
         self.assertTrue(target.partner_id.signup_type.startswith("signup:"))
         self.assertEqual(row.invitation_state, "pending")
-        self.assertFalse(self.env["trucalc.bank.admin.audit"].sudo().search_count([
-            ("event_type", "=", "invitation_sent"),
+        failed_audit = self.env["trucalc.bank.admin.audit"].sudo().search([
+            ("event_type", "=", "invitation_failed"),
             ("target_user_id", "=", target.id),
-        ]))
+        ])
+        self.assertEqual(failed_audit.mail_state, "exception")
+        self.assertEqual(failed_audit.metadata["delivery_outcome"], "failed")
 
         failed_mail = self.env["mail.mail"].sudo().search([
             ("mail_message_id.model", "=", "res.users"),
@@ -923,10 +926,89 @@ class TestBankUserProvisioning(TransactionCase):
             target.with_user(self.admin)._trucalc_send_bank_invitation(self.other_bank)
         self.assertEqual(
             self.env["trucalc.bank.admin.audit"].sudo().search_count([
-                ("event_type", "=", "invitation_sent"),
+                ("event_type", "=", "invitation_resent"),
                 ("target_user_id", "=", target.id),
             ]), 2,
         )
+
+    def test_confirmed_user_requires_reset_and_reset_nonce_invalidates_old_link(self):
+        self.main.email = "trucalc@example.test"
+        target = self._user("confirmed-reset", [self.roles["requestor"]], bank=self.bank)
+        target.with_context(no_reset_password=True).write({"password": "Still-Valid-Password"})
+        target.with_user(target)._update_last_login()
+        self.env.cr.execute("SELECT password FROM res_users WHERE id = %s", [target.id])
+        password_hash = self.env.cr.fetchone()[0]
+
+        with self.assertRaisesRegex(ValidationError, "never been invited"):
+            target.with_user(self.admin)._trucalc_send_bank_invitation(self.bank)
+
+        def sent(mails, auto_commit=False, raise_exception=False,
+                 post_send_callback=None):
+            mails.write({"state": "sent", "failure_type": False})
+            return True
+
+        with patch.object(MailMail, "send", autospec=True, side_effect=sent):
+            first = target.with_user(self.admin)._trucalc_send_bank_password_reset(
+                self.bank
+            )
+        first_mail = self.env["mail.mail"].sudo().browse(first["mail_id"])
+        first_link = etree.HTML(first_mail.body_html).xpath(
+            "//a[contains(@href, '/web/reset_password')]/@href"
+        )[0]
+        first_token = parse_qs(urlparse(first_link).query)["token"][0]
+        self.assertTrue(target.partner_id.signup_type.startswith("reset:"))
+        self.assertEqual(target._trucalc_bank_account_state(self.bank), "reset_pending")
+        self.assertEqual(
+            target.partner_id.sudo()._get_partner_from_token(first_token),
+            target.partner_id,
+        )
+        self.env.cr.execute("SELECT password FROM res_users WHERE id = %s", [target.id])
+        self.assertEqual(self.env.cr.fetchone()[0], password_hash)
+
+        with patch.object(MailMail, "send", autospec=True, side_effect=sent):
+            second = target.with_user(self.admin)._trucalc_send_bank_password_reset(
+                self.bank
+            )
+        second_mail = self.env["mail.mail"].sudo().browse(second["mail_id"])
+        second_token = parse_qs(urlparse(etree.HTML(second_mail.body_html).xpath(
+            "//a[contains(@href, '/web/reset_password')]/@href"
+        )[0]).query)["token"][0]
+        self.assertFalse(target.partner_id.sudo()._get_partner_from_token(first_token))
+        self.assertEqual(
+            target.partner_id.sudo()._get_partner_from_token(second_token),
+            target.partner_id,
+        )
+        audit = self.env["trucalc.bank.admin.audit"].sudo().search([
+            ("target_user_id", "=", target.id),
+            ("event_type", "=", "password_reset_sent"),
+        ], order="id desc", limit=1)
+        self.assertEqual(audit.metadata["validity_hours"], 4)
+        self.assertEqual(audit.metadata["link_kind"], "reset")
+        self.assertNotIn("token", str(audit.metadata).casefold())
+        self.assertNotIn("/web/", str(audit.metadata).casefold())
+
+    def test_expired_bank_invitation_is_resend_eligible(self):
+        self.main.email = "trucalc@example.test"
+        target = self._user("expired-invite", [self.roles["requestor"]], bank=self.bank)
+        self.env["ir.config_parameter"].sudo().set_param(
+            "auth_signup.signup.validity.hours", -1,
+        )
+
+        def sent(mails, auto_commit=False, raise_exception=False,
+                 post_send_callback=None):
+            mails.write({"state": "sent", "failure_type": False})
+            return True
+
+        with patch.object(MailMail, "send", autospec=True, side_effect=sent):
+            target.with_user(self.admin)._trucalc_send_bank_invitation(self.bank)
+        self.assertEqual(
+            target._trucalc_bank_account_state(self.bank), "invitation_expired",
+        )
+        with patch.object(MailMail, "send", autospec=True, side_effect=sent):
+            result = target.with_user(
+                self.admin
+            )._trucalc_resend_bank_invitation(self.bank)
+        self.assertTrue(result["sent"])
 
     def test_management_projection_is_scoped_and_no_broad_users_acl(self):
         local = self._user("local-list", [self.roles["requestor"]], bank=self.bank)

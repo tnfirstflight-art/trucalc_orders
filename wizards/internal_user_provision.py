@@ -147,7 +147,9 @@ class TruCalcInternalUserManagement(models.TransientModel):
             row.reviewer = bool(user._trucalc_persona_membership()["reviewer"])
             row.user_active = user.active
             row.login_date = user.login_date
-            row.setup_link_prepared = bool(user.partner_id.signup_type)
+            row.setup_link_prepared = user._trucalc_internal_account_state() in (
+                "invitation_pending", "invitation_expired",
+            )
 
     @api.model
     @api.private
@@ -279,7 +281,23 @@ class TruCalcInternalUserManagement(models.TransientModel):
         return {"type": "ir.actions.client", "tag": "reload"}
 
     def action_send_invitation(self):
-        result = self._controlled_target()._trucalc_send_internal_invitation()
+        target = self._controlled_target()
+        state = target._trucalc_internal_account_state()
+        result = (
+            target._trucalc_resend_internal_invitation()
+            if state in ("invitation_pending", "invitation_expired")
+            else target._trucalc_send_internal_invitation()
+        )
+        if result["queued"]:
+            return {
+                "type": "ir.actions.client", "tag": "display_notification",
+                "params": {
+                    "title": _("Invitation Queued"),
+                    "message": _("The invitation is queued; delivery is not yet confirmed."),
+                    "type": "warning", "sticky": True,
+                    "next": {"type": "ir.actions.client", "tag": "reload"},
+                },
+            }
         if not result["sent"]:
             return {
                 "type": "ir.actions.client", "tag": "display_notification",
@@ -287,7 +305,7 @@ class TruCalcInternalUserManagement(models.TransientModel):
                     "title": _("Invitation Delivery Failed"),
                     "message": _(
                         "Outbound invitation email %(mail_id)s was retained, but "
-                        "delivery was not confirmed. Resend remains available."
+                        "delivery failed. Resend remains available."
                     ) % {"mail_id": result["mail_id"]},
                     "type": "danger", "sticky": True,
                     "next": {"type": "ir.actions.client", "tag": "reload"},

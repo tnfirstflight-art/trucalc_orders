@@ -14,7 +14,7 @@ export function formatInspectionPhone(value) {
     }
 
     const extensionMatch = phone.match(
-        /\s*(?:ext\.?|x)\s*[:#.-]?\s*(\d{1,10})\s*$/i
+        /\s*(?:ext(?:ension)?\.?|x)\s*[:#.-]?\s*(\d{1,10})\s*$/i
     );
     const extension = extensionMatch ? extensionMatch[1] : "";
     const basePhone = extensionMatch
