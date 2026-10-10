@@ -789,6 +789,8 @@ class TestInternalUserProvisioning(TransactionCase):
         )
         menu = self.env.ref("trucalc_orders.menu_trucalc_internal_users")
         self.assertEqual(menu.group_ids, self.roles["administrator"])
+        list_target = self._internal_user("a4-list", "operations", reviewer=True)
+        list_target.sudo().phone = "3125550147 x9"
         action = self.env[
             "trucalc.internal.user.management"
         ].with_user(self.admin)._trucalc_open()
@@ -800,6 +802,12 @@ class TestInternalUserProvisioning(TransactionCase):
             ).id,
             "list",
         )])
+        rows = self.env[
+            "trucalc.internal.user.management"
+        ].with_user(self.admin).search(action["domain"])
+        list_row = rows.filtered(lambda row: row.target_user_id == list_target)
+        self.assertEqual(list_row.phone, "(312) 555-0147 ext. 9")
+        self.assertEqual(list_row.account_state, "never_invited")
         for actor in (self.ops, self.reviewer, self.portal, self.vendor_user):
             with self.assertRaises(AccessError):
                 self.env[
@@ -824,6 +832,24 @@ class TestInternalUserProvisioning(TransactionCase):
         list_arch = etree.fromstring(self.env.ref(
             "trucalc_orders.view_trucalc_internal_user_management_list"
         ).arch)
+        visible_columns = [
+            field.get("name") for field in list_arch.xpath("./field")
+            if field.get("column_invisible") != "True"
+        ]
+        self.assertEqual(visible_columns, [
+            "name", "login", "phone", "role", "reviewer", "user_active",
+            "account_state",
+        ])
+        phone_column = list_arch.xpath("./field[@name='phone']")[0]
+        self.assertEqual(phone_column.get("string"), "Phone Number")
+        self.assertIsNone(phone_column.get("optional"))
+        self.assertIsNone(phone_column.get("invisible"))
+        self.assertIsNone(phone_column.get("column_invisible"))
+        self.assertTrue(list_arch.xpath(".//field[@name='account_state']"))
+        self.assertFalse(list_arch.xpath(".//field[@name='login_date']"))
+        self.assertTrue(list_arch.xpath(
+            ".//header/button[@string='Add TruCalc User']"
+        ))
         self.assertEqual(len(list_arch.xpath(
             ".//field[@name='name'][@widget='trucalc_internal_user_manage_link']"
         )), 1)
@@ -834,6 +860,18 @@ class TestInternalUserProvisioning(TransactionCase):
         self.assertTrue(manage_arch.xpath(
             ".//button[@name='action_save'][@string='Save Changes']"
         ))
+        self.assertEqual(
+            [group.get("string") for group in manage_arch.xpath(
+                ".//sheet/group[@string]"
+            )],
+            ["Account Status", "Account Actions"],
+        )
+        self.assertTrue(manage_arch.xpath(
+            ".//group[@string='Identity']"
+        ))
+        self.assertTrue(manage_arch.xpath(
+            ".//group[@string='Access']"
+        ))
         self.assertEqual(set(manage_arch.xpath(
             ".//group[@string='Account Actions']/button/@name"
         )), {
@@ -841,6 +879,12 @@ class TestInternalUserProvisioning(TransactionCase):
             "action_send_password_reset", "action_reactivate",
             "action_deactivate",
         })
+        self.assertTrue(manage_arch.xpath(
+            ".//button[@name='action_deactivate'][@string='Deactivate User']"
+        ))
+        self.assertTrue(manage_arch.xpath(
+            ".//button[@name='action_reactivate'][@string='Reactivate User']"
+        ))
         self.assertFalse(set(manage_arch.xpath(".//field/@name")) & {
             "password", "new_password", "group_ids", "company_id",
             "company_ids", "share", "trucalc_bank_company_id",

@@ -119,11 +119,17 @@
                                    placeholder="user@example.com"/>
                             <field name="phone" readonly="not user_active"/>
                         </group>
-                        <group string="Access and Account Status">
+                        <group string="Access">
                             <field name="role" readonly="not user_active"/>
+                        </group>
+                    </group>
+                    <group string="Account Status" col="4">
+                        <group>
                             <field name="user_active"/>
                             <field name="account_state"/>
                             <field name="last_login"/>
+                        </group>
+                        <group>
                             <field name="recent_email_kind"/>
                             <field name="recent_email_outcome"/>
                             <field name="recent_email_at"/>
@@ -150,10 +156,10 @@
                                 string="Send Password Reset" class="btn-secondary"
                                 invisible="account_state not in ('confirmed', 'reset_pending')"/>
                         <button name="action_reactivate" type="object"
-                                string="Reactivate" class="btn-secondary"
+                                string="Reactivate User" class="btn-secondary"
                                 invisible="account_state != 'inactive'"/>
                         <button name="action_deactivate" type="object"
-                                string="Deactivate" class="btn-secondary"
+                                string="Deactivate User" class="btn-secondary"
                                 invisible="not user_active"
                                 confirm="Deactivate this Bank user? Historical Orders, documents, and audit attribution will be preserved."/>
                     </group>
@@ -199,8 +205,7 @@
                 <field name="phone" optional="show"/>
                 <field name="role"/>
                 <field name="user_active"/>
-                <field name="bank_company_id" options="{'no_open': True}"/>
-                <field name="invitation_state"/>
+                <field name="account_state"/>
             </list>
         </field>
     </record>

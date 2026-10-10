@@ -5,7 +5,7 @@
         <field name="model">trucalc.internal.user.provision</field>
         <field name="group_ids" eval="[Command.link(ref('trucalc_orders.group_trucalc_admin'))]"/>
         <field name="arch" type="xml">
-            <form string="New TruCalc User" create="false" edit="true" delete="false">
+            <form string="Add TruCalc User" create="false" edit="true" delete="false">
                 <group string="Identity">
                     <field name="name"/>
                     <field name="login"/>
@@ -24,7 +24,7 @@
     </record>
 
     <record id="action_trucalc_internal_user_new" model="ir.actions.act_window">
-        <field name="name">New TruCalc User</field>
+        <field name="name">Add TruCalc User</field>
         <field name="res_model">trucalc.internal.user.provision</field>
         <field name="view_mode">form</field>
         <field name="view_id" ref="view_trucalc_internal_user_provision_form"/>
@@ -95,12 +95,18 @@
                                    placeholder="user@example.com"/>
                             <field name="phone" readonly="not user_active"/>
                         </group>
-                        <group string="Access and Account Status">
+                        <group string="Access">
                             <field name="role" readonly="not user_active"/>
                             <field name="reviewer" readonly="not user_active"/>
+                        </group>
+                    </group>
+                    <group string="Account Status" col="4">
+                        <group>
                             <field name="user_active"/>
                             <field name="account_state"/>
                             <field name="last_login"/>
+                        </group>
+                        <group>
                             <field name="recent_email_kind"/>
                             <field name="recent_email_outcome"/>
                             <field name="recent_email_at"/>
@@ -135,10 +141,10 @@
                                 string="Send Password Reset" class="btn-secondary"
                                 invisible="account_state not in ('confirmed', 'reset_pending')"/>
                         <button name="action_reactivate" type="object"
-                                string="Reactivate" class="btn-secondary"
+                                string="Reactivate User" class="btn-secondary"
                                 invisible="account_state != 'inactive'"/>
                         <button name="action_deactivate" type="object"
-                                string="Deactivate" class="btn-secondary"
+                                string="Deactivate User" class="btn-secondary"
                                 invisible="not user_active"
                                 confirm="Deactivate this TruCalc user? Existing Orders, reviews, activities, documents, and audit attribution will be preserved."/>
                     </group>
@@ -175,16 +181,17 @@
                   open_form_view="false">
                 <header>
                     <button name="%(action_trucalc_internal_user_new)d" type="action"
-                            string="New TruCalc User" class="btn-primary" display="always"/>
+                            string="Add TruCalc User" class="btn-primary" display="always"/>
                 </header>
                 <field name="owner_user_id" column_invisible="True"/>
                 <field name="target_user_id" column_invisible="True"/>
                 <field name="name" widget="trucalc_internal_user_manage_link"/>
                 <field name="login"/>
+                <field name="phone" string="Phone Number"/>
                 <field name="role"/>
                 <field name="reviewer"/>
                 <field name="user_active"/>
-                <field name="login_date"/>
+                <field name="account_state"/>
             </list>
         </field>
     </record>

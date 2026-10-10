@@ -631,6 +631,10 @@ class TruCalcBankUserManagement(models.TransientModel):
     phone = fields.Char(string="Phone Number", compute="_compute_projection", compute_sudo=True)
     role = fields.Selection(ROLE_SELECTION, compute="_compute_projection", compute_sudo=True)
     user_active = fields.Boolean(string="Active", compute="_compute_projection", compute_sudo=True)
+    account_state = fields.Selection(
+        ACCOUNT_STATE_SELECTION, string="Account State",
+        compute="_compute_projection", compute_sudo=True,
+    )
     invitation_state = fields.Selection([
         ("not_invited", "Not Invited"),
         ("pending", "Invitation Pending"),
@@ -644,10 +648,11 @@ class TruCalcBankUserManagement(models.TransientModel):
             user = row.target_user_id.sudo().with_context(active_test=False)
             row.name = user.name
             row.login = user.login
-            row.phone = user.phone
+            row.phone = format_phone(user.phone)
             row.role = user._trucalc_bank_role_key()
             row.user_active = user.active
             state = user._trucalc_bank_account_state(row.bank_company_id)
+            row.account_state = state
             if state == "inactive":
                 row.invitation_state = "inactive"
             elif state in ("invitation_pending", "invitation_expired"):

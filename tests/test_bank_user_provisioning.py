@@ -414,7 +414,7 @@ class TestBankUserProvisioning(TransactionCase):
         ).search(management_action["domain"]).filtered(
             lambda item: item.target_user_id == target
         )
-        self.assertEqual(row.phone, "615-555-0100")
+        self.assertEqual(row.phone, "(615) 555-0100")
         edit_action = row.action_edit()
         self.assertEqual(edit_action["res_model"], "trucalc.bank.user.edit")
         self.assertEqual(edit_action["target"], "new")
@@ -1183,6 +1183,7 @@ class TestBankUserProvisioning(TransactionCase):
 
     def test_management_projection_is_scoped_and_no_broad_users_acl(self):
         local = self._user("local-list", [self.roles["requestor"]], bank=self.bank)
+        local.sudo().phone = "3125550199 ext 42"
         foreign = self._user("foreign-list", [self.roles["requestor"]], bank=self.other_bank)
         form = etree.fromstring(
             self.env.ref("trucalc_orders.view_trucalc_bank_form").arch
@@ -1213,6 +1214,9 @@ class TestBankUserProvisioning(TransactionCase):
         rows = self.env["trucalc.bank.user.management"].with_user(self.admin).search(action["domain"])
         self.assertIn(local, rows.target_user_id)
         self.assertNotIn(foreign, rows.target_user_id)
+        local_row = rows.filtered(lambda row: row.target_user_id == local)
+        self.assertEqual(local_row.phone, "(312) 555-0199 ext. 42")
+        self.assertEqual(local_row.account_state, "never_invited")
         self.assertEqual(action["context"]["default_bank_company_id"], self.bank.id)
         self.assertEqual(action["context"]["active_bank_company_id"], self.bank.id)
         self.assertFalse(
@@ -1223,6 +1227,9 @@ class TestBankUserProvisioning(TransactionCase):
             self.env.ref("trucalc_orders.view_trucalc_bank_user_management_list").arch
         )
         self.assertTrue(arch.xpath(".//field[@name='phone']"))
+        self.assertTrue(arch.xpath(".//field[@name='account_state']"))
+        self.assertFalse(arch.xpath(".//field[@name='invitation_state']"))
+        self.assertFalse(arch.xpath(".//field[@name='bank_company_id']"))
         self.assertEqual(
             len(arch.xpath(
                 ".//field[@name='name'][@widget='trucalc_bank_user_manage_link']"
@@ -1239,6 +1246,18 @@ class TestBankUserProvisioning(TransactionCase):
         )
         self.assertTrue(manage_arch.xpath(
             ".//button[@name='action_save'][@string='Save Changes']"
+        ))
+        self.assertEqual(
+            [group.get("string") for group in manage_arch.xpath(
+                ".//sheet/group[@string]"
+            )],
+            ["Account Status", "Account Actions"],
+        )
+        self.assertTrue(manage_arch.xpath(
+            ".//group[@string='Identity']"
+        ))
+        self.assertTrue(manage_arch.xpath(
+            ".//group[@string='Access']"
         ))
         self.assertEqual(set(manage_arch.xpath(
             ".//group[@string='Account Actions']/button/@name"
@@ -1266,6 +1285,12 @@ class TestBankUserProvisioning(TransactionCase):
         )
         self.assertTrue(manage_arch.xpath(
             ".//button[@name='action_deactivate'][@confirm]"
+        ))
+        self.assertTrue(manage_arch.xpath(
+            ".//button[@name='action_deactivate'][@string='Deactivate User']"
+        ))
+        self.assertTrue(manage_arch.xpath(
+            ".//button[@name='action_reactivate'][@string='Reactivate User']"
         ))
         self.assertFalse(set(manage_arch.xpath(".//field/@name")) & {
             "password", "group_ids", "company_id", "company_ids", "share",

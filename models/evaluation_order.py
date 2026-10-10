@@ -853,11 +853,11 @@ class EvaluationOrder(models.Model):
                 _("Active") if bank.trucalc_bank_active else _("Inactive")
             ) if bank else False
             order.bank_profile_email = bank.email or False
-            order.bank_profile_phone = bank.phone or False
+            order.bank_profile_phone = format_phone(bank.phone)
             order.requestor_profile_name = requestor.name or False
             order.requestor_profile_bank = requestor_bank.name or False
             order.requestor_profile_email = requestor.email or False
-            order.requestor_profile_phone = requestor.phone or False
+            order.requestor_profile_phone = format_phone(requestor.phone)
 
     def _order_context_profile_action(self, xmlid, title):
         self.ensure_one()

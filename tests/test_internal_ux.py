@@ -691,6 +691,20 @@ class TestInternalUXPassA(TransactionCase):
         order._compute_trucalc_fee()
         self.assertEqual(order.trucalc_fee, 225.0)
 
+    def test_readonly_order_profile_phone_projection_uses_shared_formatting(self):
+        self.company.phone = "3125550123 ext 8"
+        requestor = self._user("a4-requestor", ["group_trucalc_operations"])
+        requestor.phone = "+44 20 7946 0958"
+        order = self.env["trucalc.order"].new({
+            "company_id": self.company.id,
+            "requestor_id": requestor.id,
+        })
+        order._compute_order_context_profiles()
+        self.assertEqual(order.bank_profile_phone, "(312) 555-0123 ext. 8")
+        self.assertEqual(order.requestor_profile_phone, "+44 20 7946 0958")
+        self.assertEqual(self.company.phone, "3125550123 ext 8")
+        self.assertEqual(requestor.phone, "+44 20 7946 0958")
+
     def test_internal_home_action_and_backend_brand_contract(self):
         home_action = self.env.ref("trucalc_orders.action_trucalc_orders")
         for user in (

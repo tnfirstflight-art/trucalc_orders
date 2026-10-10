@@ -480,6 +480,10 @@ class TruCalcInternalUserManagement(models.TransientModel):
     user_active = fields.Boolean(
         string="Active", compute="_compute_projection", compute_sudo=True,
     )
+    account_state = fields.Selection(
+        ACCOUNT_STATE_SELECTION, string="Account State",
+        compute="_compute_projection", compute_sudo=True,
+    )
     login_date = fields.Datetime(
         string="Last Login", compute="_compute_projection", compute_sudo=True,
     )
@@ -500,7 +504,8 @@ class TruCalcInternalUserManagement(models.TransientModel):
             row.reviewer = bool(user._trucalc_persona_membership()["reviewer"])
             row.user_active = user.active
             row.login_date = user.login_date
-            row.setup_link_prepared = user._trucalc_internal_account_state() in (
+            row.account_state = user._trucalc_internal_account_state()
+            row.setup_link_prepared = row.account_state in (
                 "invitation_pending", "invitation_expired",
             )
 
