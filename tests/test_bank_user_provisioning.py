@@ -102,6 +102,21 @@ class TestBankUserProvisioning(TransactionCase):
             "acknowledge_invitation_invalidation": acknowledge,
         })
 
+    def _manage_wizard(self, target, bank=False, actor=False):
+        bank = bank or self.bank
+        actor = actor or self.admin
+        action = bank.with_user(actor).action_trucalc_view_bank_users()
+        row = self.env["trucalc.bank.user.management"].with_user(actor).search(
+            action["domain"]
+        ).filtered(lambda item: item.target_user_id == target)
+        self.assertEqual(len(row), 1)
+        manage_action = row.action_manage()
+        self.assertEqual(manage_action["res_model"], "trucalc.bank.user.manage")
+        self.assertEqual(manage_action["target"], "new")
+        return self.env["trucalc.bank.user.manage"].with_user(actor).with_context(
+            **manage_action["context"]
+        ).browse(manage_action["res_id"])
+
     def test_wizard_provisions_all_roles_without_invitation_or_password(self):
         for role in self.roles:
             suffix = role.replace("_", "-")
@@ -216,6 +231,162 @@ class TestBankUserProvisioning(TransactionCase):
             ("login", "=", "5a2-provisioned-blank-phone@example.test"),
         ])
         self.assertFalse(blank_target.phone)
+
+    def test_unified_manage_atomic_save_noop_and_history_preservation(self):
+        target = self._user(
+            "unified-save", [self.roles["requestor"]], bank=self.bank,
+        )
+        target.phone = "6155550100"
+        target.with_context(no_reset_password=True).write({
+            "password": "Unified-A2-Existing-Password",
+        })
+        target.partner_id.sudo().signup_prepare(signup_type="signup:unified-a2")
+        order = self.env["trucalc.order"].sudo().create({
+            "borrower": "Unified A2 History",
+            "property_address": "22 Modal Way",
+            "due_date": fields.Date.add(fields.Date.today(), days=7),
+            "company_id": self.bank.id,
+            "requestor_company_id": self.bank.id,
+            "requestor_id": target.id,
+        })
+        self.env.cr.execute("SELECT password FROM res_users WHERE id=%s", [target.id])
+        password_hash = self.env.cr.fetchone()[0]
+        user_id, partner_id, order_id = target.id, target.partner_id.id, order.id
+        mail_ids = self.env["mail.mail"].sudo().search([]).ids
+
+        wizard = self._manage_wizard(target)
+        self.assertEqual(wizard.phone, "(615) 555-0100")
+        self.assertEqual(wizard.account_state, "invitation_pending")
+        wizard.write({
+            "name": "  Unified   Bank User  ",
+            "login": "Unified.A2@Example.TEST",
+            "phone": "+1 (615) 555-0198 extension 44",
+            "role": "administrator",
+            "acknowledge_account_link_invalidation": True,
+        })
+        fresh_action = wizard.action_save()
+        target.invalidate_recordset()
+        target.partner_id.invalidate_recordset()
+        order.invalidate_recordset()
+        self.assertEqual((target.id, target.partner_id.id, order.id), (
+            user_id, partner_id, order_id,
+        ))
+        self.assertEqual(target.name, "Unified Bank User")
+        self.assertEqual(target.login, "unified.a2@example.test")
+        self.assertEqual(target.email, target.login)
+        self.assertEqual(target.phone, "(615) 555-0198 ext. 44")
+        self.assertEqual(target._trucalc_bank_role_key(), "administrator")
+        self.assertFalse(target.partner_id.signup_type)
+        self.assertEqual(order.requestor_id, target)
+        self._assert_exact(target, self.bank, "administrator")
+        self.env.cr.execute("SELECT password FROM res_users WHERE id=%s", [target.id])
+        self.assertEqual(self.env.cr.fetchone()[0], password_hash)
+        new_mails = self.env["mail.mail"].sudo().search([
+            ("id", "not in", mail_ids),
+        ])
+        self.assertFalse(new_mails, new_mails.mapped(lambda mail: (
+            mail.subject, mail.email_to, mail.state,
+            mail.mail_message_id.model, mail.mail_message_id.res_id,
+        )))
+        fresh_rows = self.env["trucalc.bank.user.management"].with_user(
+            self.admin
+        ).search(fresh_action["domain"])
+        self.assertIn(target, fresh_rows.target_user_id)
+        events = self.env["trucalc.bank.admin.audit"].sudo().search([
+            ("target_user_id", "=", target.id),
+        ]).mapped("event_type")
+        self.assertIn("bank_user_identity_updated", events)
+        self.assertIn("bank_user_email_updated", events)
+        self.assertIn("role_changed", events)
+
+        noop = self._manage_wizard(target)
+        audit_count = self.env["trucalc.bank.admin.audit"].sudo().search_count([
+            ("target_user_id", "=", target.id),
+        ])
+        noop.action_save()
+        self.assertEqual(self.env["trucalc.bank.admin.audit"].sudo().search_count([
+            ("target_user_id", "=", target.id),
+        ]), audit_count)
+
+    def test_unified_manage_rolls_back_and_rejects_forgery(self):
+        target = self._user(
+            "unified-rollback", [self.roles["requestor"]], bank=self.bank,
+        )
+        collision = self._user(
+            "unified-collision", [self.roles["view_only"]], bank=self.bank,
+        )
+        wizard = self._manage_wizard(target)
+        original = (target.name, target.login, target.phone, target._trucalc_bank_role_key())
+        wizard.write({
+            "name": "Must Roll Back", "login": collision.login,
+            "phone": "615-555-0111", "role": "administrator",
+        })
+        with self.assertRaises(ValidationError):
+            wizard.action_save()
+        target.invalidate_recordset()
+        self.assertEqual(
+            (target.name, target.login, target.phone, target._trucalc_bank_role_key()),
+            original,
+        )
+        for values in (
+            {"owner_user_id": self.ops.id},
+            {"management_row_id": False},
+            {"bank_company_id": self.other_bank.id},
+            {"target_user_id": collision.id},
+            {"user_active": False},
+        ):
+            with self.assertRaises(AccessError):
+                wizard.write(values)
+        for actor in (
+            self.ops, self.reviewer, self.internal, self.portal, self.vendor_user,
+        ):
+            with self.assertRaises(AccessError):
+                wizard.with_user(actor).action_save()
+
+    def test_unified_manage_account_actions_guard_unsaved_edits_and_are_explicit(self):
+        self.main.email = "trucalc@example.test"
+        target = self._user(
+            "unified-actions", [self.roles["requestor"]], bank=self.bank,
+        )
+        wizard = self._manage_wizard(target)
+        wizard.name = "Unsaved Name"
+        with self.assertRaisesRegex(ValidationError, "Save or discard"):
+            wizard.action_send_invitation()
+        self.assertFalse(target.partner_id.signup_type)
+
+        wizard.name = target.name
+        mail_count = self.env["mail.mail"].sudo().search_count([])
+
+        def queued(mails, auto_commit=False, raise_exception=False,
+                   post_send_callback=None):
+            return True
+
+        with patch.object(MailMail, "send", autospec=True, side_effect=queued):
+            result = wizard.action_send_invitation()
+        self.assertEqual(result["params"]["type"], "warning")
+        self.assertIn("queued", result["params"]["message"].casefold())
+        self.assertEqual(self.env["mail.mail"].sudo().search_count([]), mail_count + 1)
+        target.invalidate_recordset()
+        pending = self._manage_wizard(target)
+        self.assertEqual(pending.account_state, "invitation_pending")
+        with self.assertRaises(ValidationError):
+            pending.action_send_invitation()
+
+        before_deactivate_mail = self.env["mail.mail"].sudo().search_count([])
+        pending.action_deactivate()
+        target.invalidate_recordset()
+        self.assertFalse(target.active)
+        self.assertEqual(
+            self.env["mail.mail"].sudo().search_count([]), before_deactivate_mail,
+        )
+        inactive = self._manage_wizard(target)
+        self.assertEqual(inactive.account_state, "inactive")
+        inactive.action_reactivate()
+        target.invalidate_recordset()
+        self.assertTrue(target.active)
+        self.assertEqual(
+            self.env["mail.mail"].sudo().search_count([]), before_deactivate_mail,
+        )
 
     def test_controlled_edit_name_phone_audit_and_immutable_fields(self):
         target = self._user(
@@ -1053,48 +1224,52 @@ class TestBankUserProvisioning(TransactionCase):
         )
         self.assertTrue(arch.xpath(".//field[@name='phone']"))
         self.assertEqual(
-            len(arch.xpath(".//button[@name='action_edit'][@string='Edit']")),
+            len(arch.xpath(
+                ".//field[@name='name'][@widget='trucalc_bank_user_manage_link']"
+            )),
             1,
         )
+        self.assertFalse(arch.xpath(".//button[@type='object']"))
         self.assertFalse(set(arch.xpath(".//field/@name")) & {
             "password", "group_ids", "company_id", "company_ids",
             "trucalc_bank_company_id", "trucalc_vendor_id",
         })
-        edit_arch = etree.fromstring(
-            self.env.ref("trucalc_orders.view_trucalc_bank_user_edit_form").arch
+        manage_arch = etree.fromstring(
+            self.env.ref("trucalc_orders.view_trucalc_bank_user_manage_form").arch
         )
-        self.assertEqual(
-            set(edit_arch.xpath(".//field/@name")),
-            {
-                "owner_user_id", "bank_company_id", "target_user_id", "login",
-                "name", "phone",
-            },
-        )
-        self.assertTrue(edit_arch.xpath(".//field[@name='login']"))
-        self.assertFalse(set(edit_arch.xpath(".//field/@name")) & {
-            "password", "group_ids", "company_id", "company_ids", "role",
-            "share", "active", "invitation_state", "trucalc_bank_company_id",
-            "trucalc_vendor_id",
+        self.assertTrue(manage_arch.xpath(
+            ".//button[@name='action_save'][@string='Save Changes']"
+        ))
+        self.assertEqual(set(manage_arch.xpath(
+            ".//group[@string='Account Actions']/button/@name"
+        )), {
+            "action_send_invitation", "action_resend_invitation",
+            "action_send_password_reset", "action_reactivate",
+            "action_deactivate",
         })
+        visibility = {
+            button.get("name"): button.get("invisible")
+            for button in manage_arch.xpath(
+                ".//group[@string='Account Actions']/button"
+            )
+        }
         self.assertEqual(
-            len(arch.xpath(
-                ".//button[@name='action_change_email'][@string='Change Email']"
-            )),
-            1,
+            visibility["action_send_invitation"],
+            "account_state != 'never_invited'",
         )
-        email_arch = etree.fromstring(
-            self.env.ref(
-                "trucalc_orders.view_trucalc_bank_user_email_change_form"
-            ).arch
+        self.assertIn("invitation_pending", visibility["action_resend_invitation"])
+        self.assertIn("invitation_expired", visibility["action_resend_invitation"])
+        self.assertIn("confirmed", visibility["action_send_password_reset"])
+        self.assertIn("reset_pending", visibility["action_send_password_reset"])
+        self.assertEqual(
+            visibility["action_reactivate"], "account_state != 'inactive'",
         )
-        self.assertEqual(set(email_arch.xpath(".//field/@name")), {
-            "owner_user_id", "pending_invitation", "bank_company_id",
-            "target_user_id", "current_login", "new_login",
-            "acknowledge_invitation_invalidation",
-        })
-        self.assertFalse(set(email_arch.xpath(".//field/@name")) & {
-            "password", "group_ids", "company_id", "company_ids", "role",
-            "share", "active", "trucalc_bank_company_id", "trucalc_vendor_id",
+        self.assertTrue(manage_arch.xpath(
+            ".//button[@name='action_deactivate'][@confirm]"
+        ))
+        self.assertFalse(set(manage_arch.xpath(".//field/@name")) & {
+            "password", "group_ids", "company_id", "company_ids", "share",
+            "trucalc_bank_company_id", "trucalc_vendor_id",
         })
         with self.assertRaises(AccessError):
             self.other_bank.with_user(self.ops).action_trucalc_view_bank_users()

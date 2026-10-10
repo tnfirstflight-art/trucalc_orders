@@ -44,6 +44,15 @@ class ResUsers(models.Model):
         help="Vendor organization this user is authorized to represent in TruCalc.",
     )
 
+    def _notify_security_setting_update(
+        self, subject, content, mail_values=None, **kwargs,
+    ):
+        if self.env.context.get("trucalc_suppress_security_update_mail"):
+            return None
+        return super()._notify_security_setting_update(
+            subject, content, mail_values=mail_values, **kwargs,
+        )
+
     @api.model
     @api.private
     def _trucalc_advisory_lock(self, *keys):
@@ -405,7 +414,10 @@ class ResUsers(models.Model):
         outstanding_link = bool(target.partner_id.signup_type)
         with self.env.cr.savepoint():
             self._trucalc_assert_bank_email_available(normalized, target)
-            target.with_context(no_reset_password=True).write({
+            target.with_context(
+                no_reset_password=True,
+                trucalc_suppress_security_update_mail=True,
+            ).write({
                 "login": normalized,
                 "email": normalized,
             })
