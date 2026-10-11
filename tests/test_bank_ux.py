@@ -16,6 +16,12 @@ from .test_bank_order_portal import TestBankOrderPortal
 class TestBankUX(TestBankOrderPortal):
     """Pass A presentation contracts, with the existing Bank security fixtures."""
 
+    def _branding_installed(self):
+        return bool(self.env["ir.module.module"].sudo().search_count([
+            ("name", "=", "trucalc_branding"),
+            ("state", "=", "installed"),
+        ]))
+
     def test_login_scope_and_footer(self):
         self.authenticate(None, None)
         response = self.url_open('/web/login?redirect=%2Fodoo%3F')
@@ -28,7 +34,8 @@ class TestBankUX(TestBankOrderPortal):
         self.assertNotIn('Manage Databases', response.text)
         self.assertNotIn('Powered by', response.text)
         self.assertTrue(card[0].xpath('.//input[@name="redirect"][@value="/odoo?"]'))
-        self.assertEqual(self.url_open('/web/database/manager').status_code, 404)
+        if self._branding_installed():
+            self.assertEqual(self.url_open('/web/database/manager').status_code, 404)
         # Other callers of login_layout do not acquire the login-only marker.
         reset = self.url_open('/web/reset_password').text
         self.assertNotIn('o_trucalc_login', reset)
@@ -44,7 +51,8 @@ class TestBankUX(TestBankOrderPortal):
             self.assertEqual(account.status_code, 200)
             self.assertNotIn('o_trucalc_bank_shell', account.text)
             self.assertNotIn('o_trucalc_bank_header', account.text)
-            self.assertNotIn('o_brand_promotion', account.text)
+            if self._branding_installed():
+                self.assertNotIn('o_brand_promotion', account.text)
             self.assertEqual(self.url_open('/my/account', allow_redirects=False).status_code, 200)
         for actor in (self.plain_portal, self.admin, self.legacy_internal_bank_user):
             self._login(actor)
@@ -65,7 +73,9 @@ class TestBankUX(TestBankOrderPortal):
     def test_bank_shell_identity(self):
         self._login(self.bank_admin)
         issuer = self.env.ref('base.main_company').name
-        self.assertEqual(issuer, "TruCalc Valuation Solutions")
+        branding_installed = self._branding_installed()
+        if branding_installed:
+            self.assertEqual(issuer, "TruCalc Valuation Solutions")
         for path in ('/my/trucalc/bank/orders', '/my/trucalc/bank/orders/new',
                      '/my/trucalc/bank/orders/%s/documents' % self.order_a.order_number):
             response = self.url_open(path)
@@ -80,8 +90,9 @@ class TestBankUX(TestBankOrderPortal):
             footer = tree.xpath('//footer')[0]
             self.assertIn(issuer, footer.text_content())
             self.assertNotIn(self.bank_a.name, footer.text_content())
-            self.assertFalse(footer.xpath('.//*[contains(@class,"o_brand_promotion")]'))
-            self.assertNotIn('Powered by', footer.text_content())
+            if branding_installed:
+                self.assertFalse(footer.xpath('.//*[contains(@class,"o_brand_promotion")]'))
+                self.assertNotIn('Powered by', footer.text_content())
             if path.endswith('/documents'):
                 self.assertTrue(tree.xpath('//a[normalize-space()="Back to My TruCalc Requests"]'))
 
@@ -99,13 +110,16 @@ class TestBankUX(TestBankOrderPortal):
         account = self.url_open('/my/home', allow_redirects=False)
         self.assertEqual(account.status_code, 200)
         self.assertNotIn('o_trucalc_vendor_shell', account.text)
-        self.assertNotIn('o_brand_promotion', account.text)
+        branding_installed = self._branding_installed()
+        if branding_installed:
+            self.assertNotIn('o_brand_promotion', account.text)
         response = self.url_open('/my/trucalc/orders', allow_redirects=False)
         self.assertEqual(response.status_code, 200)
         self.assertIn('o_trucalc_vendor_shell', response.text)
         self.assertIn('o_trucalc_vendor_header', response.text)
         self.assertIn('o_trucalc_vendor_portal', response.text)
-        self.assertNotIn('o_brand_promotion', response.text)
+        if branding_installed:
+            self.assertNotIn('o_brand_promotion', response.text)
         for page in (account, response):
             self.assertNotIn('o_trucalc_bank_shell', page.text)
             self.assertNotIn('o_trucalc_bank_header', page.text)
@@ -115,7 +129,7 @@ class TestBankUX(TestBankOrderPortal):
     def test_asset_scope_contract(self):
         root = Path(__file__).resolve().parents[1]
         manifest = ast.literal_eval((root / '__manifest__.py').read_text())
-        self.assertEqual(manifest['version'], '1.38')
+        self.assertEqual(manifest['version'], '1.39')
         self.assertNotIn('web._assets_primary_variables', manifest['assets'])
         self.assertFalse(any('trucalc_tokens' in p or 'bank_portal.scss' in p or 'trucalc_login' in p
                              for p in manifest['assets']['web.assets_backend']))

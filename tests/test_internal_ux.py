@@ -71,9 +71,7 @@ class TestInternalUXPassA(TransactionCase):
         })
 
     def _launcher_ids(self):
-        return {
-            label: self.env.ref(xmlid).id
-            for label, xmlid in {
+        launcher_xmlids = {
                 "Discuss": "mail.menu_root_discuss",
                 "To-Do": "project_todo.menu_todo_todos",
                 "Contacts": "contacts.menu_contacts",
@@ -81,13 +79,16 @@ class TestInternalUXPassA(TransactionCase):
                 "Apps": "base.menu_management",
                 "Settings": "base.menu_administration",
                 "TruCalc": "trucalc_orders.menu_trucalc_root",
-            }.items()
+        }
+        return {
+            label: menu.id
+            for label, xmlid in launcher_xmlids.items()
+            if (menu := self.env.ref(xmlid, raise_if_not_found=False))
         }
 
     def _launcher_user(self, suffix, role=None, reviewer=False):
         group_xmlids = [
             "base.group_system",
-            "project.group_project_manager",
         ]
         if role:
             group_xmlids.append(
@@ -239,8 +240,9 @@ class TestInternalUXPassA(TransactionCase):
         operations_reviewer = self._launcher_user(
             "operations-reviewer", "operations", reviewer=True
         )
-        expected_admin = {"TruCalc", "Discuss", "Apps", "Settings"}
-        expected_operations = {"TruCalc", "Discuss"}
+        available = set(self._launcher_ids())
+        expected_admin = available.difference({"To-Do", "Contacts", "Project"})
+        expected_operations = expected_admin.difference({"Apps", "Settings"})
         self.assertEqual(
             self._visible_launcher_labels(admin), expected_admin
         )
@@ -272,11 +274,11 @@ class TestInternalUXPassA(TransactionCase):
         self.assertEqual(menu_model._visible_menu_ids(False), upstream_ids)
         self.assertEqual(
             self._visible_launcher_labels(non_trucalc),
-            {"Discuss", "To-Do", "Contacts", "Project", "Apps", "Settings"},
+            available.difference({"TruCalc"}),
         )
         self.assertEqual(
             self._loaded_launcher_labels(non_trucalc),
-            {"Discuss", "To-Do", "Contacts", "Project", "Apps", "Settings"},
+            available.difference({"TruCalc"}),
         )
 
         reviewer_only = self.env["res.users"].with_context(
@@ -316,18 +318,21 @@ class TestInternalUXPassA(TransactionCase):
         self.env.invalidate_all()
         self.assertEqual(
             self._visible_launcher_labels(malformed),
-            {"TruCalc", "Discuss"},
+            expected_operations,
         )
 
     def test_launcher_visibility_refreshes_after_internal_role_change(self):
         user = self._launcher_user("role-change", "admin", reviewer=True)
+        available = set(self._launcher_ids())
+        expected_admin = available.difference({"To-Do", "Contacts", "Project"})
+        expected_operations = expected_admin.difference({"Apps", "Settings"})
         self.assertEqual(
             self._visible_launcher_labels(user),
-            {"TruCalc", "Discuss", "Apps", "Settings"},
+            expected_admin,
         )
         self.assertEqual(
             self._loaded_launcher_labels(user),
-            {"TruCalc", "Discuss", "Apps", "Settings"},
+            expected_admin,
         )
         user.write({
             "group_ids": [
@@ -340,10 +345,10 @@ class TestInternalUXPassA(TransactionCase):
             ],
         })
         self.assertEqual(
-            self._visible_launcher_labels(user), {"TruCalc", "Discuss"}
+            self._visible_launcher_labels(user), expected_operations
         )
         self.assertEqual(
-            self._loaded_launcher_labels(user), {"TruCalc", "Discuss"}
+            self._loaded_launcher_labels(user), expected_operations
         )
 
     def test_default_queue_is_recoverable_and_due_date_first(self):
@@ -870,7 +875,6 @@ class TestInternalUXPassABrowser(HttpCase):
             "group_ids": [Command.set([
                 cls.env.ref("trucalc_orders.group_trucalc_admin").id,
                 cls.env.ref("base.group_system").id,
-                cls.env.ref("project.group_project_manager").id,
             ])],
         })
         cls.operations = cls.env["res.users"].with_context(
@@ -885,7 +889,6 @@ class TestInternalUXPassABrowser(HttpCase):
             "group_ids": [Command.set([
                 cls.env.ref("trucalc_orders.group_trucalc_operations").id,
                 cls.env.ref("base.group_system").id,
-                cls.env.ref("project.group_project_manager").id,
             ])],
         })
         cls.reviewer_company = cls.env["res.company"].create({

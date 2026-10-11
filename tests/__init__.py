@@ -34,3 +34,4 @@ from . import test_internal_user_provisioning
 from . import test_invitation_signup
 from . import test_location_correction
 from . import test_location_correction_b
+from . import test_logging_redaction

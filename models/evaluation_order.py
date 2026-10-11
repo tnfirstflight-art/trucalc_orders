@@ -2762,14 +2762,12 @@ class EvaluationOrder(models.Model):
         )
         if len(reviewer_user) != 1:
             raise ValidationError(_("Select an internal Reviewer before assignment."))
-        self.env["res.users"]._trucalc_advisory_lock(
-            "reviewer:%s" % reviewer_user.id,
-        )
         self._lock_for_bid_lifecycle()
         if self.status != "report_received":
             raise ValidationError(_(
                 "A Reviewer may be assigned only after controlled report receipt."
             ))
+        reviewer_user = reviewer_user._trucalc_lock_reviewer_roster()
         reviewer_user._trucalc_reviewer_identity()
         review_due_date = self._validated_review_due_date(review_due_date)
         return self._transition_status(
@@ -2792,10 +2790,6 @@ class EvaluationOrder(models.Model):
         reviewer_user = reviewer_user.sudo().exists()
         if len(reviewer_user) != 1:
             raise ValidationError(_("Select an internal Reviewer."))
-        self.env["res.users"]._trucalc_advisory_lock(
-            "reviewer:%s" % reviewer_user.id,
-        )
-        reviewer_user._trucalc_reviewer_identity()
         self._lock_for_bid_lifecycle()
         order = self.sudo()
         prior = order.reviewer_user_id
@@ -2803,6 +2797,11 @@ class EvaluationOrder(models.Model):
             raise ValidationError(_("Reviewer reassignment is not available in this state."))
         if reviewer_user == prior:
             raise ValidationError(_("Select a different Reviewer."))
+        locked_reviewers = (prior | reviewer_user)._trucalc_lock_reviewer_roster()
+        reviewer_user = locked_reviewers.filtered(
+            lambda user: user.id == reviewer_user.id
+        )
+        reviewer_user._trucalc_reviewer_identity()
         if order.status == "under_review" and self.env[
             "trucalc.order.lifecycle.event"
         ]._valuation_approval(order.current_valuation_id):

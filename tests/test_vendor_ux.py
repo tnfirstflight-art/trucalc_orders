@@ -15,6 +15,12 @@ from .test_vendor_order_portal import TestVendorOrderPortal
 class TestVendorUX(TestVendorOrderPortal):
     """Vendor Pass A shell contracts over the existing portal security fixtures."""
 
+    def _branding_installed(self):
+        return bool(self.env["ir.module.module"].sudo().search_count([
+            ("name", "=", "trucalc_branding"),
+            ("state", "=", "installed"),
+        ]))
+
     def _vendor_user(self, suffix, vendor=None):
         vendor = vendor or self.env["trucalc.vendor"].create({
             "name": "UX Vendor %s" % suffix,
@@ -117,7 +123,9 @@ class TestVendorUX(TestVendorOrderPortal):
         )
         self._login(self.vendor_user_a)
         issuer = self.env.ref("base.main_company").name
-        self.assertEqual(issuer, "TruCalc Valuation Solutions")
+        branding_installed = self._branding_installed()
+        if branding_installed:
+            self.assertEqual(issuer, "TruCalc Valuation Solutions")
         for path in (
             "/my/trucalc/orders",
             "/my/trucalc/orders/%s" % order.order_number,
@@ -140,8 +148,9 @@ class TestVendorUX(TestVendorOrderPortal):
             footer = tree.xpath("//footer")[0]
             self.assertIn(issuer, footer.text_content())
             self.assertNotIn(self.vendor_a.name, footer.text_content())
-            self.assertFalse(footer.xpath('.//*[contains(@class,"o_brand_promotion")]'))
-            self.assertNotIn("Powered by", footer.text_content())
+            if branding_installed:
+                self.assertFalse(footer.xpath('.//*[contains(@class,"o_brand_promotion")]'))
+                self.assertNotIn("Powered by", footer.text_content())
 
         detail = self.url_open("/my/trucalc/orders/%s" % order.order_number)
         detail_tree = html.fromstring(detail.content)

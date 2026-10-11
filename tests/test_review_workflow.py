@@ -222,12 +222,43 @@ class TestControlledValuationReview(TransactionCase):
         self._assign_and_accept(order)
         self.assertTrue(first.with_user(self.reviewer).has_access("read"))
         self.assertFalse(invoice.with_user(self.reviewer).has_access("read"))
-        before_messages = order.message_ids
+        # Materialize tracking from the authorized setup before asserting that
+        # the denied operation itself creates no persistent side effects. Use
+        # direct searches so relation-cache refreshes around the AccessError do
+        # not look like newly persisted rows.
+        self.env.flush_all()
+        self.env.cr.precommit.run()
+        message_domain = [
+            ("model", "=", "trucalc.order"),
+            ("res_id", "=", order.id),
+        ]
+        event_domain = [("order_id", "=", order.id)]
+        before_messages = self.env["mail.message"].sudo().search(message_domain)
+        before_events = self.env["trucalc.order.lifecycle.event"].sudo().search(
+            event_domain
+        )
+        before_activities = self.env["mail.activity"].sudo().search([
+            ("res_model", "=", "trucalc.order"),
+            ("res_id", "=", order.id),
+        ])
         with self.assertRaises(AccessError):
             order.with_user(self.other_reviewer).action_request_valuation_revision(
                 first, "Unauthorized request must not post.",
             )
-        self.assertEqual(order.message_ids, before_messages)
+        self.assertEqual(
+            self.env["mail.message"].sudo().search(message_domain), before_messages
+        )
+        self.assertEqual(
+            self.env["trucalc.order.lifecycle.event"].sudo().search(event_domain),
+            before_events,
+        )
+        self.assertEqual(
+            self.env["mail.activity"].sudo().search([
+                ("res_model", "=", "trucalc.order"),
+                ("res_id", "=", order.id),
+            ]),
+            before_activities,
+        )
         order.with_user(self.reviewer).action_request_valuation_revision(
             first, "Revise the value conclusion.",
         )
@@ -237,7 +268,9 @@ class TestControlledValuationReview(TransactionCase):
         self.assertEqual(len(revision_events), 1)
         self.assertEqual(revision_events.target_valuation_id, first)
         self.assertEqual(order.status, "under_review")
-        revision_messages = order.message_ids - before_messages
+        revision_messages = (
+            self.env["mail.message"].sudo().search(message_domain) - before_messages
+        )
         self.assertEqual(len(revision_messages), 1)
         self.assertIn("Valuation revision requested", revision_messages.body)
         self.assertIn("version 1", revision_messages.body)

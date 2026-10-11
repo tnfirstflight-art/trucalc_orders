@@ -183,7 +183,7 @@ class TestInternalUserProvisioning(TransactionCase):
             self.assertFalse(user.partner_id.signup_type)
             self.assertNotIn(self.env.ref("base.group_system"), user.all_group_ids)
             self.assertNotIn(
-                self.env.ref("project.group_project_manager"), user.all_group_ids,
+                self.env.ref("base.group_erp_manager"), user.all_group_ids,
             )
             audit = self.env["trucalc.internal.user.admin.audit"].sudo().search([
                 ("target_user_id", "=", user.id),

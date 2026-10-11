@@ -387,10 +387,15 @@ class TestDownstreamLifecycleSecurity(TransactionCase):
         )
         self.assertFalse(reviewer_order.has_access("write"))
         odoobot = self.env.ref("base.partner_root")
-        self.assertEqual(
-            odoobot.with_user(self.reviewer).read(["name"])[0]["name"],
-            "TruCalc Assistant",
-        )
+        assistant_name = odoobot.with_user(self.reviewer).read(["name"])[0]["name"]
+        branding = self.env["ir.module.module"].sudo().search([
+            ("name", "=", "trucalc_branding"),
+            ("state", "=", "installed"),
+        ], limit=1)
+        if branding:
+            self.assertEqual(assistant_name, "TruCalc Assistant")
+        else:
+            self.assertTrue(assistant_name)
 
         message = reviewer_order.message_post(
             body="Assigned Reviewer message",

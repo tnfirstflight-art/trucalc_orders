@@ -1,6 +1,9 @@
 import logging
 import uuid
+from contextlib import contextmanager
 from datetime import timedelta
+
+from psycopg2 import errors
 
 from odoo import Command, api, fields, models, tools, _
 from odoo.exceptions import AccessError, UserError, ValidationError
@@ -63,6 +66,65 @@ class ResUsers(models.Model):
                 "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
                 ["trucalc_orders:%s" % key],
             )
+
+    @api.model
+    @api.private
+    def _trucalc_lock_internal_admin_roster(self):
+        """Fence the Administrator roster against an older ORM snapshot."""
+        self._trucalc_advisory_lock("internal-admin-roster")
+        admin_group = self.env.ref("trucalc_orders.group_trucalc_admin")
+        try:
+            with self.env.cr.savepoint():
+                # A no-op UPDATE creates a row-version conflict when a waiter began
+                # before the prior roster mutation committed.  That prevents a
+                # REPEATABLE READ transaction from validating a stale roster.
+                self.env.cr.execute(
+                    "UPDATE res_groups SET id = id WHERE id = %s RETURNING id",
+                    [admin_group.id],
+                )
+                if not self.env.cr.fetchone():
+                    raise ValidationError(_(
+                        "The TruCalc Administrator roster is unavailable."
+                    ))
+        except errors.SerializationFailure as exc:
+            raise ValidationError(_(
+                "The TruCalc Administrator roster changed concurrently. "
+                "Reload and try again."
+            )) from exc
+        admin_group.invalidate_recordset()
+        return admin_group
+
+    @api.private
+    def _trucalc_lock_reviewer_roster(self):
+        """Serialize eligibility and assignment changes for these Reviewers."""
+        reviewers = self.sudo().with_context(active_test=False).exists().sorted("id")
+        if len(reviewers) != len(self):
+            raise AccessError(_("The managed Reviewer no longer exists."))
+        self._trucalc_advisory_lock(*(
+            "reviewer:%s" % reviewer.id for reviewer in reviewers
+        ))
+        try:
+            with self.env.cr.savepoint():
+                for reviewer in reviewers:
+                    # See the Administrator fence above. Assignment, reassignment,
+                    # capability removal, and deactivation all update this row
+                    # version before evaluating eligibility or active assignments.
+                    self.env.cr.execute(
+                        "UPDATE res_users SET id = id WHERE id = %s RETURNING id",
+                        [reviewer.id],
+                    )
+                    if not self.env.cr.fetchone():
+                        raise AccessError(_(
+                            "The managed Reviewer no longer exists."
+                        ))
+        except errors.SerializationFailure as exc:
+            raise ValidationError(_(
+                "Reviewer eligibility or assignment changed concurrently. "
+                "Reload and try again."
+            )) from exc
+        reviewers.invalidate_recordset()
+        reviewers.mapped("partner_id").invalidate_recordset()
+        return reviewers
 
     @api.private
     def _trucalc_lock_target(self):
@@ -202,6 +264,26 @@ class ResUsers(models.Model):
 
     @api.model
     @api.private
+    def _trucalc_raise_identity_unique_collision(self, exc):
+        """Translate only the expected login backstop into the neutral error."""
+        if (
+            isinstance(exc, errors.UniqueViolation)
+            and exc.diag.constraint_name == "res_users_login_key"
+        ):
+            raise self._trucalc_identity_collision() from exc
+        raise exc
+
+    @contextmanager
+    def _trucalc_identity_savepoint(self):
+        """Keep expected concurrent login collisions scoped and recoverable."""
+        try:
+            with self.env.cr.savepoint():
+                yield
+        except errors.UniqueViolation as exc:
+            self._trucalc_raise_identity_unique_collision(exc)
+
+    @api.model
+    @api.private
     def _trucalc_find_bank_user_identity(self, normalized):
         Users = self.sudo().with_context(active_test=False)
         Partners = self.env["res.partner"].sudo().with_context(active_test=False)
@@ -316,7 +398,7 @@ class ResUsers(models.Model):
         elif partner:
             if not partner.active or partner.user_ids:
                 raise self._trucalc_identity_collision()
-        with self.env.cr.savepoint():
+        with self._trucalc_identity_savepoint():
             values = {
                 "name": clean_name,
                 "login": normalized,
@@ -412,7 +494,7 @@ class ResUsers(models.Model):
         user_id = target.id
         invitation_state = target._trucalc_bank_account_state(bank)
         outstanding_link = bool(target.partner_id.signup_type)
-        with self.env.cr.savepoint():
+        with self._trucalc_identity_savepoint():
             self._trucalc_assert_bank_email_available(normalized, target)
             target.with_context(
                 no_reset_password=True,
@@ -835,7 +917,7 @@ class ResUsers(models.Model):
         outstanding_link = bool(target.partner_id.signup_type)
         role = target._trucalc_internal_role_key()
         reviewer = bool(target._trucalc_persona_membership()["reviewer"])
-        with self.env.cr.savepoint():
+        with self._trucalc_identity_savepoint():
             self._trucalc_assert_internal_email_available(normalized, target)
             target.with_context(
                 no_reset_password=True,
@@ -908,6 +990,8 @@ class ResUsers(models.Model):
         selected = self._trucalc_internal_role_map().get(role)
         if not clean_name or not selected:
             raise ValidationError(_("Name and one TruCalc internal role are required."))
+        if role == "administrator":
+            self._trucalc_lock_internal_admin_roster()
         partner, user = self._trucalc_find_internal_user_identity(normalized)
         if user:
             membership = user._trucalc_persona_membership()
@@ -933,7 +1017,7 @@ class ResUsers(models.Model):
         groups = selected | (reviewer_group if reviewer else self.env["res.groups"])
         companies = self._trucalc_internal_companies()
         main_company = self.env.ref("base.main_company")
-        with self.env.cr.savepoint():
+        with self._trucalc_identity_savepoint():
             values = {
                 "name": clean_name,
                 "login": normalized,
@@ -1000,7 +1084,7 @@ class ResUsers(models.Model):
     def _trucalc_change_internal_role(self, role):
         self.ensure_one()
         actor = self.env["res.users"]._trucalc_require_internal_administrator()
-        self._trucalc_advisory_lock("internal-admin-roster")
+        self._trucalc_lock_internal_admin_roster()
         target = self._trucalc_assert_managed_internal_user()
         target = target._trucalc_lock_target()._trucalc_assert_managed_internal_user()
         selected = self._trucalc_internal_role_map().get(role)
@@ -1060,7 +1144,7 @@ class ResUsers(models.Model):
         self.ensure_one()
         actor = self.env["res.users"]._trucalc_require_internal_administrator()
         target = self._trucalc_assert_managed_internal_user()
-        self._trucalc_advisory_lock("reviewer:%s" % target.id)
+        target = target._trucalc_lock_reviewer_roster()
         target = target._trucalc_lock_target()._trucalc_assert_managed_internal_user()
         reviewer_group = self.env.ref("trucalc_orders.group_trucalc_reviewer")
         prior = bool(target._trucalc_persona_membership()["reviewer"])
@@ -1105,9 +1189,9 @@ class ResUsers(models.Model):
     def _trucalc_deactivate_internal_user(self, acknowledge_open_activities=False):
         self.ensure_one()
         actor = self.env["res.users"]._trucalc_require_internal_administrator()
-        self._trucalc_advisory_lock("internal-admin-roster")
+        self._trucalc_lock_internal_admin_roster()
         target = self._trucalc_assert_managed_internal_user()
-        self._trucalc_advisory_lock("reviewer:%s" % target.id)
+        target = target._trucalc_lock_reviewer_roster()
         target = target._trucalc_lock_target()._trucalc_assert_managed_internal_user()
         if target == actor:
             raise ValidationError(_("You cannot deactivate your own TruCalc account."))
@@ -1176,6 +1260,11 @@ class ResUsers(models.Model):
             raise self._trucalc_identity_collision()
         role = target._trucalc_internal_role_key()
         reviewer = bool(target._trucalc_persona_membership()["reviewer"])
+        if role == "administrator":
+            self._trucalc_lock_internal_admin_roster()
+            target = target._trucalc_lock_target()._trucalc_assert_managed_internal_user(
+                require_active=False, require_company_binding=False,
+            )
         companies = self._trucalc_internal_companies()
         main_company = self.env.ref("base.main_company")
         if (
