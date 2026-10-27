@@ -71,6 +71,7 @@ class TestPricingArchitecture(TransactionCase):
             "city": "Pricing City",
             "zip_code": "38600",
             "loan_number": "PRICE-1",
+            "loan_purpose": "purchase",
             "service_type": "evaluation",
             "property_type": "single_family",
             "due_date": fields.Date.to_string(
@@ -215,6 +216,7 @@ class TestPricingArchitecture(TransactionCase):
             trucalc_internal_draft_intake=True,
         ).create({
             "borrower": "Internal Pricing",
+            "loan_purpose": "refinance",
             "property_address": "2 Pricing Way",
             "company_id": self.bank_a.id,
             "pricing_state_id": self.state.id,
@@ -262,6 +264,18 @@ class TestPricingArchitecture(TransactionCase):
         self.assertEqual(len(order.lifecycle_event_ids.filtered(
             lambda item: item.event_type == "internal_request_submitted"
         )), 1)
+
+    def test_loan_purpose_internal_editing_and_tracking(self):
+        order = self.env["trucalc.order"].with_user(self.admin).create({
+            "borrower": "Loan Purpose Tracking",
+            "property_address": "10 Tracking Way",
+            "due_date": fields.Date.add(fields.Date.today(), days=10),
+        })
+        self.assertFalse(order.loan_purpose)
+        self.assertTrue(order._fields["loan_purpose"].tracking)
+        order.with_user(self.admin).write({"loan_purpose": "new_loan"})
+        order.with_user(self.ops).write({"loan_purpose": "refinance"})
+        self.assertEqual(order.loan_purpose, "refinance")
 
     def test_acceptance_and_legacy_lifecycle_do_not_require_pricing(self):
         order = self.env["trucalc.order"].with_user(self.admin).create({
@@ -349,13 +363,24 @@ class TestPricingArchitecture(TransactionCase):
                 ("company_id", "Bank"),
                 ("requestor_id", "Requester"),
                 ("order_date_display", "Order Date"),
-                ("loan_number", "Loan Number"),
-                ("borrower", "Borrower"),
                 ("due_date", "Due Date"),
                 ("status", "Status"),
                 ("decline_reason", None),
             ],
         )
+        identity = arch.xpath(
+            "//div[contains(@class, 'o_trucalc_request_identity')]"
+            "/div/group/field"
+        )
+        self.assertEqual(
+            [field.get("name") for field in identity],
+            ["borrower", "loan_number", "loan_purpose"],
+        )
+        self.assertTrue(all(
+            "col-12" in field.getparent().getparent().get("class", "")
+            and "col-md-4" in field.getparent().getparent().get("class", "")
+            for field in identity
+        ))
         for label, field_name in (
             ("State", "pricing_state_id"),
             ("County", "pricing_county_area_id"),
@@ -509,6 +534,7 @@ class TestPricingArchitecture(TransactionCase):
         draft.with_user(self.admin).write({
             "company_id": self.bank_a.id,
             "borrower": "Internal Draft",
+            "loan_purpose": "new_loan",
             "property_address": "3B Draft Way",
             "due_date": fields.Date.add(fields.Date.today(), days=10),
             "pricing_state_id": self.state.id,
@@ -639,6 +665,7 @@ class TestPricingArchitecture(TransactionCase):
             trucalc_internal_draft_intake=True,
         ).create({
             "borrower": "Lock Authority",
+            "loan_purpose": "other",
             "property_address": "5 Lock Way",
             "company_id": self.bank_a.id,
             "pricing_state_id": self.state.id,
@@ -666,6 +693,7 @@ class TestPricingArchitecture(TransactionCase):
         complete = {
             "company_id": self.bank_a.id,
             "borrower": "Complete Intake",
+            "loan_purpose": "purchase",
             "property_address": "7 Complete Way",
             "due_date": fields.Date.add(fields.Date.today(), days=10),
             "pricing_state_id": self.state.id,
@@ -676,7 +704,7 @@ class TestPricingArchitecture(TransactionCase):
             "county": self.area.county,
         }
         for missing in (
-            "company_id", "borrower", "property_address", "due_date",
+            "company_id", "borrower", "loan_purpose", "property_address", "due_date",
             "pricing_state_id", "pricing_county_area_id", "service_area_id",
             "service_type",
         ):
@@ -724,6 +752,7 @@ class TestPricingArchitecture(TransactionCase):
         ).with_context(trucalc_internal_draft_intake=True).create({
             "company_id": self.bank_a.id,
             "borrower": "Unpriced Intake",
+            "loan_purpose": "refinance",
             "property_address": "8 Unpriced Way",
             "due_date": fields.Date.add(fields.Date.today(), days=10),
             "pricing_state_id": self.state.id,
@@ -746,6 +775,7 @@ class TestPricingArchitecture(TransactionCase):
             trucalc_internal_draft_intake=True,
         ).create({
             "borrower": "Operations Pricing",
+            "loan_purpose": "new_loan",
             "property_address": "6 Operations Way",
             "company_id": self.bank_a.id,
             "pricing_state_id": self.state.id,

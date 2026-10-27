@@ -146,6 +146,7 @@ class TestBankOrderPortal(HttpCase):
             "property_address": "44 Isolated Action Way",
             "city": "Tupelo", "zip_code": "38801",
             "loan_number": "ACTION-44",
+            "loan_purpose": "purchase",
             "service_area_id": str(self.service_area.id),
             "service_state_id": str(self.service_state.id),
             "service_county": self.service_area.county,
@@ -216,6 +217,7 @@ class TestBankOrderPortal(HttpCase):
             self.assertIn("o_trucalc_bank_portal", form.text)
             self.assertIn("Inspection Contact Person", form.text)
             self.assertIn("Loan Number", form.text)
+            self.assertIn("Loan Purpose", form.text)
             self.assertIn("Select a State", form.text)
             self.assertIn("data-service-areas", form.text)
             form_node = etree.HTML(form.text).xpath(
@@ -229,6 +231,25 @@ class TestBankOrderPortal(HttpCase):
                 for option in property_options
             ], [("single_family", "Single Family")])
             self.assertEqual(property_options[0].get("selected"), "True")
+            identity_names = form_node.xpath(
+                "./div[contains(@class, 'row')][1]/div[position() <= 3]"
+                "/*[self::input or self::select]/@name"
+            )
+            self.assertEqual(identity_names, [
+                "borrower", "loan_number", "loan_purpose",
+            ])
+            self.assertEqual([
+                (option.get("value"), " ".join(option.itertext()).strip())
+                for option in form_node.xpath(
+                    ".//select[@name='loan_purpose']/option"
+                )
+            ], [
+                ("", "Select a Loan Purpose"),
+                ("new_loan", "New Loan"),
+                ("refinance", "Refinance"),
+                ("purchase", "Purchase"),
+                ("other", "Other"),
+            ])
             matrix = json.loads(form_node.get("data-service-areas"))
             expected_area = {
                 "id": self.service_area.id,
@@ -257,6 +278,7 @@ class TestBankOrderPortal(HttpCase):
                     "borrower": "Portal Submitted Borrower",
                     "property_address": "401 Portal Way", "city": "Memphis",
                     "zip_code": "38103", "loan_number": "PORTAL-401",
+                    "loan_purpose": "purchase",
                     "service_type": "evaluation", "property_type": "single_family",
                     "due_date": fields.Date.to_string(fields.Date.today()),
                     "inspection_contact_name": "Portal Contact",
@@ -304,6 +326,7 @@ class TestBankOrderPortal(HttpCase):
                     "borrower": "Portal Submitted Borrower",
                     "property_address": "401 Portal Way", "city": "Memphis",
                     "zip_code": "38103", "loan_number": "PORTAL-401",
+                    "loan_purpose": "purchase",
                     "service_type": "evaluation", "property_type": "single_family",
                     "due_date": fields.Date.to_string(fields.Date.today()),
                     "inspection_contact_name": "Portal Contact",
@@ -318,6 +341,7 @@ class TestBankOrderPortal(HttpCase):
             )
             self.assertIn(send.status_code, (302, 303))
             self.assertEqual(order.status, "new")
+            self.assertEqual(order.loan_purpose, "purchase")
             self.assertTrue(order.order_date)
             self.assertEqual(
                 (
@@ -477,13 +501,26 @@ class TestBankOrderPortal(HttpCase):
                 for node in etree.HTML(detail).xpath("//dt")
             }
             self.assertEqual(labels, {
-                "Order Number", "Borrower", "Property Address", "City", "State",
+                "Order Number", "Property Address", "City", "State",
                 "ZIP", "County", "Service Type", "Client Due Date", "Status",
-                "Loan Number",
                 "Inspection Contact Person", "Inspection Contact Phone",
                 "Inspection Contact Email",
             })
-            self.assertEqual('name="document_file"' in detail, can_upload)
+            tree = etree.HTML(detail)
+            identity = tree.xpath(
+                "//div[contains(@class, 'o_trucalc_bank_request_identity')]/div"
+            )
+            self.assertEqual([
+                " ".join(node.xpath("./div[1]//text()")).strip()
+                for node in identity
+            ], ["Borrower", "Loan Number", "Loan Purpose"])
+            self.assertEqual(bool(tree.xpath(
+                "//button[@data-bs-target='#bank-document-upload-modal']"
+            )), can_upload)
+            self.assertEqual(bool(tree.xpath(
+                "//form[@enctype='multipart/form-data']"
+                "//input[@name='document_file']"
+            )), can_upload)
             for value in forbidden:
                 self.assertNotIn(value, detail)
 
@@ -831,6 +868,8 @@ class TestBankOrderPortal(HttpCase):
 
     def test_controlled_bank_multipart_upload(self):
         before = self._document_artifact_counts(self.order_a)
+        status = self.order_a.status
+        lifecycle_count = len(self.order_a.lifecycle_event_ids)
         response = self._portal_upload(
             self.bank_requestor, self.order_a, self.tag.id,
             "Portal Upload.pdf", b"portal upload",
@@ -852,6 +891,9 @@ class TestBankOrderPortal(HttpCase):
         self.assertEqual(document.attachment, base64.b64encode(b"portal upload"))
         self.assertEqual(len(document.event_ids), 1)
         self.assertEqual(document.event_ids.event_type, "uploaded")
+        self.order_a.invalidate_recordset()
+        self.assertEqual(self.order_a.status, status)
+        self.assertEqual(len(self.order_a.lifecycle_event_ids), lifecycle_count)
         after = self._document_artifact_counts(self.order_a)
         self.assertEqual(after, tuple(value + 1 for value in before))
 

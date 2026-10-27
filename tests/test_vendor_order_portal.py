@@ -58,6 +58,7 @@ class TestVendorOrderPortal(HttpCase):
         order = cls.env["trucalc.order"].with_user(cls.admin).create({
             "borrower": f"Forbidden Borrower {address}",
             "loan_number": "FORBIDDEN-LOAN-NUMBER-%s" % address,
+            "loan_purpose": "refinance",
             "loan_amount": 987654.32,
             "property_address": address,
             "city": "Memphis",
@@ -238,6 +239,8 @@ class TestVendorOrderPortal(HttpCase):
             f"/my/trucalc/orders/{order.order_number}"
         ).text
         self.assertIn("466 Safe Output Street", rendered)
+        self.assertIn("Loan Purpose", rendered)
+        self.assertIn("Refinance", rendered)
         labels = {
             label.strip()
             for label in etree.HTML(rendered).xpath("//dt/text()")
@@ -245,10 +248,17 @@ class TestVendorOrderPortal(HttpCase):
         }
         self.assertFalse({"Bidding round", "Phase", "Assigned"} & labels)
         self.assertTrue({
-            "Service", "Borrower", "Property type", "Property address",
+            "Service", "Property type", "Property address",
             "Status", "Response deadline", "Standard fee",
         } <= labels)
         self.assertNotIn("Due date", labels)
+        identity = etree.HTML(rendered).xpath(
+            "//div[contains(@class, 'o_trucalc_vendor_request_identity')]/div"
+        )
+        self.assertEqual([
+            " ".join(node.xpath("./div[1]//text()")).strip()
+            for node in identity
+        ], ["Borrower", "Loan Purpose"])
         self.assertIn("500", rendered)
         for forbidden in (
             "order_id",

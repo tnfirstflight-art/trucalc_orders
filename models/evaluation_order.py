@@ -11,6 +11,7 @@ from ..utils.phone import format_phone, normalize_phone, phone_parts
 
 BANK_REQUEST_FIELDS = frozenset({
     "borrower", "property_address", "city", "zip_code", "loan_number",
+    "loan_purpose",
     "service_type", "property_type", "due_date", "inspection_contact_name",
     "inspection_contact_phone", "inspection_contact_email", "notes",
     "service_area_id", "service_state_id", "service_county",
@@ -19,6 +20,12 @@ BANK_ORDER_CREATE_FIELDS = BANK_REQUEST_FIELDS - {
     "service_state_id", "service_county",
 }
 BANK_PILOT_PROPERTY_TYPE = "single_family"
+LOAN_PURPOSE_SELECTION = [
+    ("new_loan", "New Loan"),
+    ("refinance", "Refinance"),
+    ("purchase", "Purchase"),
+    ("other", "Other"),
+]
 CURRENT_FEE_FIELDS = frozenset({
     "current_agreed_fee", "current_fee_change_request_id",
     "fee_workflow_revision", "fee_change_request_ids",
@@ -782,6 +789,12 @@ class EvaluationOrder(models.Model):
 
     loan_number = fields.Char(
         string="Loan Number",
+        tracking=True,
+    )
+
+    loan_purpose = fields.Selection(
+        LOAN_PURPOSE_SELECTION,
+        string="Loan Purpose",
         tracking=True,
     )
 
@@ -1757,6 +1770,13 @@ class EvaluationOrder(models.Model):
             ),
         }
 
+        loan_purpose = clean_text(
+            "loan_purpose", "Loan Purpose", 64, required=final,
+        )
+        if loan_purpose and loan_purpose not in dict(LOAN_PURPOSE_SELECTION):
+            raise ValidationError(_("Select a valid Loan Purpose."))
+        prepared["loan_purpose"] = loan_purpose
+
         property_type = clean_text(
             "property_type", "Property Type", 64, required=final,
         )
@@ -2198,9 +2218,13 @@ class EvaluationOrder(models.Model):
             raise ValidationError(_(
                 "Select an authorized customer Bank other than TruCalc before submitting."
             ))
-        if not self.borrower or not self.property_address or not self.due_date:
+        if (
+            not self.borrower or not self.property_address or not self.due_date
+            or not self.loan_purpose
+        ):
             raise ValidationError(_(
-                "Borrower, Property Address, and Client Due Date are required before submitting."
+                "Borrower, Loan Purpose, Property Address, and Client Due Date "
+                "are required before submitting."
             ))
         area = self.service_area_id
         if (

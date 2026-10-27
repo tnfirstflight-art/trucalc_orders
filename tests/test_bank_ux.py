@@ -129,7 +129,7 @@ class TestBankUX(TestBankOrderPortal):
     def test_asset_scope_contract(self):
         root = Path(__file__).resolve().parents[1]
         manifest = ast.literal_eval((root / '__manifest__.py').read_text())
-        self.assertEqual(manifest['version'], '1.39')
+        self.assertEqual(manifest['version'], '1.40')
         self.assertNotIn('web._assets_primary_variables', manifest['assets'])
         self.assertFalse(any('trucalc_tokens' in p or 'bank_portal.scss' in p or 'trucalc_login' in p
                              for p in manifest['assets']['web.assets_backend']))
@@ -310,6 +310,23 @@ class TestBankUX(TestBankOrderPortal):
                         const r = filter.getBoundingClientRect();
                         if (r.left < -1 || r.right > innerWidth + 1) throw Error('Filter overflow');
                     }
+                }
+                const addDocument = document.querySelector(
+                    '[data-bs-target="#bank-document-upload-modal"]'
+                );
+                if (addDocument) {
+                    addDocument.click(); await wait();
+                    const modal = document.querySelector('#bank-document-upload-modal.show');
+                    if (!modal) throw Error('Document modal did not open');
+                    if (!modal.querySelector('input[name="document_file"]')) throw Error('Document selection missing');
+                    if (!modal.querySelector('select[name="tag_id"]')) throw Error('Document Tag missing');
+                    if (![...modal.querySelectorAll('button')].some(button => button.textContent.trim() === 'Save Document')) throw Error('Save Document missing');
+                    const cancel = [...modal.querySelectorAll('[data-bs-dismiss="modal"]')].find(
+                        button => button.textContent.trim() === 'Cancel'
+                    );
+                    if (!cancel) throw Error('Cancel missing');
+                    cancel.click(); await wait();
+                    if (document.querySelector('.modal.show, .modal-backdrop')) throw Error('Document modal did not close');
                 }
                 console.log('test successful');
             })();

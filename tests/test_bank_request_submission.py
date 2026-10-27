@@ -42,6 +42,7 @@ class TestBankRequestSubmission(TransactionCase):
         if not minimal:
             values.update({
                 "city": "Memphis", "zip_code": "38103", "loan_number": " LN-4001 ",
+                "loan_purpose": "new_loan",
                 "service_type": "evaluation", "property_type": "single_family",
                 "due_date": fields.Date.to_string(fields.Date.today()),
                 "inspection_contact_name": " Property Manager ",
@@ -81,6 +82,7 @@ class TestBankRequestSubmission(TransactionCase):
             self.assertEqual(order.requestor_id, actor)
             self.assertEqual(order.create_uid, actor)
             self.assertEqual(order.property_type, "single_family")
+            self.assertFalse(order.loan_purpose)
             self.assertFalse(order.service_area_id)
             self.assertTrue(order.message_ids.filtered(
                 lambda message: "Bank Draft Created" in (message.body or "")
@@ -162,7 +164,10 @@ class TestBankRequestSubmission(TransactionCase):
         self.assertEqual(sent.order_date, fields.Date.context_today(sent))
         self.assertEqual(sent.service_area_id, self.area)
         self.assertEqual((sent.state, sent.county), ("DS", "Submission County"))
-        self.assertEqual((sent.borrower, sent.loan_number), ("Bank Borrower", "LN-4001"))
+        self.assertEqual(
+            (sent.borrower, sent.loan_number, sent.loan_purpose),
+            ("Bank Borrower", "LN-4001", "new_loan"),
+        )
         self.assertEqual(
             sent.inspection_contact_phone, "9015550100 ext 22",
         )
@@ -171,6 +176,22 @@ class TestBankRequestSubmission(TransactionCase):
         self.assertEqual(event.event_type, "bank_request_sent")
         self.assertEqual((event.from_status, event.to_status), ("draft", "new"))
         self.assertEqual(event.actor_id, self.bank_admin)
+
+    def test_loan_purpose_is_nullable_in_draft_and_required_for_send(self):
+        draft = self._create(self.requestor)
+        self.assertFalse(draft.loan_purpose)
+        with self.assertRaisesRegex(ValidationError, "Loan Purpose is required"):
+            self._send(
+                draft, self.requestor,
+                self._values(loan_purpose=""),
+            )
+        self.assertEqual(draft.status, "draft")
+        with self.assertRaisesRegex(ValidationError, "valid Loan Purpose"):
+            self._update(
+                draft, self.requestor,
+                self._values(loan_purpose="forged"),
+            )
+        self.assertFalse(draft.loan_purpose)
 
     def test_inspection_contact_phone_normalization_and_validation(self):
         cases = (

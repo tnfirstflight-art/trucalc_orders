@@ -548,6 +548,19 @@ class TestInternalUXPassA(TransactionCase):
             ".//div[contains(@class, 'o_trucalc_request_details')]/div"
         )
         self.assertEqual(len(request_columns), 3)
+        identity = request.xpath(
+            ".//div[contains(@class, 'o_trucalc_request_identity')]"
+            "/div/group/field"
+        )
+        self.assertEqual(
+            [field.get("name") for field in identity],
+            ["borrower", "loan_number", "loan_purpose"],
+        )
+        self.assertTrue(all(
+            "col-12" in field.getparent().getparent().get("class", "")
+            and "col-md-4" in field.getparent().getparent().get("class", "")
+            for field in identity
+        ))
         self.assertTrue(all(
             "col-12" in node.get("class", "")
             and "col-lg-4" in node.get("class", "")

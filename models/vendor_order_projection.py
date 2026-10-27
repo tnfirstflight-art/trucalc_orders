@@ -11,6 +11,12 @@ class TruCalcVendorOrder(models.Model):
 
     order_number = fields.Char(readonly=True)
     borrower = fields.Char(readonly=True)
+    loan_purpose = fields.Selection(
+        selection=lambda self: self.env["trucalc.order"]._fields[
+            "loan_purpose"
+        ].selection,
+        readonly=True,
+    )
     service_type = fields.Selection(
         selection=lambda self: self.env["trucalc.order"]._fields[
             "service_type"
@@ -184,7 +190,8 @@ class TruCalcVendorOrder(models.Model):
             CREATE VIEW {self._table} AS (
                 SELECT DISTINCT ON (a.vendor_id, a.order_id)
                     a.id, a.vendor_id,
-                    o.order_number, o.borrower, o.service_type, o.property_type,
+                    o.order_number, o.borrower, o.loan_purpose,
+                    o.service_type, o.property_type,
                     o.property_address, o.city, o.state, o.zip_code, o.bidding_round,
                     CASE WHEN a.active IS TRUE AND a.source = 'assignment'
                               AND o.status = 'engaged'

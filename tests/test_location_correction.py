@@ -112,6 +112,7 @@ class TestLocationCorrectionA(TransactionCase):
             "city": "Informational City",
             "zip_code": "38103",
             "loan_number": "LOCATION-A",
+            "loan_purpose": "refinance",
             "service_type": "evaluation",
             "property_type": "single_family",
             "due_date": fields.Date.add(fields.Date.today(), days=10),

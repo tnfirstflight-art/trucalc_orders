@@ -38,6 +38,7 @@ class TestVendorOrderProjection(TransactionCase):
         order = self.env["trucalc.order"].with_user(self.admin).create({
             "borrower": "Forbidden Borrower",
             "loan_number": "FORBIDDEN-LOAN-NUMBER",
+            "loan_purpose": "other",
             "loan_amount": 987654.32,
             "property_address": "1 Safe Street",
             "city": "Memphis", "state": "TN", "zip_code": "38103",
@@ -81,6 +82,7 @@ class TestVendorOrderProjection(TransactionCase):
         self.assertEqual(own.vendor_status, "open_for_bid")
         self.assertEqual(own.response_deadline, invitation.response_deadline)
         self.assertEqual(own.borrower, "Forbidden Borrower")
+        self.assertEqual(own.loan_purpose, "other")
         self.assertNotIn("due_date", own.fields_get())
         self.assertFalse(own.vendor_delivery_date)
         self.assertFalse(own.is_assigned)

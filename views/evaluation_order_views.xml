@@ -219,6 +219,27 @@
 
                     <notebook>
                         <page string="Request Details">
+                            <div class="o_trucalc_request_identity row g-3 mb-3">
+                                <div class="col-12 col-md-4">
+                                    <group>
+                                        <field name="borrower" string="Borrower"
+                                               required="not is_internal_draft"
+                                               readonly="status == 'completed'"/>
+                                    </group>
+                                </div>
+                                <div class="col-12 col-md-4">
+                                    <group>
+                                        <field name="loan_number" string="Loan Number"
+                                               readonly="status == 'completed'"/>
+                                    </group>
+                                </div>
+                                <div class="col-12 col-md-4">
+                                    <group>
+                                        <field name="loan_purpose" string="Loan Purpose"
+                                               readonly="status == 'completed'"/>
+                                    </group>
+                                </div>
+                            </div>
                             <div class="o_trucalc_request_details row g-3">
                                 <div class="col-12 col-lg-4">
                                     <group string="Order / Request Info">
@@ -231,11 +252,6 @@
                                    widget="trucalc_order_context_profile_link"
                                    options="{'no_open': True, 'profile_action': 'action_open_requestor_profile'}"/>
                             <field name="order_date_display" string="Order Date"/>
-                            <field name="loan_number" string="Loan Number"
-                                   readonly="status == 'completed'"/>
-                            <field name="borrower" string="Borrower"
-                                   required="not is_internal_draft"
-                                   readonly="status == 'completed'"/>
                             <field name="due_date" string="Due Date"
                                    required="not is_internal_draft"
                                    options="{'numeric': True}" readonly="status == 'completed'"/>

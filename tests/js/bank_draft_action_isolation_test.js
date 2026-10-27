@@ -28,6 +28,7 @@ global.FormData = class FormData {
         yield ["csrf_token", "ignored"];
         yield ["draft_action", "save"];
         yield ["borrower", "Current Unsaved Borrower"];
+        yield ["loan_purpose", "purchase"];
         yield ["inspection_contact_email", ""];
         yield ["service_area_id", "30"];
     }
@@ -60,6 +61,7 @@ uploadForm.listeners.submit();
 
 assert.deepEqual(generated.map((input) => [input.name, input.value]), [
     ["borrower", "Current Unsaved Borrower"],
+    ["loan_purpose", "purchase"],
     ["inspection_contact_email", ""],
     ["service_area_id", "30"],
 ]);

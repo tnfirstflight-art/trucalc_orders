@@ -9,6 +9,8 @@ from odoo.http import content_disposition
 
 from odoo.addons.portal.controllers.portal import CustomerPortal, pager as portal_pager
 
+from ..models.document import MAX_DOCUMENT_BYTES
+
 
 class TruCalcVendorPortal(CustomerPortal):
     _vendor_order_filter_keys = frozenset({
@@ -419,6 +421,7 @@ class TruCalcVendorPortal(CustomerPortal):
                 "city": order.city or "",
                 "zip_code": order.zip_code or "",
                 "loan_number": order.loan_number or "",
+                "loan_purpose": order.loan_purpose or "",
                 "service_type": order.service_type or "",
                 "property_type": order.property_type or "",
                 "due_date": fields.Date.to_string(order.due_date) if order.due_date else "",
@@ -468,6 +471,9 @@ class TruCalcVendorPortal(CustomerPortal):
             "property_types": request.env[
                 "trucalc.order"
             ]._bank_request_property_types(),
+            "loan_purposes": request.env[
+                "trucalc.order"
+            ]._fields["loan_purpose"].selection,
             "form_values": form_values or {},
             "submission_error": submission_error,
             "filterby": False,
@@ -713,9 +719,10 @@ class TruCalcVendorPortal(CustomerPortal):
                     request.env["trucalc.order"]._update_bank_draft(
                         order, draft_values, request.env.user,
                     )
+                payload = upload.stream.read(MAX_DOCUMENT_BYTES + 1)
                 request.env["trucalc.document"]._create_bank_document(
                     order, tag, upload.filename,
-                    base64.b64encode(upload.read()), request.env.user,
+                    base64.b64encode(payload), request.env.user,
                 )
         except (AccessError, ValidationError, ValueError) as error:
             return self.portal_bank_documents(
