@@ -172,6 +172,10 @@ class TestBankNavigation(TestBankOrderPortal):
         second = self.url_open(page_two[0])
         second_tree = html.fromstring(second.content)
         self.assertEqual(len(second_tree.xpath("//table/tbody/tr")), 5)
+        self.assertEqual(
+            second_tree.xpath("//form[contains(@class,'o_trucalc_order_list_toolbar')]/@action"),
+            ["/my/trucalc/bank/orders"],
+        )
         self.assertIn(
             "Showing 21–25 of 25", " ".join(second_tree.text_content().split()),
         )
@@ -216,13 +220,16 @@ class TestBankNavigation(TestBankOrderPortal):
         ]
         self.assertEqual(borrowers_desc, sorted(borrowers_desc, reverse=True))
 
-        order_search = self.url_open(
-            "/my/trucalc/bank/orders?%s" % urlencode({
-                "filterby": "open", "search": alpha.order_number,
-            })
-        ).text
-        self.assertIn(alpha.order_number, order_search)
-        self.assertNotIn(zulu.order_number, order_search)
+        for search_value in (
+            alpha.order_number, alpha.borrower, alpha.property_address,
+        ):
+            search_result = self.url_open(
+                "/my/trucalc/bank/orders?%s" % urlencode({
+                    "filterby": "open", "search": search_value,
+                })
+            ).text
+            self.assertIn(alpha.order_number, search_result)
+            self.assertNotIn(zulu.order_number, search_result)
 
         invalid = self.url_open(
             "/my/trucalc/bank/orders?filterby=open&status=company_id"
@@ -242,7 +249,9 @@ class TestBankNavigation(TestBankOrderPortal):
                 const header = document.querySelector('thead.o_trucalc_order_list_header');
                 const link = header?.querySelector('.o_trucalc_sort_link');
                 const icon = header?.querySelector('.o_trucalc_sort_link .fa');
-                if (!toggle || !panel || !header || !link || !icon) throw Error('UX controls missing');
+                const search = document.querySelector('#trucalc-order-search');
+                const form = search?.form;
+                if (!toggle || !panel || !header || !link || !icon || !form) throw Error('UX controls missing');
                 if (panel.classList.contains('show')) throw Error('Filters initially open');
                 if (toggle.getAttribute('aria-expanded') !== 'false') throw Error('Initial collapse state');
                 if (getComputedStyle(header).backgroundColor !== 'rgb(2, 47, 91)') throw Error('Header background');
@@ -252,6 +261,20 @@ class TestBankNavigation(TestBankOrderPortal):
                 const focusStyle = getComputedStyle(link);
                 if (focusStyle.outlineStyle === 'none' || focusStyle.outlineWidth === '0px') throw Error('Focus indicator');
                 if (document.documentElement.scrollWidth > document.documentElement.clientWidth + 1) throw Error('Page overflow');
+                const searchWidth = search.getBoundingClientRect().width;
+                if (innerWidth >= 992 && Math.abs(searchWidth - 275) > 2) throw Error('Desktop search width');
+                if (search.getBoundingClientRect().right > toggle.getBoundingClientRect().left) throw Error('Search alignment');
+                let clearSubmitted = false;
+                form.submit = () => { clearSubmitted = true; };
+                search.value = 'unsubmitted search';
+                search.value = '';
+                search.dispatchEvent(new Event('input', {bubbles: true}));
+                if (!clearSubmitted || search.hasAttribute('name')) throw Error('Search clear submit');
+                const clearData = new FormData(form);
+                if (clearData.has('search')) throw Error('Search parameter retained');
+                if (clearData.get('filterby') !== 'open' || clearData.get('sort') !== 'order_number' || clearData.get('direction') !== 'asc') throw Error('List state not retained');
+                if (clearData.get('status') !== 'new' || clearData.get('service') !== 'evaluation') throw Error('Other filters not retained');
+                if (new URL(form.action).pathname.includes('/page/')) throw Error('Pagination not reset');
                 toggle.click();
                 setTimeout(() => {
                     if (!panel.classList.contains('show')) throw Error('Filters did not open');
@@ -264,7 +287,7 @@ class TestBankNavigation(TestBankOrderPortal):
             with self.subTest(size=size):
                 self.browser_size = size
                 self.browser_js(
-                    "/my/trucalc/bank/orders?sort=order_number&direction=asc",
+                    "/my/trucalc/bank/orders?filterby=open&status=new&service=evaluation&sort=order_number&direction=asc",
                     code,
                     login=self.bank_admin.login,
                     ready=(

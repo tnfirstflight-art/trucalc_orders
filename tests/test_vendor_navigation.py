@@ -170,10 +170,27 @@ class TestVendorNavigation(TestVendorOrderPortal):
 
         second_tree = html.fromstring(self.url_open(page_two[0]).content)
         self.assertEqual(len(second_tree.xpath("//table/tbody/tr")), 5)
+        self.assertEqual(
+            second_tree.xpath("//form[contains(@class,'o_trucalc_order_list_toolbar')]/@action"),
+            ["/my/trucalc/orders"],
+        )
         self.assertIn(
             "Showing 21–25 of 25", " ".join(second_tree.text_content().split()),
         )
         self.assertNotIn(foreign.order_number, first.text)
+
+        for search_value in (
+            fixtures[0].order_number,
+            fixtures[0].borrower,
+            fixtures[0].property_address,
+        ):
+            search_result = self.url_open(
+                "/my/trucalc/orders?%s" % urlencode({
+                    "filterby": "active", "search": search_value,
+                })
+            ).text
+            self.assertIn(fixtures[0].order_number, search_result)
+            self.assertNotIn(foreign.order_number, search_result)
 
         filter_query = {
             **query,
@@ -238,7 +255,9 @@ class TestVendorNavigation(TestVendorOrderPortal):
                 const listHeader = document.querySelector('thead.o_trucalc_order_list_header');
                 const sortLink = listHeader?.querySelector('.o_trucalc_sort_link');
                 const sortIcon = listHeader?.querySelector('.o_trucalc_sort_link .fa');
-                if (!toggle || !panel || !listHeader || !sortLink || !sortIcon) throw Error('UX controls missing');
+                const search = document.querySelector('#trucalc-order-search');
+                const form = search?.form;
+                if (!toggle || !panel || !listHeader || !sortLink || !sortIcon || !form) throw Error('UX controls missing');
                 if (panel.classList.contains('show')) throw Error('Filters initially open');
                 if (toggle.getAttribute('aria-expanded') !== 'false') throw Error('Initial collapse state');
                 if (getComputedStyle(listHeader).backgroundColor !== 'rgb(2, 47, 91)') throw Error('Header background');
@@ -247,6 +266,20 @@ class TestVendorNavigation(TestVendorOrderPortal):
                 sortLink.focus();
                 const focusStyle = getComputedStyle(sortLink);
                 if (focusStyle.outlineStyle === 'none' || focusStyle.outlineWidth === '0px') throw Error('Focus indicator');
+                const searchWidth = search.getBoundingClientRect().width;
+                if (innerWidth >= 992 && Math.abs(searchWidth - 275) > 2) throw Error('Desktop search width');
+                if (search.getBoundingClientRect().right > toggle.getBoundingClientRect().left) throw Error('Search alignment');
+                let clearSubmitted = false;
+                form.submit = () => { clearSubmitted = true; };
+                search.value = 'unsubmitted search';
+                search.value = '';
+                search.dispatchEvent(new Event('input', {bubbles: true}));
+                if (!clearSubmitted || search.hasAttribute('name')) throw Error('Search clear submit');
+                const clearData = new FormData(form);
+                if (clearData.has('search')) throw Error('Search parameter retained');
+                if (clearData.get('filterby') !== 'active' || clearData.get('sort') !== 'order_number' || clearData.get('direction') !== 'asc') throw Error('List state not retained');
+                if (clearData.get('status') !== 'open_for_bid' || clearData.get('service') !== 'evaluation') throw Error('Other filters not retained');
+                if (new URL(form.action).pathname.includes('/page/')) throw Error('Pagination not reset');
                 toggle.click();
                 setTimeout(() => {
                     if (!panel.classList.contains('show')) throw Error('Filters did not open');
@@ -259,7 +292,7 @@ class TestVendorNavigation(TestVendorOrderPortal):
             with self.subTest(size=size):
                 self.browser_size = size
                 self.browser_js(
-                    "/my/trucalc/orders?sort=order_number&direction=asc", code,
+                    "/my/trucalc/orders?filterby=active&status=open_for_bid&service=evaluation&sort=order_number&direction=asc", code,
                     login=self.vendor_user_a.login,
                     ready=(
                         "document.readyState === 'complete' && "

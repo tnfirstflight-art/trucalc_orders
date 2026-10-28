@@ -67,7 +67,7 @@
             <div class="o_trucalc_order_searchbar d-flex align-items-stretch gap-2">
                 <label class="visually-hidden" for="trucalc-order-search">Search Orders</label>
                 <input id="trucalc-order-search" type="search" name="search"
-                       class="form-control flex-grow-1" maxlength="200"
+                       class="form-control" maxlength="200"
                        placeholder="Order Number, Borrower, or Property Address"
                        t-att-value="list_query['search']"/>
                 <button type="button"

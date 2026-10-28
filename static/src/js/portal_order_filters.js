@@ -7,8 +7,24 @@ function setExpanded(toggle, panel, expanded) {
 }
 
 function initializePortalOrderFilters() {
-    for (const toggle of document.querySelectorAll(".o_trucalc_filter_toggle")) {
-        if (toggle.dataset.trucalcFilterReady === "true") {
+    for (const form of document.querySelectorAll(".o_trucalc_order_list_toolbar")) {
+        if (form.dataset.trucalcToolbarReady === "true") {
+            continue;
+        }
+        const search = form.querySelector('input[type="search"][name="search"]');
+        if (search) {
+            const submitClearedSearch = () => {
+                if (search.value) {
+                    return;
+                }
+                search.removeAttribute("name");
+                form.submit();
+            };
+            search.addEventListener("search", submitClearedSearch);
+            search.addEventListener("input", submitClearedSearch);
+        }
+        const toggle = form.querySelector(".o_trucalc_filter_toggle");
+        if (!toggle) {
             continue;
         }
         const selector = toggle.dataset.trucalcFilterTarget;
@@ -31,6 +47,7 @@ function initializePortalOrderFilters() {
             }
         });
         toggle.dataset.trucalcFilterReady = "true";
+        form.dataset.trucalcToolbarReady = "true";
     }
 }
 

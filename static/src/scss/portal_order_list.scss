@@ -1,7 +1,13 @@
 :is(.o_trucalc_bank_portal, .o_trucalc_vendor_portal) {
     .o_trucalc_order_list_toolbar {
-        .o_trucalc_order_searchbar .form-control {
-            min-width: 0;
+        .o_trucalc_order_searchbar {
+            justify-content: flex-start;
+
+            .form-control {
+                flex: 1 1 auto;
+                width: auto;
+                min-width: 0;
+            }
         }
 
         .o_trucalc_filter_toggle {
@@ -53,6 +59,15 @@
             .fa {
                 color: #ffffff !important;
             }
+        }
+    }
+}
+
+@media (min-width: 992px) {
+    :is(.o_trucalc_bank_portal, .o_trucalc_vendor_portal) {
+        .o_trucalc_order_list_toolbar .o_trucalc_order_searchbar .form-control {
+            flex: 0 1 275px;
+            width: 275px;
         }
     }
 }
