@@ -58,6 +58,83 @@
         </xpath>
     </template>
 
+    <template id="portal_order_list_toolbar" name="TruCalc Portal Order List Toolbar">
+        <form method="get" t-att-action="list_url"
+              class="o_trucalc_order_list_toolbar card card-body mb-3">
+            <input type="hidden" name="filterby" t-att-value="list_query['filterby']"/>
+            <input type="hidden" name="sort" t-att-value="list_query['sort']"/>
+            <input type="hidden" name="direction" t-att-value="list_query['direction']"/>
+            <div class="row g-2 align-items-end">
+                <div class="col-12 col-lg-4">
+                    <label class="form-label" for="trucalc-order-search">Search</label>
+                    <input id="trucalc-order-search" type="search" name="search"
+                           class="form-control" maxlength="200"
+                           placeholder="Order Number, Borrower, or Property Address"
+                           t-att-value="list_query['search']"/>
+                </div>
+                <div class="col-6 col-md-4 col-lg-2">
+                    <label class="form-label" for="trucalc-order-status">Status</label>
+                    <select id="trucalc-order-status" name="status" class="form-select">
+                        <option value="">All Statuses</option>
+                        <option t-foreach="status_options" t-as="item"
+                                t-att-value="item[0]"
+                                t-att-selected="list_query['status'] == item[0]">
+                            <t t-out="item[1]"/>
+                        </option>
+                    </select>
+                </div>
+                <div class="col-6 col-md-4 col-lg-2">
+                    <label class="form-label" for="trucalc-order-service">Service Type</label>
+                    <select id="trucalc-order-service" name="service" class="form-select">
+                        <option value="">All Services</option>
+                        <option t-foreach="service_options" t-as="item"
+                                t-att-value="item[0]"
+                                t-att-selected="list_query['service'] == item[0]">
+                            <t t-out="item[1]"/>
+                        </option>
+                    </select>
+                </div>
+                <div class="col-12 col-md-4 col-lg-2">
+                    <label class="form-label" for="trucalc-order-date-field">Date</label>
+                    <select id="trucalc-order-date-field" name="date_field" class="form-select">
+                        <option value="">Any Date</option>
+                        <option t-foreach="date_options" t-as="item"
+                                t-att-value="item[0]"
+                                t-att-selected="list_query['date_field'] == item[0]">
+                            <t t-out="item[1]"/>
+                        </option>
+                    </select>
+                </div>
+                <div class="col-6 col-md-3 col-lg-2">
+                    <label class="form-label" for="trucalc-order-date-from">From</label>
+                    <input id="trucalc-order-date-from" type="date" name="date_from"
+                           class="form-control" t-att-value="list_query['date_from']"/>
+                </div>
+                <div class="col-6 col-md-3 col-lg-2">
+                    <label class="form-label" for="trucalc-order-date-to">To</label>
+                    <input id="trucalc-order-date-to" type="date" name="date_to"
+                           class="form-control" t-att-value="list_query['date_to']"/>
+                </div>
+                <div class="col-12 col-md-6 col-lg-auto d-flex gap-2">
+                    <button type="submit" class="btn btn-primary">Apply</button>
+                    <a t-if="has_active_filters" t-att-href="clear_filters_url"
+                       class="btn btn-outline-secondary">Clear Filters</a>
+                </div>
+            </div>
+        </form>
+    </template>
+
+    <template id="portal_sortable_header" name="TruCalc Portal Sortable Header">
+        <th t-att-aria-sort="sort == sort_key and ('ascending' if direction == 'asc' else 'descending') or 'none'">
+            <a class="o_trucalc_sort_link" t-att-href="sort_urls[sort_key]">
+                <t t-out="sort_label"/>
+                <i t-if="sort == sort_key"
+                   t-attf-class="fa fa-chevron-#{'up' if direction == 'asc' else 'down'} ms-1"
+                   aria-hidden="true"/>
+            </a>
+        </th>
+    </template>
+
     <template id="portal_my_trucalc_orders" name="My TruCalc Orders">
         <t t-call="trucalc_orders.vendor_portal_layout">
             <t t-set="no_breadcrumbs" t-value="True"/>
@@ -66,6 +143,17 @@
                 <t t-set="title">My TruCalc Orders</t>
             </t>
 
+            <div t-if="filter_error" class="alert alert-warning" role="alert">
+                <t t-out="filter_error"/>
+            </div>
+            <t t-call="trucalc_orders.portal_order_list_toolbar"/>
+
+            <div class="d-flex justify-content-end small text-muted mb-2"
+                 aria-live="polite">
+                Showing <t t-out="range_start"/>–<t t-out="range_end"/>
+                of <t t-out="result_total"/>
+            </div>
+
             <div t-if="not projections" class="alert alert-info" role="status">
                 <t t-out="empty_message"/>
             </div>
@@ -73,13 +161,13 @@
             <t t-if="projections" t-call="portal.portal_table">
                 <thead>
                     <tr>
-                        <th>Order</th>
-                        <th>Service</th>
-                        <th>Borrower</th>
-                        <th>Property</th>
-                        <th>Status</th>
-                        <th>Response</th>
-                        <th>Due</th>
+                        <t t-set="sort_key" t-value="'order_number'"/><t t-set="sort_label" t-value="'Order'"/><t t-call="trucalc_orders.portal_sortable_header"/>
+                        <t t-set="sort_key" t-value="'service_type'"/><t t-set="sort_label" t-value="'Service'"/><t t-call="trucalc_orders.portal_sortable_header"/>
+                        <t t-set="sort_key" t-value="'borrower'"/><t t-set="sort_label" t-value="'Borrower'"/><t t-call="trucalc_orders.portal_sortable_header"/>
+                        <t t-set="sort_key" t-value="'property_address'"/><t t-set="sort_label" t-value="'Property'"/><t t-call="trucalc_orders.portal_sortable_header"/>
+                        <t t-set="sort_key" t-value="'status'"/><t t-set="sort_label" t-value="'Status'"/><t t-call="trucalc_orders.portal_sortable_header"/>
+                        <t t-set="sort_key" t-value="'response'"/><t t-set="sort_label" t-value="'Response'"/><t t-call="trucalc_orders.portal_sortable_header"/>
+                        <t t-set="sort_key" t-value="'due_date'"/><t t-set="sort_label" t-value="'Due'"/><t t-call="trucalc_orders.portal_sortable_header"/>
                     </tr>
                 </thead>
                 <tbody>
@@ -118,9 +206,6 @@
                 </tbody>
             </t>
 
-            <div t-if="pager" class="d-flex justify-content-center mt-3">
-                <t t-call="portal.pager"/>
-            </div>
             </div>
         </t>
     </template>
@@ -571,18 +656,27 @@
                 <span t-if="filterby == 'open'" class="small text-muted">Includes authorized drafts</span>
                 <a t-if="can_submit" href="/my/trucalc/bank/orders/new" class="btn btn-primary">New Request</a>
             </div>
+            <div t-if="filter_error" class="alert alert-warning" role="alert">
+                <t t-out="filter_error"/>
+            </div>
+            <t t-call="trucalc_orders.portal_order_list_toolbar"/>
+            <div class="d-flex justify-content-end small text-muted mb-2"
+                 aria-live="polite">
+                Showing <t t-out="range_start"/>–<t t-out="range_end"/>
+                of <t t-out="result_total"/>
+            </div>
             <div t-if="not orders" class="alert alert-info" role="status">
                 <t t-out="empty_message"/>
             </div>
             <t t-if="orders" t-call="portal.portal_table">
                 <thead>
                     <tr>
-                        <th>Order Number</th>
-                        <th>Borrower</th>
-                        <th>Property Address</th>
-                        <th>Service Type</th>
-                        <th>Client Due Date</th>
-                        <th>Status</th>
+                        <t t-set="sort_key" t-value="'order_number'"/><t t-set="sort_label" t-value="'Order Number'"/><t t-call="trucalc_orders.portal_sortable_header"/>
+                        <t t-set="sort_key" t-value="'borrower'"/><t t-set="sort_label" t-value="'Borrower'"/><t t-call="trucalc_orders.portal_sortable_header"/>
+                        <t t-set="sort_key" t-value="'property_address'"/><t t-set="sort_label" t-value="'Property Address'"/><t t-call="trucalc_orders.portal_sortable_header"/>
+                        <t t-set="sort_key" t-value="'service_type'"/><t t-set="sort_label" t-value="'Service Type'"/><t t-call="trucalc_orders.portal_sortable_header"/>
+                        <t t-set="sort_key" t-value="'due_date'"/><t t-set="sort_label" t-value="'Client Due Date'"/><t t-call="trucalc_orders.portal_sortable_header"/>
+                        <t t-set="sort_key" t-value="'status'"/><t t-set="sort_label" t-value="'Status'"/><t t-call="trucalc_orders.portal_sortable_header"/>
                     </tr>
                 </thead>
                 <tbody>
@@ -671,9 +765,6 @@
                     </div>
                 </t>
             </t>
-            <div t-if="pager" class="d-flex justify-content-center mt-3">
-                <t t-call="portal.pager"/>
-            </div>
             </div>
         </t>
     </template>

@@ -1,9 +1,11 @@
 import base64
 import json
-from datetime import timedelta
+from datetime import datetime, time, timedelta
+from urllib.parse import urlencode
 
 from odoo import fields, http
 from odoo.exceptions import AccessError, ValidationError
+from odoo.fields import Domain
 from odoo.http import request
 from odoo.http import content_disposition
 
@@ -13,12 +15,199 @@ from ..models.document import MAX_DOCUMENT_BYTES
 
 
 class TruCalcVendorPortal(CustomerPortal):
+    _portal_order_page_size = 20
+    _portal_search_limit = 200
     _vendor_order_filter_keys = frozenset({
         "active", "submitted", "recent_completed", "all",
     })
     _bank_order_filter_keys = frozenset({
         "open", "recent_completed", "outstanding_invoices", "all",
     })
+    _bank_sort_fields = {
+        "newest": "create_date",
+        "order_number": "order_number",
+        "borrower": "borrower",
+        "property_address": "property_address",
+        "service_type": "service_type",
+        "due_date": "due_date",
+        "status": "status",
+    }
+    _vendor_sort_fields = {
+        "newest": "authorization_date",
+        "completed": "completion_at",
+        "order_number": "order_number",
+        "service_type": "service_type",
+        "borrower": "borrower",
+        "property_address": "property_address",
+        "status": "vendor_status",
+        "response": "vendor_response_label",
+        "due_date": "delivery_due_date",
+    }
+
+    def _selection_options(self, model_name, field_name):
+        field = request.env[model_name]._fields[field_name]
+        return field._description_selection(request.env)
+
+    def _portal_list_query(
+        self, kwargs, *, filterby, sort_fields, default_sort,
+        default_direction, status_options, date_fields,
+    ):
+        search = (kwargs.get("search") or "").strip()[:self._portal_search_limit]
+        status = (kwargs.get("status") or "").strip()
+        service = (kwargs.get("service") or "").strip()
+        date_field = (kwargs.get("date_field") or "").strip()
+        raw_date_from = (kwargs.get("date_from") or "").strip()
+        raw_date_to = (kwargs.get("date_to") or "").strip()
+        invalid = False
+
+        allowed_statuses = {item[0] for item in status_options}
+        service_options = self._selection_options("trucalc.order", "service_type")
+        allowed_services = {item[0] for item in service_options}
+        if status and status not in allowed_statuses:
+            invalid = True
+        if service and service not in allowed_services:
+            invalid = True
+        if date_field and date_field not in date_fields:
+            invalid = True
+
+        date_from = date_to = False
+        try:
+            date_from = fields.Date.to_date(raw_date_from) if raw_date_from else False
+            date_to = fields.Date.to_date(raw_date_to) if raw_date_to else False
+        except (TypeError, ValueError):
+            invalid = True
+        if (raw_date_from and not date_from) or (raw_date_to and not date_to):
+            invalid = True
+        if (date_from or date_to) and not date_field:
+            invalid = True
+        if date_from and date_to and date_from > date_to:
+            invalid = True
+
+        requested_sort = (kwargs.get("sort") or "").strip()
+        sort = requested_sort if requested_sort in sort_fields else default_sort
+        requested_direction = (kwargs.get("direction") or "").strip().lower()
+        direction = (
+            requested_direction
+            if requested_direction in ("asc", "desc")
+            else default_direction if not requested_sort else "asc"
+        )
+
+        query = {
+            "filterby": filterby,
+            "search": search,
+            "status": status if status in allowed_statuses else "",
+            "service": service if service in allowed_services else "",
+            "date_field": date_field if date_field in date_fields else "",
+            "date_from": fields.Date.to_string(date_from) if date_from else "",
+            "date_to": fields.Date.to_string(date_to) if date_to else "",
+            "sort": sort,
+            "direction": direction,
+        }
+        return {
+            "query": query,
+            "status_options": status_options,
+            "service_options": service_options,
+            "date_from": date_from,
+            "date_to": date_to,
+            "sort": sort,
+            "direction": direction,
+            "order": "%s %s, id %s" % (
+                sort_fields[sort], direction, direction,
+            ),
+            "invalid": invalid,
+        }
+
+    def _portal_filter_domain(
+        self, query_values, search_fields, date_fields, status_field,
+    ):
+        if query_values["invalid"]:
+            return Domain.FALSE
+        query = query_values["query"]
+        domains = []
+        if query["search"]:
+            domains.append(Domain.OR([
+                Domain(field_name, "ilike", query["search"])
+                for field_name in search_fields
+            ]))
+        if query["status"]:
+            domains.append(Domain(status_field, "=", query["status"]))
+        if query["service"]:
+            domains.append(Domain("service_type", "=", query["service"]))
+        if query["date_field"]:
+            field_name, field_type = date_fields[query["date_field"]]
+            if query_values["date_from"]:
+                lower = query_values["date_from"]
+                if field_type == "datetime":
+                    lower = datetime.combine(lower, time.min)
+                domains.append(Domain(field_name, ">=", lower))
+            if query_values["date_to"]:
+                upper = query_values["date_to"]
+                if field_type == "datetime":
+                    upper = datetime.combine(upper + timedelta(days=1), time.min)
+                    domains.append(Domain(field_name, "<", upper))
+                else:
+                    domains.append(Domain(field_name, "<=", upper))
+        return Domain.AND(domains) if domains else Domain.TRUE
+
+    def _portal_url(self, base_url, values):
+        values = {
+            key: value for key, value in values.items()
+            if value not in (False, "", None)
+        }
+        return "%s?%s" % (base_url, urlencode(values)) if values else base_url
+
+    def _portal_list_values(
+        self, *, base_url, filter_keys, query_values, total, pager,
+        sort_fields, date_options,
+    ):
+        query = query_values["query"]
+        sort_urls = {}
+        for sort_key in sort_fields:
+            if sort_key in ("newest", "completed"):
+                continue
+            next_direction = (
+                "desc"
+                if query["sort"] == sort_key and query["direction"] == "asc"
+                else "asc"
+            )
+            sort_urls[sort_key] = self._portal_url(base_url, {
+                **query, "sort": sort_key, "direction": next_direction,
+            })
+        category_urls = {
+            key: self._portal_url(base_url, {**query, "filterby": key})
+            for key in filter_keys
+        }
+        clear_url = self._portal_url(base_url, {
+            "filterby": query["filterby"],
+            "sort": query["sort"],
+            "direction": query["direction"],
+        })
+        return {
+            "list_url": base_url,
+            "list_query": query,
+            "pager": pager,
+            "sort_urls": sort_urls,
+            "sort": query["sort"],
+            "direction": query["direction"],
+            "category_urls": category_urls,
+            "clear_filters_url": clear_url,
+            "has_active_filters": any(query[key] for key in (
+                "search", "status", "service", "date_field",
+                "date_from", "date_to",
+            )),
+            "filter_error": (
+                "One or more list filters were invalid. No Orders were returned."
+                if query_values["invalid"] else False
+            ),
+            "status_options": query_values["status_options"],
+            "service_options": query_values["service_options"],
+            "date_options": date_options,
+            "result_total": total,
+            "range_start": pager["offset"] + 1 if total else 0,
+            "range_end": min(
+                pager["offset"] + self._portal_order_page_size, total,
+            ),
+        }
 
     @http.route()
     def home(self, **kw):
@@ -88,7 +277,7 @@ class TruCalcVendorPortal(CustomerPortal):
     def _vendor_filter_now(self):
         return fields.Datetime.now()
 
-    def _vendor_order_filter_domain(self, filterby, authorized_projections):
+    def _vendor_order_filter_domain(self, filterby):
         if filterby == "active":
             return [
                 ("vendor_phase", "in", ("invitation", "assignment")),
@@ -106,26 +295,11 @@ class TruCalcVendorPortal(CustomerPortal):
 
         now = self._vendor_filter_now()
         cutoff = now - timedelta(days=30)
-        # Authorization is established by the non-sudo projection search above.
-        # The sudo event lookup can only narrow that already-authorized Order set.
-        authorizations = request.env[
-            "trucalc.order.vendor.authorization"
-        ].sudo().browse(authorized_projections.ids).exists()
-        authorized_order_ids = authorizations.mapped("order_id").ids
-        events = request.env["trucalc.order.lifecycle.event"].sudo().search([
-            ("order_id", "in", authorized_order_ids),
-            ("event_type", "=", "order_completed"),
-            ("event_at", ">=", cutoff),
-            ("event_at", "<=", now),
-        ])
-        completed_order_ids = set(events.mapped("order_id").ids)
-        projection_ids = authorizations.filtered(
-            lambda authorization: authorization.order_id.id in completed_order_ids
-        ).ids
         return [
-            ("id", "in", projection_ids),
             ("vendor_phase", "=", "assignment"),
             ("order_status", "=", "completed"),
+            ("completion_at", ">=", cutoff),
+            ("completion_at", "<=", now),
         ]
 
     @http.route(
@@ -143,24 +317,52 @@ class TruCalcVendorPortal(CustomerPortal):
         filterby = (
             filterby if filterby in self._vendor_order_filter_keys else "active"
         )
+        default_sort = "due_date" if filterby == "active" else (
+            "completed" if filterby == "recent_completed" else "newest"
+        )
+        default_direction = "asc" if filterby == "active" else "desc"
+        status_options = self._selection_options(
+            "trucalc.vendor.order", "vendor_status",
+        )
+        date_fields = {
+            "invitation": ("invitation_date", "datetime"),
+            "bid_due": ("response_deadline", "datetime"),
+            "delivery_due": ("delivery_due_date", "date"),
+        }
+        query_values = self._portal_list_query(
+            kwargs,
+            filterby=filterby,
+            sort_fields=self._vendor_sort_fields,
+            default_sort=default_sort,
+            default_direction=default_direction,
+            status_options=status_options,
+            date_fields=date_fields,
+        )
         try:
-            # Search without sudo first so lifecycle data can never discover access.
-            authorized_projections = projection_model.search([])
-            domain = self._vendor_order_filter_domain(
-                filterby, authorized_projections,
+            # Record rules remain authoritative. Every list option only narrows
+            # the non-sudo Vendor projection before count and limited retrieval.
+            domain = Domain(self._vendor_order_filter_domain(filterby)) & self._portal_filter_domain(
+                query_values,
+                ("order_number", "borrower", "property_address"),
+                date_fields,
+                "vendor_status",
             )
             projection_count = projection_model.search_count(domain)
+            pager_args = {
+                key: value for key, value in query_values["query"].items()
+                if value
+            }
             pager = portal_pager(
                 url="/my/trucalc/orders",
                 total=projection_count,
                 page=page,
-                step=self._items_per_page,
-                url_args={"filterby": filterby},
+                step=self._portal_order_page_size,
+                url_args=pager_args,
             )
             projections = projection_model.search(
                 domain,
-                order="order_number, id",
-                limit=self._items_per_page,
+                order=query_values["order"],
+                limit=self._portal_order_page_size,
                 offset=pager["offset"],
             )
         except AccessError:
@@ -170,7 +372,6 @@ class TruCalcVendorPortal(CustomerPortal):
         values.update({
             "page_name": "trucalc_orders",
             "projections": projections,
-            "pager": pager,
             "filterby": filterby,
             "empty_message": {
                 "active": "No active TruCalc Orders require current Vendor work.",
@@ -183,6 +384,19 @@ class TruCalcVendorPortal(CustomerPortal):
                 "all": "No TruCalc Orders are currently available.",
             }[filterby],
         })
+        values.update(self._portal_list_values(
+            base_url="/my/trucalc/orders",
+            filter_keys=self._vendor_order_filter_keys,
+            query_values=query_values,
+            total=projection_count,
+            pager=pager,
+            sort_fields=self._vendor_sort_fields,
+            date_options=(
+                ("invitation", "Invitation Date"),
+                ("bid_due", "Bid Due Date"),
+                ("delivery_due", "Delivery Due Date"),
+            ),
+        ))
         return request.render("trucalc_orders.portal_my_trucalc_orders", values)
 
     @http.route(
@@ -578,27 +792,51 @@ class TruCalcVendorPortal(CustomerPortal):
         bank = request.env.user._trucalc_bank_identity()
         filterby = filterby if filterby in self._bank_order_filter_keys else "open"
         model = request.env["trucalc.order"].sudo()
+        date_fields = {"request": ("order_date", "date")}
+        query_values = self._portal_list_query(
+            kwargs,
+            filterby=filterby,
+            sort_fields=self._bank_sort_fields,
+            default_sort="newest",
+            default_direction="desc",
+            status_options=self._selection_options("trucalc.order", "status"),
+            date_fields=date_fields,
+        )
         # Authorization is established first; filters only narrow this domain.
-        domain = [("company_id", "=", bank.id)]
+        domain = Domain("company_id", "=", bank.id)
         if request.env.user.has_group("trucalc_orders.group_bank_view_only"):
-            domain.append(("status", "!=", "draft"))
+            domain &= Domain("status", "!=", "draft")
         elif request.env.user.has_group("trucalc_orders.group_bank_requestor"):
-            domain += [
-                "|", ("status", "!=", "draft"),
-                ("requestor_id", "=", request.env.user.id),
-            ]
-        domain += self._bank_order_filter_domain(filterby, bank)
+            domain &= Domain.OR([
+                Domain("status", "!=", "draft"),
+                Domain("requestor_id", "=", request.env.user.id),
+            ])
+        domain &= Domain(self._bank_order_filter_domain(filterby, bank))
+        domain &= self._portal_filter_domain(
+            query_values,
+            ("order_number", "borrower", "property_address"),
+            date_fields,
+            "status",
+        )
+        order_count = model.search_count(domain)
+        pager_args = {
+            key: value for key, value in query_values["query"].items()
+            if value
+        }
         pager = portal_pager(
-            url="/my/trucalc/bank/orders", total=model.search_count(domain),
-            page=page, step=self._items_per_page,
-            url_args={"filterby": filterby},
+            url="/my/trucalc/bank/orders", total=order_count,
+            page=page, step=self._portal_order_page_size,
+            url_args=pager_args,
         )
         values = self._prepare_portal_layout_values()
         values.update({
             "page_name": "trucalc_bank_orders",
-            "orders": model.search(domain, order="order_number desc",
-                                   limit=self._items_per_page, offset=pager["offset"]),
-            "pager": pager,
+            "orders": model.search(
+                domain,
+                order=query_values["order"],
+                limit=self._portal_order_page_size,
+                offset=pager["offset"],
+            ),
             "can_submit": self._can_create_bank_draft(),
             "filterby": filterby,
             "empty_message": {
@@ -628,6 +866,15 @@ class TruCalcVendorPortal(CustomerPortal):
             ]._can_decide(),
             "fee_error": fee_error,
         })
+        values.update(self._portal_list_values(
+            base_url="/my/trucalc/bank/orders",
+            filter_keys=self._bank_order_filter_keys,
+            query_values=query_values,
+            total=order_count,
+            pager=pager,
+            sort_fields=self._bank_sort_fields,
+            date_options=(("request", "Request Date"),),
+        ))
         return request.render("trucalc_orders.portal_bank_orders", values)
 
     @http.route(

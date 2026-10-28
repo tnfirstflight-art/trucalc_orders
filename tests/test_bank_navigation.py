@@ -1,5 +1,6 @@
 import base64
 from datetime import timedelta
+from urllib.parse import urlencode
 from unittest.mock import patch
 
 from lxml import html
@@ -115,11 +116,109 @@ class TestBankNavigation(TestBankOrderPortal):
 
         for number in range(4):
             self._status_order(self.bank_a, "Pager Open %s" % number, "new")
-        with patch.object(TruCalcVendorPortal, "_items_per_page", 2):
+        with patch.object(TruCalcVendorPortal, "_portal_order_page_size", 2):
             _, tree = self._listing(self.bank_admin, "open")
         page_two = tree.xpath('//a[contains(@href,"/page/2")]/@href')
         self.assertTrue(page_two)
         self.assertTrue(any("filterby=open" in href for href in page_two))
+        self.assertEqual(len(tree.xpath(
+            '//div[contains(concat(" ", normalize-space(@class), " "),'
+            ' " o_portal_pager ")]'
+        )), 1)
+
+    def test_pass_a_pagination_search_sort_filters_and_invalid_input(self):
+        for number in range(25):
+            self._status_order(
+                self.bank_a, "Pass A Page %02d" % number, "new",
+            )
+        query = {
+            "filterby": "open", "search": "Pass A Page",
+            "sort": "borrower", "direction": "asc",
+        }
+        self._login(self.bank_admin)
+        first = self.url_open(
+            "/my/trucalc/bank/orders?%s" % urlencode(query)
+        )
+        first_tree = html.fromstring(first.content)
+        self.assertEqual(len(first_tree.xpath("//table/tbody/tr")), 20)
+        self.assertIn(
+            "Showing 1–20 of 25", " ".join(first_tree.text_content().split()),
+        )
+        category_hrefs = first_tree.xpath(
+            '//nav[@aria-label="Bank Orders filters"]//a/@href'
+        )
+        self.assertTrue(category_hrefs)
+        self.assertTrue(all("search=Pass+A+Page" in href for href in category_hrefs))
+        page_two = sorted(set(
+            first_tree.xpath('//a[contains(@href,"/page/2")]/@href')
+        ))
+        self.assertEqual(len(page_two), 1)
+        for value in ("filterby=open", "search=Pass+A+Page", "sort=borrower"):
+            self.assertIn(value, page_two[0])
+
+        second = self.url_open(page_two[0])
+        second_tree = html.fromstring(second.content)
+        self.assertEqual(len(second_tree.xpath("//table/tbody/tr")), 5)
+        self.assertIn(
+            "Showing 21–25 of 25", " ".join(second_tree.text_content().split()),
+        )
+
+        alpha = self._status_order(
+            self.bank_a, "Pass A Sort Alpha", "new",
+        )
+        zulu = self._status_order(
+            self.bank_a, "Pass A Sort Zulu", "new",
+        )
+        foreign = self._status_order(
+            self.bank_b, "Pass A Sort Foreign", "new",
+        )
+        filter_query = {
+            "filterby": "open", "search": "Pass A Sort",
+            "status": "new", "service": "evaluation",
+            "date_field": "request",
+            "date_from": fields.Date.to_string(fields.Date.today()),
+            "date_to": fields.Date.to_string(fields.Date.today()),
+            "sort": "borrower", "direction": "asc",
+        }
+        ascending = html.fromstring(self.url_open(
+            "/my/trucalc/bank/orders?%s" % urlencode(filter_query)
+        ).content)
+        ascending_text = ascending.text_content()
+        self.assertIn(alpha.order_number, ascending_text)
+        self.assertIn(zulu.order_number, ascending_text)
+        self.assertNotIn(foreign.order_number, ascending_text)
+        borrowers = [
+            value.strip() for value in ascending.xpath("//table/tbody/tr/td[2]//text()")
+            if value.strip()
+        ]
+        self.assertEqual(borrowers, sorted(borrowers))
+
+        filter_query["direction"] = "desc"
+        descending = html.fromstring(self.url_open(
+            "/my/trucalc/bank/orders?%s" % urlencode(filter_query)
+        ).content)
+        borrowers_desc = [
+            value.strip() for value in descending.xpath("//table/tbody/tr/td[2]//text()")
+            if value.strip()
+        ]
+        self.assertEqual(borrowers_desc, sorted(borrowers_desc, reverse=True))
+
+        order_search = self.url_open(
+            "/my/trucalc/bank/orders?%s" % urlencode({
+                "filterby": "open", "search": alpha.order_number,
+            })
+        ).text
+        self.assertIn(alpha.order_number, order_search)
+        self.assertNotIn(zulu.order_number, order_search)
+
+        invalid = self.url_open(
+            "/my/trucalc/bank/orders?filterby=open&status=company_id"
+            "&sort=company_id&direction=drop&date_field=unknown"
+        )
+        invalid_tree = html.fromstring(invalid.content)
+        self.assertIn("list filters were invalid", invalid.text)
+        self.assertFalse(invalid_tree.xpath("//table/tbody/tr"))
+        self.assertNotIn(foreign.order_number, invalid.text)
 
     def test_open_all_and_role_scoping(self):
         active = self._status_order(self.bank_a, "Pass B Active", "accepted")

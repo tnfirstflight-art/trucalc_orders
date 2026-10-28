@@ -71,6 +71,10 @@ class TruCalcVendorOrder(models.Model):
         readonly=True,
     )
     response_deadline = fields.Datetime(readonly=True)
+    invitation_date = fields.Datetime(readonly=True)
+    authorization_date = fields.Datetime(readonly=True)
+    completion_at = fields.Datetime(readonly=True)
+    delivery_due_date = fields.Date(readonly=True)
     vendor_delivery_date = fields.Date(readonly=True)
     vendor_engaged_at = fields.Datetime(readonly=True)
     is_assigned = fields.Boolean(readonly=True)
@@ -222,8 +226,13 @@ class TruCalcVendorOrder(models.Model):
                               'reviewer_assigned', 'under_review', 'completed') THEN o.status
                          ELSE NULL END AS vendor_status,
                     o.status AS order_status,
+                    i.invited_at AS invitation_date,
+                    a.authorized_at AS authorization_date,
+                    completed.event_at AS completion_at,
                     CASE WHEN a.source = 'invitation' THEN a.expires_at END
                         AS response_deadline,
+                    CASE WHEN a.source = 'assignment' THEN o.vendor_delivery_date
+                         ELSE i.requested_delivery_date END AS delivery_due_date,
                     CASE WHEN a.source = 'assignment' THEN o.vendor_delivery_date END
                         AS vendor_delivery_date,
                     CASE WHEN a.source = 'assignment' THEN o.vendor_engaged_at END
@@ -306,6 +315,9 @@ class TruCalcVendorOrder(models.Model):
                    AND e.active IS TRUE
                 LEFT JOIN trucalc_vendor_engagement_event pending
                     ON pending.id = e.pending_request_event_id
+                LEFT JOIN trucalc_order_lifecycle_event completed
+                    ON completed.order_id = a.order_id
+                   AND completed.event_type = 'order_completed'
                 LEFT JOIN trucalc_bid b
                     ON b.response_type IS NOT NULL
                    AND (
