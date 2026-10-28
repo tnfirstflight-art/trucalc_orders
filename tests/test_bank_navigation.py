@@ -141,6 +141,19 @@ class TestBankNavigation(TestBankOrderPortal):
         )
         first_tree = html.fromstring(first.content)
         self.assertEqual(len(first_tree.xpath("//table/tbody/tr")), 20)
+        toggle = first_tree.xpath("//button[contains(@class,'o_trucalc_filter_toggle')]")
+        self.assertEqual(len(toggle), 1)
+        self.assertEqual(toggle[0].get("aria-expanded"), "false")
+        self.assertIn("Active", toggle[0].text_content())
+        panel = first_tree.get_element_by_id("trucalc-order-filter-panel")
+        self.assertIn("collapse", panel.get("class", ""))
+        self.assertNotIn("show", panel.get("class", "").split())
+        self.assertTrue(first_tree.xpath(
+            "//thead[contains(@class,'o_trucalc_order_list_header')]"
+        ))
+        self.assertTrue(first_tree.xpath(
+            "//div[@id='trucalc-order-filter-panel']//a[normalize-space()='Clear']"
+        ))
         self.assertIn(
             "Showing 1–20 of 25", " ".join(first_tree.text_content().split()),
         )
@@ -219,6 +232,48 @@ class TestBankNavigation(TestBankOrderPortal):
         self.assertIn("list filters were invalid", invalid.text)
         self.assertFalse(invalid_tree.xpath("//table/tbody/tr"))
         self.assertNotIn(foreign.order_number, invalid.text)
+
+    def test_order_list_ux_browser_responsive_and_accessible(self):
+        self._status_order(self.bank_a, "Responsive Active", "new")
+        code = """
+            (() => {
+                const toggle = document.querySelector('.o_trucalc_filter_toggle');
+                const panel = document.querySelector('#trucalc-order-filter-panel');
+                const header = document.querySelector('thead.o_trucalc_order_list_header');
+                const link = header?.querySelector('.o_trucalc_sort_link');
+                const icon = header?.querySelector('.o_trucalc_sort_link .fa');
+                if (!toggle || !panel || !header || !link || !icon) throw Error('UX controls missing');
+                if (panel.classList.contains('show')) throw Error('Filters initially open');
+                if (toggle.getAttribute('aria-expanded') !== 'false') throw Error('Initial collapse state');
+                if (getComputedStyle(header).backgroundColor !== 'rgb(2, 47, 91)') throw Error('Header background');
+                if (getComputedStyle(link).color !== 'rgb(255, 255, 255)') throw Error('Header link color');
+                if (getComputedStyle(icon).color !== 'rgb(255, 255, 255)') throw Error('Sort icon color');
+                link.focus();
+                const focusStyle = getComputedStyle(link);
+                if (focusStyle.outlineStyle === 'none' || focusStyle.outlineWidth === '0px') throw Error('Focus indicator');
+                if (document.documentElement.scrollWidth > document.documentElement.clientWidth + 1) throw Error('Page overflow');
+                toggle.click();
+                setTimeout(() => {
+                    if (!panel.classList.contains('show')) throw Error('Filters did not open');
+                    if (toggle.getAttribute('aria-expanded') !== 'true') throw Error('Expanded collapse state');
+                    console.log('test successful');
+                }, 400);
+            })();
+        """
+        for size in ("1366x768", "768x1024", "390x844"):
+            with self.subTest(size=size):
+                self.browser_size = size
+                self.browser_js(
+                    "/my/trucalc/bank/orders?sort=order_number&direction=asc",
+                    code,
+                    login=self.bank_admin.login,
+                    ready=(
+                        "document.readyState === 'complete' && "
+                        "document.querySelector('.o_trucalc_filter_toggle')?."
+                        "dataset.trucalcFilterReady === 'true'"
+                    ),
+                    timeout=90,
+                )
 
     def test_open_all_and_role_scoping(self):
         active = self._status_order(self.bank_a, "Pass B Active", "accepted")

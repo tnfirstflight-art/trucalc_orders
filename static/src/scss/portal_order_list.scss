@@ -1,0 +1,72 @@
+:is(.o_trucalc_bank_portal, .o_trucalc_vendor_portal) {
+    .o_trucalc_order_list_toolbar {
+        .o_trucalc_order_searchbar .form-control {
+            min-width: 0;
+        }
+
+        .o_trucalc_filter_toggle {
+            flex: 0 0 auto;
+            white-space: nowrap;
+        }
+
+        .o_trucalc_order_filter_panel {
+            background-color: var(--trucalc-light-background);
+        }
+
+        .form-label {
+            margin-bottom: 0.25rem;
+            font-size: 0.8125rem;
+            font-weight: 600;
+        }
+    }
+
+    .table > thead.o_trucalc_order_list_header {
+        background-color: #022f5b;
+        color: #ffffff;
+
+        > tr > th,
+        > tr > th .o_trucalc_sort_link,
+        > tr > th .o_trucalc_sort_link:link,
+        > tr > th .o_trucalc_sort_link:visited,
+        > tr > th .o_trucalc_sort_link:hover,
+        > tr > th .o_trucalc_sort_link:active {
+            color: #ffffff !important;
+        }
+
+        .o_trucalc_sort_link {
+            display: inline-block;
+            border-radius: 0.125rem;
+            text-decoration: none;
+            white-space: nowrap;
+
+            &:hover {
+                text-decoration: underline;
+            }
+
+            &:focus-visible {
+                color: #ffffff !important;
+                outline: 0.1875rem solid #ffffff;
+                outline-offset: 0.125rem;
+                text-decoration: underline;
+            }
+
+            .fa {
+                color: #ffffff !important;
+            }
+        }
+    }
+}
+
+@media (max-width: 575.98px) {
+    :is(.o_trucalc_bank_portal, .o_trucalc_vendor_portal) {
+        .o_trucalc_order_list_toolbar {
+            .o_trucalc_order_searchbar {
+                gap: 0.5rem !important;
+            }
+
+            .o_trucalc_filter_toggle .badge {
+                display: none;
+            }
+        }
+    }
+}

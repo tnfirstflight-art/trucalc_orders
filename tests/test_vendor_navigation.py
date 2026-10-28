@@ -135,6 +135,19 @@ class TestVendorNavigation(TestVendorOrderPortal):
             )
         first_tree = html.fromstring(first.content)
         self.assertEqual(len(first_tree.xpath("//table/tbody/tr")), 20)
+        toggle = first_tree.xpath("//button[contains(@class,'o_trucalc_filter_toggle')]")
+        self.assertEqual(len(toggle), 1)
+        self.assertEqual(toggle[0].get("aria-expanded"), "false")
+        self.assertIn("Active", toggle[0].text_content())
+        panel = first_tree.get_element_by_id("trucalc-order-filter-panel")
+        self.assertIn("collapse", panel.get("class", ""))
+        self.assertNotIn("show", panel.get("class", "").split())
+        self.assertTrue(first_tree.xpath(
+            "//thead[contains(@class,'o_trucalc_order_list_header')]"
+        ))
+        self.assertTrue(first_tree.xpath(
+            "//div[@id='trucalc-order-filter-panel']//a[normalize-space()='Clear']"
+        ))
         self.assertIn(
             "Showing 1–20 of 25", " ".join(first_tree.text_content().split()),
         )
@@ -220,16 +233,39 @@ class TestVendorNavigation(TestVendorOrderPortal):
                 if (controls.some(a => a.href.includes('/page/'))) throw Error('Filter retains page');
                 controls[0].focus();
                 if (document.activeElement !== controls[0]) throw Error('Keyboard focus');
-                console.log('test successful');
+                const toggle = document.querySelector('.o_trucalc_filter_toggle');
+                const panel = document.querySelector('#trucalc-order-filter-panel');
+                const listHeader = document.querySelector('thead.o_trucalc_order_list_header');
+                const sortLink = listHeader?.querySelector('.o_trucalc_sort_link');
+                const sortIcon = listHeader?.querySelector('.o_trucalc_sort_link .fa');
+                if (!toggle || !panel || !listHeader || !sortLink || !sortIcon) throw Error('UX controls missing');
+                if (panel.classList.contains('show')) throw Error('Filters initially open');
+                if (toggle.getAttribute('aria-expanded') !== 'false') throw Error('Initial collapse state');
+                if (getComputedStyle(listHeader).backgroundColor !== 'rgb(2, 47, 91)') throw Error('Header background');
+                if (getComputedStyle(sortLink).color !== 'rgb(255, 255, 255)') throw Error('Header link color');
+                if (getComputedStyle(sortIcon).color !== 'rgb(255, 255, 255)') throw Error('Sort icon color');
+                sortLink.focus();
+                const focusStyle = getComputedStyle(sortLink);
+                if (focusStyle.outlineStyle === 'none' || focusStyle.outlineWidth === '0px') throw Error('Focus indicator');
+                toggle.click();
+                setTimeout(() => {
+                    if (!panel.classList.contains('show')) throw Error('Filters did not open');
+                    if (toggle.getAttribute('aria-expanded') !== 'true') throw Error('Expanded collapse state');
+                    console.log('test successful');
+                }, 400);
             })();
         """
         for size in ("1366x768", "768x1024", "390x844"):
             with self.subTest(size=size):
                 self.browser_size = size
                 self.browser_js(
-                    "/my/trucalc/orders", code,
+                    "/my/trucalc/orders?sort=order_number&direction=asc", code,
                     login=self.vendor_user_a.login,
-                    ready="!!document.querySelector('.o_trucalc_vendor_filters')",
+                    ready=(
+                        "document.readyState === 'complete' && "
+                        "document.querySelector('.o_trucalc_filter_toggle')?."
+                        "dataset.trucalcFilterReady === 'true'"
+                    ),
                     timeout=90,
                 )
 

@@ -60,65 +60,79 @@
 
     <template id="portal_order_list_toolbar" name="TruCalc Portal Order List Toolbar">
         <form method="get" t-att-action="list_url"
-              class="o_trucalc_order_list_toolbar card card-body mb-3">
+              class="o_trucalc_order_list_toolbar mb-3" role="search">
             <input type="hidden" name="filterby" t-att-value="list_query['filterby']"/>
             <input type="hidden" name="sort" t-att-value="list_query['sort']"/>
             <input type="hidden" name="direction" t-att-value="list_query['direction']"/>
-            <div class="row g-2 align-items-end">
-                <div class="col-12 col-lg-4">
-                    <label class="form-label" for="trucalc-order-search">Search</label>
-                    <input id="trucalc-order-search" type="search" name="search"
-                           class="form-control" maxlength="200"
-                           placeholder="Order Number, Borrower, or Property Address"
-                           t-att-value="list_query['search']"/>
-                </div>
-                <div class="col-6 col-md-4 col-lg-2">
-                    <label class="form-label" for="trucalc-order-status">Status</label>
-                    <select id="trucalc-order-status" name="status" class="form-select">
-                        <option value="">All Statuses</option>
-                        <option t-foreach="status_options" t-as="item"
-                                t-att-value="item[0]"
-                                t-att-selected="list_query['status'] == item[0]">
-                            <t t-out="item[1]"/>
-                        </option>
-                    </select>
-                </div>
-                <div class="col-6 col-md-4 col-lg-2">
-                    <label class="form-label" for="trucalc-order-service">Service Type</label>
-                    <select id="trucalc-order-service" name="service" class="form-select">
-                        <option value="">All Services</option>
-                        <option t-foreach="service_options" t-as="item"
-                                t-att-value="item[0]"
-                                t-att-selected="list_query['service'] == item[0]">
-                            <t t-out="item[1]"/>
-                        </option>
-                    </select>
-                </div>
-                <div class="col-12 col-md-4 col-lg-2">
-                    <label class="form-label" for="trucalc-order-date-field">Date</label>
-                    <select id="trucalc-order-date-field" name="date_field" class="form-select">
-                        <option value="">Any Date</option>
-                        <option t-foreach="date_options" t-as="item"
-                                t-att-value="item[0]"
-                                t-att-selected="list_query['date_field'] == item[0]">
-                            <t t-out="item[1]"/>
-                        </option>
-                    </select>
-                </div>
-                <div class="col-6 col-md-3 col-lg-2">
-                    <label class="form-label" for="trucalc-order-date-from">From</label>
-                    <input id="trucalc-order-date-from" type="date" name="date_from"
-                           class="form-control" t-att-value="list_query['date_from']"/>
-                </div>
-                <div class="col-6 col-md-3 col-lg-2">
-                    <label class="form-label" for="trucalc-order-date-to">To</label>
-                    <input id="trucalc-order-date-to" type="date" name="date_to"
-                           class="form-control" t-att-value="list_query['date_to']"/>
-                </div>
-                <div class="col-12 col-md-6 col-lg-auto d-flex gap-2">
-                    <button type="submit" class="btn btn-primary">Apply</button>
-                    <a t-if="has_active_filters" t-att-href="clear_filters_url"
-                       class="btn btn-outline-secondary">Clear Filters</a>
+            <div class="o_trucalc_order_searchbar d-flex align-items-stretch gap-2">
+                <label class="visually-hidden" for="trucalc-order-search">Search Orders</label>
+                <input id="trucalc-order-search" type="search" name="search"
+                       class="form-control flex-grow-1" maxlength="200"
+                       placeholder="Order Number, Borrower, or Property Address"
+                       t-att-value="list_query['search']"/>
+                <button type="button"
+                        t-attf-class="btn #{'btn-primary' if has_active_filters else 'btn-outline-primary'} o_trucalc_filter_toggle"
+                        data-trucalc-filter-target="#trucalc-order-filter-panel"
+                        aria-controls="trucalc-order-filter-panel"
+                        aria-expanded="false">
+                    <i class="fa fa-filter me-1" aria-hidden="true"/>
+                    Filters
+                    <span t-if="has_active_filters"
+                          class="badge rounded-pill bg-white text-primary ms-1">Active</span>
+                </button>
+            </div>
+            <div id="trucalc-order-filter-panel" class="collapse mt-2" aria-hidden="true">
+                <div class="o_trucalc_order_filter_panel rounded p-3">
+                    <div class="row g-2 align-items-end">
+                        <div class="col-6 col-md-4 col-xl-2">
+                            <label class="form-label" for="trucalc-order-status">Status</label>
+                            <select id="trucalc-order-status" name="status" class="form-select">
+                                <option value="">All Statuses</option>
+                                <option t-foreach="status_options" t-as="item"
+                                        t-att-value="item[0]"
+                                        t-att-selected="list_query['status'] == item[0]">
+                                    <t t-out="item[1]"/>
+                                </option>
+                            </select>
+                        </div>
+                        <div class="col-6 col-md-4 col-xl-2">
+                            <label class="form-label" for="trucalc-order-service">Service Type</label>
+                            <select id="trucalc-order-service" name="service" class="form-select">
+                                <option value="">All Services</option>
+                                <option t-foreach="service_options" t-as="item"
+                                        t-att-value="item[0]"
+                                        t-att-selected="list_query['service'] == item[0]">
+                                    <t t-out="item[1]"/>
+                                </option>
+                            </select>
+                        </div>
+                        <div class="col-12 col-md-4 col-xl-2">
+                            <label class="form-label" for="trucalc-order-date-field">Date</label>
+                            <select id="trucalc-order-date-field" name="date_field" class="form-select">
+                                <option value="">Any Date</option>
+                                <option t-foreach="date_options" t-as="item"
+                                        t-att-value="item[0]"
+                                        t-att-selected="list_query['date_field'] == item[0]">
+                                    <t t-out="item[1]"/>
+                                </option>
+                            </select>
+                        </div>
+                        <div class="col-6 col-md-3 col-xl-2">
+                            <label class="form-label" for="trucalc-order-date-from">From</label>
+                            <input id="trucalc-order-date-from" type="date" name="date_from"
+                                   class="form-control" t-att-value="list_query['date_from']"/>
+                        </div>
+                        <div class="col-6 col-md-3 col-xl-2">
+                            <label class="form-label" for="trucalc-order-date-to">To</label>
+                            <input id="trucalc-order-date-to" type="date" name="date_to"
+                                   class="form-control" t-att-value="list_query['date_to']"/>
+                        </div>
+                        <div class="col-12 col-md-auto d-flex gap-2">
+                            <button type="submit" class="btn btn-primary">Apply Filters</button>
+                            <a t-att-href="clear_filters_url"
+                               class="btn btn-outline-secondary">Clear</a>
+                        </div>
+                    </div>
                 </div>
             </div>
         </form>
@@ -159,7 +173,7 @@
             </div>
 
             <t t-if="projections" t-call="portal.portal_table">
-                <thead>
+                <thead class="o_trucalc_order_list_header">
                     <tr>
                         <t t-set="sort_key" t-value="'order_number'"/><t t-set="sort_label" t-value="'Order'"/><t t-call="trucalc_orders.portal_sortable_header"/>
                         <t t-set="sort_key" t-value="'service_type'"/><t t-set="sort_label" t-value="'Service'"/><t t-call="trucalc_orders.portal_sortable_header"/>
@@ -669,7 +683,7 @@
                 <t t-out="empty_message"/>
             </div>
             <t t-if="orders" t-call="portal.portal_table">
-                <thead>
+                <thead class="o_trucalc_order_list_header">
                     <tr>
                         <t t-set="sort_key" t-value="'order_number'"/><t t-set="sort_label" t-value="'Order Number'"/><t t-call="trucalc_orders.portal_sortable_header"/>
                         <t t-set="sort_key" t-value="'borrower'"/><t t-set="sort_label" t-value="'Borrower'"/><t t-call="trucalc_orders.portal_sortable_header"/>
