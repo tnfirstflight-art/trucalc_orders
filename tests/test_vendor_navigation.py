@@ -248,12 +248,13 @@ class TestVendorNavigation(TestVendorOrderPortal):
             (() => {
                 const header = document.querySelector('.o_trucalc_vendor_header');
                 const nav = header.querySelector('.o_trucalc_vendor_filters');
+                const categories = nav.querySelector('.o_trucalc_portal_categories');
                 const controls = [...nav.querySelectorAll('a[data-filter-key]')];
                 if (controls.length !== 4) throw Error('Filter count');
                 const current = controls.filter(a => a.getAttribute('aria-current') === 'page');
                 if (current.length !== 1 || current[0].dataset.filterKey !== 'active') throw Error('Current filter');
                 if (getComputedStyle(header).position !== 'sticky') throw Error('Sticky header');
-                if (document.documentElement.scrollWidth > document.documentElement.clientWidth + 1) throw Error('Page overflow');
+                if (document.documentElement.scrollWidth > innerWidth + 1) throw Error('Page overflow');
                 if (header.getBoundingClientRect().height > innerHeight * .7) throw Error('Header too tall');
                 if (controls.some(a => a.getBoundingClientRect().right > innerWidth + 1)) throw Error('Control overflow');
                 if (controls.some(a => a.href.includes('/page/'))) throw Error('Filter retains page');
@@ -266,7 +267,8 @@ class TestVendorNavigation(TestVendorOrderPortal):
                 const sortIcon = listHeader?.querySelector('.o_trucalc_sort_link .fa');
                 const search = document.querySelector('#trucalc-order-search');
                 const form = search?.form;
-                if (!toggle || !panel || !listHeader || !sortLink || !sortIcon || !form) throw Error('UX controls missing');
+                const searchbar = form?.querySelector('.o_trucalc_order_searchbar');
+                if (!toggle || !panel || !categories || !listHeader || !sortLink || !sortIcon || !form || !searchbar) throw Error('UX controls missing');
                 if (!header.contains(form)) throw Error('Toolbar is not sticky');
                 if (document.querySelector('.o_trucalc_vendor_portal')?.contains(form)) throw Error('Toolbar remains in page content');
                 if (panel.classList.contains('show')) throw Error('Filters initially open');
@@ -280,6 +282,16 @@ class TestVendorNavigation(TestVendorOrderPortal):
                 const searchWidth = search.getBoundingClientRect().width;
                 if (innerWidth >= 992 && Math.abs(searchWidth - 275) > 2) throw Error('Desktop search width');
                 if (search.getBoundingClientRect().right > toggle.getBoundingClientRect().left) throw Error('Search alignment');
+                const categoryRect = categories.getBoundingClientRect();
+                const searchbarRect = searchbar.getBoundingClientRect();
+                if (innerWidth >= 992) {
+                    const categoryCenter = categoryRect.top + categoryRect.height / 2;
+                    const searchCenter = searchbarRect.top + searchbarRect.height / 2;
+                    if (Math.abs(categoryCenter - searchCenter) > 2) throw Error('Desktop controls are not on the same row');
+                    if (searchbarRect.left < categoryRect.right) throw Error('Desktop control groups overlap');
+                } else if (searchbarRect.top < categoryRect.bottom - 1) {
+                    throw Error('Narrow controls did not wrap below navigation');
+                }
                 let clearSubmitted = false;
                 form.submit = () => { clearSubmitted = true; };
                 search.value = 'unsubmitted search';
@@ -295,11 +307,14 @@ class TestVendorNavigation(TestVendorOrderPortal):
                 setTimeout(() => {
                     if (!panel.classList.contains('show')) throw Error('Filters did not open');
                     if (toggle.getAttribute('aria-expanded') !== 'true') throw Error('Expanded collapse state');
+                    const panelRect = panel.getBoundingClientRect();
+                    if (panelRect.top < Math.max(categoryRect.bottom, searchbarRect.bottom) - 1) throw Error('Expanded panel overlaps header controls');
+                    if (panelRect.left < -1 || panelRect.right > innerWidth + 1) throw Error('Expanded panel overflow');
                     console.log('test successful');
                 }, 400);
             })();
         """
-        for size in ("1366x768", "768x1024", "390x844"):
+        for size in ("1366x768", "1280x720", "1024x768", "768x1024", "390x844"):
             with self.subTest(size=size):
                 self.browser_size = size
                 self.browser_js(

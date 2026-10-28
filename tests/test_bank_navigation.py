@@ -129,6 +129,12 @@ class TestBankNavigation(TestBankOrderPortal):
                 '//div[contains(@class,"o_trucalc_bank_primary_action")]'
                 '/a[@href="/my/trucalc/bank/orders/new"]/text()'
             ), ["New Request"])
+            toolbar_count = len(tree.xpath(
+                '//header//form[contains(@class,"o_trucalc_order_list_toolbar")]'
+            ))
+            self.assertEqual(
+                toolbar_count, 0 if selected == "outstanding_invoices" else 1,
+            )
 
         for number in range(4):
             self._status_order(self.bank_a, "Pager Open %s" % number, "new")
@@ -263,14 +269,18 @@ class TestBankNavigation(TestBankOrderPortal):
             (() => {
                 const toggle = document.querySelector('.o_trucalc_filter_toggle');
                 const panel = document.querySelector('#trucalc-order-filter-panel');
+                const stickyHeader = document.querySelector('.o_trucalc_bank_header');
+                const categories = stickyHeader?.querySelector('.o_trucalc_portal_categories');
                 const header = document.querySelector('thead.o_trucalc_order_list_header');
                 const link = header?.querySelector('.o_trucalc_sort_link');
                 const icon = header?.querySelector('.o_trucalc_sort_link .fa');
                 const search = document.querySelector('#trucalc-order-search');
                 const form = search?.form;
-                if (!toggle || !panel || !header || !link || !icon || !form) throw Error('UX controls missing');
-                if (!document.querySelector('.o_trucalc_bank_header')?.contains(form)) throw Error('Toolbar is not sticky');
+                const searchbar = form?.querySelector('.o_trucalc_order_searchbar');
+                if (!toggle || !panel || !stickyHeader || !categories || !header || !link || !icon || !form || !searchbar) throw Error('UX controls missing');
+                if (!stickyHeader.contains(form)) throw Error('Toolbar is not sticky');
                 if (document.querySelector('.o_trucalc_bank_portal')?.contains(form)) throw Error('Toolbar remains in page content');
+                if (getComputedStyle(stickyHeader).position !== 'sticky') throw Error('Header is not sticky');
                 if (panel.classList.contains('show')) throw Error('Filters initially open');
                 if (toggle.getAttribute('aria-expanded') !== 'false') throw Error('Initial collapse state');
                 if (getComputedStyle(header).backgroundColor !== 'rgb(2, 47, 91)') throw Error('Header background');
@@ -279,10 +289,20 @@ class TestBankNavigation(TestBankOrderPortal):
                 link.focus();
                 const focusStyle = getComputedStyle(link);
                 if (focusStyle.outlineStyle === 'none' || focusStyle.outlineWidth === '0px') throw Error('Focus indicator');
-                if (document.documentElement.scrollWidth > document.documentElement.clientWidth + 1) throw Error('Page overflow');
+                if (document.documentElement.scrollWidth > innerWidth + 1) throw Error('Page overflow');
                 const searchWidth = search.getBoundingClientRect().width;
                 if (innerWidth >= 992 && Math.abs(searchWidth - 275) > 2) throw Error('Desktop search width');
                 if (search.getBoundingClientRect().right > toggle.getBoundingClientRect().left) throw Error('Search alignment');
+                const categoryRect = categories.getBoundingClientRect();
+                const searchbarRect = searchbar.getBoundingClientRect();
+                if (innerWidth >= 992) {
+                    const categoryCenter = categoryRect.top + categoryRect.height / 2;
+                    const searchCenter = searchbarRect.top + searchbarRect.height / 2;
+                    if (Math.abs(categoryCenter - searchCenter) > 2) throw Error('Desktop controls are not on the same row');
+                    if (searchbarRect.left < categoryRect.right) throw Error('Desktop control groups overlap');
+                } else if (searchbarRect.top < categoryRect.bottom - 1) {
+                    throw Error('Narrow controls did not wrap below navigation');
+                }
                 let clearSubmitted = false;
                 form.submit = () => { clearSubmitted = true; };
                 search.value = 'unsubmitted search';
@@ -298,11 +318,14 @@ class TestBankNavigation(TestBankOrderPortal):
                 setTimeout(() => {
                     if (!panel.classList.contains('show')) throw Error('Filters did not open');
                     if (toggle.getAttribute('aria-expanded') !== 'true') throw Error('Expanded collapse state');
+                    const panelRect = panel.getBoundingClientRect();
+                    if (panelRect.top < Math.max(categoryRect.bottom, searchbarRect.bottom) - 1) throw Error('Expanded panel overlaps header controls');
+                    if (panelRect.left < -1 || panelRect.right > innerWidth + 1) throw Error('Expanded panel overflow');
                     console.log('test successful');
                 }, 400);
             })();
         """
-        for size in ("1366x768", "768x1024", "390x844"):
+        for size in ("1366x768", "1280x720", "1024x768", "768x1024", "390x844"):
             with self.subTest(size=size):
                 self.browser_size = size
                 self.browser_js(

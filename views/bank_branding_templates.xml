@@ -67,27 +67,31 @@
         <xpath expr="//div[@id='wrapwrap']/header/nav" position="after">
             <nav t-if="trucalc_bank_shell" class="o_trucalc_bank_filters" aria-label="Bank Orders filters">
                 <div class="container">
-                    <a t-foreach="trucalc_bank_filters" t-as="item"
-                       t-att-href="category_urls.get(item[0]) if category_urls else '/my/trucalc/bank/orders?filterby=%s' % item[0]"
-                       t-att-data-filter-key="item[0]"
-                       t-attf-class="btn btn-sm #{'btn-primary' if filterby == item[0] else 'btn-outline-primary'}"
-                       t-att-aria-current="'page' if filterby == item[0] else None">
-                        <t t-out="item[1]"/>
-                    </a>
-                    <t t-if="page_name == 'trucalc_bank_orders'"
+                    <div class="o_trucalc_portal_categories">
+                        <a t-foreach="trucalc_bank_filters" t-as="item"
+                           t-att-href="category_urls.get(item[0]) if category_urls else '/my/trucalc/bank/orders?filterby=%s' % item[0]"
+                           t-att-data-filter-key="item[0]"
+                           t-attf-class="btn btn-sm #{'btn-primary' if filterby == item[0] else 'btn-outline-primary'}"
+                           t-att-aria-current="'page' if filterby == item[0] else None">
+                            <t t-out="item[1]"/>
+                        </a>
+                    </div>
+                    <t t-if="page_name == 'trucalc_bank_orders' and filterby != 'outstanding_invoices'"
                        t-call="trucalc_orders.portal_order_list_toolbar"/>
                 </div>
             </nav>
             <nav t-if="trucalc_vendor_shell and filterby"
                  class="o_trucalc_vendor_filters" aria-label="Vendor Orders filters">
                 <div class="container">
-                    <a t-foreach="trucalc_vendor_filters" t-as="item"
-                       t-att-href="category_urls.get(item[0]) if category_urls else '/my/trucalc/orders?filterby=%s' % item[0]"
-                       t-att-data-filter-key="item[0]"
-                       t-attf-class="btn btn-sm #{'btn-primary' if filterby == item[0] else 'btn-outline-primary'}"
-                       t-att-aria-current="'page' if filterby == item[0] else None">
-                        <t t-out="item[1]"/>
-                    </a>
+                    <div class="o_trucalc_portal_categories">
+                        <a t-foreach="trucalc_vendor_filters" t-as="item"
+                           t-att-href="category_urls.get(item[0]) if category_urls else '/my/trucalc/orders?filterby=%s' % item[0]"
+                           t-att-data-filter-key="item[0]"
+                           t-attf-class="btn btn-sm #{'btn-primary' if filterby == item[0] else 'btn-outline-primary'}"
+                           t-att-aria-current="'page' if filterby == item[0] else None">
+                            <t t-out="item[1]"/>
+                        </a>
+                    </div>
                     <t t-if="page_name == 'trucalc_orders'"
                        t-call="trucalc_orders.portal_order_list_toolbar"/>
                 </div>
