@@ -58,7 +58,8 @@ class TestVendorNavigation(TestVendorOrderPortal):
         for selected in (None, "invalid"):
             _response, tree = self._listing(selected)
             filters = tree.xpath(
-                '//header//nav[@aria-label="Vendor Orders filters"]//a'
+                '//header//nav[@aria-label="Vendor Orders filters"]'
+                '//a[@data-filter-key]'
             )
             self.assertEqual(
                 [(node.get("data-filter-key"), node.text_content().strip())
@@ -80,6 +81,13 @@ class TestVendorNavigation(TestVendorOrderPortal):
             ))
             self.assertTrue(all("/page/" not in node.get("href") for node in filters))
             self.assertFalse(tree.xpath('//nav[contains(@class,"o_trucalc_bank_filters")]'))
+            self.assertEqual(len(tree.xpath(
+                '//header//form[contains(@class,"o_trucalc_order_list_toolbar")]'
+            )), 1)
+            self.assertFalse(tree.xpath(
+                '//div[contains(@class,"o_trucalc_vendor_portal")]'
+                '//form[contains(@class,"o_trucalc_order_list_toolbar")]'
+            ))
 
         for selected in ("active", "submitted", "recent_completed", "all"):
             _response, tree = self._listing(selected)
@@ -153,7 +161,8 @@ class TestVendorNavigation(TestVendorOrderPortal):
         )
         self.assertEqual([limit for _domain, limit in projection_searches], [20])
         category_hrefs = first_tree.xpath(
-            '//nav[@aria-label="Vendor Orders filters"]//a/@href'
+            '//nav[@aria-label="Vendor Orders filters"]'
+            '//a[@data-filter-key]/@href'
         )
         self.assertTrue(category_hrefs)
         self.assertTrue(all(
@@ -258,6 +267,8 @@ class TestVendorNavigation(TestVendorOrderPortal):
                 const search = document.querySelector('#trucalc-order-search');
                 const form = search?.form;
                 if (!toggle || !panel || !listHeader || !sortLink || !sortIcon || !form) throw Error('UX controls missing');
+                if (!header.contains(form)) throw Error('Toolbar is not sticky');
+                if (document.querySelector('.o_trucalc_vendor_portal')?.contains(form)) throw Error('Toolbar remains in page content');
                 if (panel.classList.contains('show')) throw Error('Filters initially open');
                 if (toggle.getAttribute('aria-expanded') !== 'false') throw Error('Initial collapse state');
                 if (getComputedStyle(listHeader).backgroundColor !== 'rgb(2, 47, 91)') throw Error('Header background');

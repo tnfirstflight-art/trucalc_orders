@@ -129,7 +129,7 @@ class TestBankUX(TestBankOrderPortal):
     def test_asset_scope_contract(self):
         root = Path(__file__).resolve().parents[1]
         manifest = ast.literal_eval((root / '__manifest__.py').read_text())
-        self.assertEqual(manifest['version'], '1.41')
+        self.assertEqual(manifest['version'], '1.44')
         self.assertNotIn('web._assets_primary_variables', manifest['assets'])
         self.assertFalse(any('trucalc_tokens' in p or 'bank_portal.scss' in p or 'trucalc_login' in p
                              for p in manifest['assets']['web.assets_backend']))
@@ -227,7 +227,7 @@ class TestBankUX(TestBankOrderPortal):
                 const s = getComputedStyle(header);
                 if (s.position !== 'sticky' || s.top !== '0px' || Number(s.zIndex) >= 1050) throw Error('Sticky contract');
                 if (getComputedStyle(header.querySelector('nav')).backgroundColor !== 'rgb(215, 224, 234)') throw Error('Header palette');
-                const filters = [...header.querySelectorAll('.o_trucalc_bank_filters a')];
+                const filters = [...header.querySelectorAll('.o_trucalc_bank_filters a[data-filter-key]')];
                 if (filters.length !== 4) throw Error('Filter controls missing');
                 if (filters.filter(a => a.getAttribute('aria-current') === 'page').length !== 1) throw Error('Filter selection unclear');
                 filters[0].focus();
@@ -250,7 +250,13 @@ class TestBankUX(TestBankOrderPortal):
                 modal.querySelector('[data-bs-dismiss="modal"]').click(); await wait();
                 if (document.querySelector('.modal.show, .modal-backdrop')) throw Error('Modal did not close');
                 document.documentElement.style.zoom = '2'; await wait();
-                if (document.documentElement.scrollWidth > document.documentElement.clientWidth + 1) throw Error('Zoom page overflow');
+                if (document.documentElement.scrollWidth > innerWidth + 1) {
+                    const offenders = [...document.querySelectorAll('body *')]
+                        .filter(element => element.getBoundingClientRect().right > innerWidth + 1)
+                        .slice(0, 8)
+                        .map(element => `${element.tagName}.${element.className}:${Math.round(element.getBoundingClientRect().right)}`);
+                    throw Error(`Zoom page overflow ${document.documentElement.scrollWidth}/${innerWidth}: ${offenders.join(',')}`);
+                }
                 for (const filter of filters) {
                     const r = filter.getBoundingClientRect();
                     if (r.left < -1 || r.right > innerWidth + 1) throw Error('Filter overflow');
@@ -269,7 +275,7 @@ class TestBankUX(TestBankOrderPortal):
             (async () => {
                 const wait = () => new Promise(resolve => setTimeout(resolve, 700));
                 const header = document.querySelector('.o_trucalc_bank_header');
-                const filters = [...header.querySelectorAll('.o_trucalc_bank_filters a')];
+                const filters = [...header.querySelectorAll('.o_trucalc_bank_filters a[data-filter-key]')];
                 if (filters.length !== 4) throw Error('Ordinary Bank filters missing');
                 const active = filters.filter(a => a.getAttribute('aria-current') === 'page');
                 if (active.length !== 1 || active[0].dataset.filterKey !== 'all') throw Error('Ordinary Bank active filter');
@@ -294,7 +300,7 @@ class TestBankUX(TestBankOrderPortal):
                 const header = document.querySelector('.o_trucalc_bank_header');
                 const logo = header.querySelector('.logo');
                 const toggle = header.querySelector('[data-bs-toggle="dropdown"]');
-                const filters = [...header.querySelectorAll('.o_trucalc_bank_filters a')];
+                const filters = [...header.querySelectorAll('.o_trucalc_bank_filters a[data-filter-key]')];
                 if (filters.length !== 4) throw Error('Filter controls missing');
                 for (const zoom of ['1', '2']) {
                     document.documentElement.style.zoom = zoom;

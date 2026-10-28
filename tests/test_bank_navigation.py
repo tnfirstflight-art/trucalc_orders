@@ -86,7 +86,10 @@ class TestBankNavigation(TestBankOrderPortal):
     def test_filter_navigation_default_invalid_pager_and_shell(self):
         for selected in (None, "invalid"):
             response, tree = self._listing(self.bank_admin, selected)
-            filters = tree.xpath('//header//nav[@aria-label="Bank Orders filters"]//a')
+            filters = tree.xpath(
+                '//header//nav[@aria-label="Bank Orders filters"]'
+                '//a[@data-filter-key]'
+            )
             self.assertEqual(
                 [(node.get("data-filter-key"), node.text_content().strip()) for node in filters],
                 [("open", "Open Orders"),
@@ -99,6 +102,14 @@ class TestBankNavigation(TestBankOrderPortal):
             self.assertTrue(all("btn-primary" in node.get("class", "") for node in active))
             self.assertFalse(tree.xpath('//ol[contains(@class,"breadcrumb")]'))
             self.assertIn("New Request", response.text)
+            self.assertNotIn("Includes authorized drafts", response.text)
+            self.assertEqual(len(tree.xpath(
+                '//header//form[contains(@class,"o_trucalc_order_list_toolbar")]'
+            )), 1)
+            self.assertFalse(tree.xpath(
+                '//div[contains(@class,"o_trucalc_bank_portal")]'
+                '//form[contains(@class,"o_trucalc_order_list_toolbar")]'
+            ))
             self.assertTrue(tree.xpath('//header//a[contains(@class,"logo")]/img'))
             self.assertTrue(tree.xpath('//header//a[@id="o_logout"]'))
             for node in filters:
@@ -107,12 +118,17 @@ class TestBankNavigation(TestBankOrderPortal):
         for selected in (
             "open", "recent_completed", "outstanding_invoices", "all",
         ):
-            _, tree = self._listing(self.bank_admin, selected)
+            response, tree = self._listing(self.bank_admin, selected)
             active = tree.xpath(
                 '//header//nav[@aria-label="Bank Orders filters"]'
                 '//a[@aria-current="page"]/@data-filter-key'
             )
             self.assertEqual(active, [selected])
+            self.assertNotIn("Includes authorized drafts", response.text)
+            self.assertEqual(tree.xpath(
+                '//div[contains(@class,"o_trucalc_bank_primary_action")]'
+                '/a[@href="/my/trucalc/bank/orders/new"]/text()'
+            ), ["New Request"])
 
         for number in range(4):
             self._status_order(self.bank_a, "Pager Open %s" % number, "new")
@@ -158,7 +174,8 @@ class TestBankNavigation(TestBankOrderPortal):
             "Showing 1–20 of 25", " ".join(first_tree.text_content().split()),
         )
         category_hrefs = first_tree.xpath(
-            '//nav[@aria-label="Bank Orders filters"]//a/@href'
+            '//nav[@aria-label="Bank Orders filters"]'
+            '//a[@data-filter-key]/@href'
         )
         self.assertTrue(category_hrefs)
         self.assertTrue(all("search=Pass+A+Page" in href for href in category_hrefs))
@@ -252,6 +269,8 @@ class TestBankNavigation(TestBankOrderPortal):
                 const search = document.querySelector('#trucalc-order-search');
                 const form = search?.form;
                 if (!toggle || !panel || !header || !link || !icon || !form) throw Error('UX controls missing');
+                if (!document.querySelector('.o_trucalc_bank_header')?.contains(form)) throw Error('Toolbar is not sticky');
+                if (document.querySelector('.o_trucalc_bank_portal')?.contains(form)) throw Error('Toolbar remains in page content');
                 if (panel.classList.contains('show')) throw Error('Filters initially open');
                 if (toggle.getAttribute('aria-expanded') !== 'false') throw Error('Initial collapse state');
                 if (getComputedStyle(header).backgroundColor !== 'rgb(2, 47, 91)') throw Error('Header background');
@@ -329,6 +348,9 @@ class TestBankNavigation(TestBankOrderPortal):
         self.assertIn(active.order_number, viewer_text)
         self.assertNotIn(own_draft.order_number, viewer_text)
         self.assertNotIn(other_draft.order_number, viewer_text)
+        self.assertFalse(viewer_open.xpath(
+            '//a[@href="/my/trucalc/bank/orders/new"]'
+        ))
 
         _, all_orders = self._listing(self.bank_admin, "all")
         all_text = all_orders.text_content()

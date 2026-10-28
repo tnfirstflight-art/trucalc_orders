@@ -60,7 +60,7 @@
 
     <template id="portal_order_list_toolbar" name="TruCalc Portal Order List Toolbar">
         <form method="get" t-att-action="list_url"
-              class="o_trucalc_order_list_toolbar mb-3" role="search">
+              class="o_trucalc_order_list_toolbar" role="search">
             <input type="hidden" name="filterby" t-att-value="list_query['filterby']"/>
             <input type="hidden" name="sort" t-att-value="list_query['sort']"/>
             <input type="hidden" name="direction" t-att-value="list_query['direction']"/>
@@ -160,7 +160,6 @@
             <div t-if="filter_error" class="alert alert-warning" role="alert">
                 <t t-out="filter_error"/>
             </div>
-            <t t-call="trucalc_orders.portal_order_list_toolbar"/>
 
             <div class="d-flex justify-content-end small text-muted mb-2"
                  aria-live="polite">
@@ -665,15 +664,13 @@
             <t t-set="no_breadcrumbs" t-value="True"/>
             <div class="o_trucalc_bank_portal">
             <h1 class="visually-hidden">My TruCalc Requests</h1>
-            <div t-if="fee_error" class="alert alert-danger" role="alert"><t t-out="fee_error"/></div>
-            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-                <span t-if="filterby == 'open'" class="small text-muted">Includes authorized drafts</span>
-                <a t-if="can_submit" href="/my/trucalc/bank/orders/new" class="btn btn-primary">New Request</a>
+            <div t-if="can_submit" class="o_trucalc_bank_primary_action mb-3">
+                <a href="/my/trucalc/bank/orders/new" class="btn btn-primary">New Request</a>
             </div>
+            <div t-if="fee_error" class="alert alert-danger" role="alert"><t t-out="fee_error"/></div>
             <div t-if="filter_error" class="alert alert-warning" role="alert">
                 <t t-out="filter_error"/>
             </div>
-            <t t-call="trucalc_orders.portal_order_list_toolbar"/>
             <div class="d-flex justify-content-end small text-muted mb-2"
                  aria-live="polite">
                 Showing <t t-out="range_start"/>–<t t-out="range_end"/>
