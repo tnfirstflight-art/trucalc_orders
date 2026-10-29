@@ -1,4 +1,28 @@
 :is(.o_trucalc_bank_shell, .o_trucalc_vendor_shell) {
+    :is(.o_trucalc_bank_filters, .o_trucalc_vendor_filters) {
+        .o_trucalc_portal_categories > .btn,
+        .o_trucalc_order_searchbar > .form-control,
+        .o_trucalc_order_searchbar > .o_trucalc_filter_toggle {
+            height: 34px;
+            border-radius: var(--border-radius, 0.375rem);
+            font-size: 13px;
+        }
+
+        .o_trucalc_portal_categories > .btn,
+        .o_trucalc_order_searchbar > .o_trucalc_filter_toggle {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.375rem 0.625rem;
+            line-height: 1.25;
+        }
+
+        .o_trucalc_order_searchbar > .form-control {
+            padding: 0.375rem 0.75rem;
+            line-height: 1.25;
+        }
+    }
+
     .o_trucalc_portal_categories {
         display: flex;
         flex: 1 1 100%;

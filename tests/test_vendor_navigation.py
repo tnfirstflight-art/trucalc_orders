@@ -269,6 +269,16 @@ class TestVendorNavigation(TestVendorOrderPortal):
                 const form = search?.form;
                 const searchbar = form?.querySelector('.o_trucalc_order_searchbar');
                 if (!toggle || !panel || !categories || !listHeader || !sortLink || !sortIcon || !form || !searchbar) throw Error('UX controls missing');
+                const measuredControls = [...controls, search, toggle];
+                if (measuredControls.some(control => !control)) throw Error('Sized controls missing');
+                if (measuredControls.some(control => Math.abs(control.getBoundingClientRect().height - 34) > .1)) throw Error('Control height is not 34px');
+                if (measuredControls.some(control => getComputedStyle(control).fontSize !== '13px')) throw Error('Control font size is not 13px');
+                if (controls.concat(toggle).some(control => getComputedStyle(control).alignItems !== 'center')) throw Error('Button contents are not vertically centered');
+                console.info('TRUCALC_MEASUREMENTS ' + JSON.stringify({
+                    viewport: `${innerWidth}x${innerHeight}`,
+                    heights: measuredControls.map(control => control.getBoundingClientRect().height),
+                    fontSizes: measuredControls.map(control => getComputedStyle(control).fontSize),
+                }));
                 if (!header.contains(form)) throw Error('Toolbar is not sticky');
                 if (document.querySelector('.o_trucalc_vendor_portal')?.contains(form)) throw Error('Toolbar remains in page content');
                 if (panel.classList.contains('show')) throw Error('Filters initially open');
