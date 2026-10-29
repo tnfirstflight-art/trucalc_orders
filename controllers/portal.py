@@ -12,6 +12,59 @@ from odoo.http import content_disposition
 from odoo.addons.portal.controllers.portal import CustomerPortal, pager as portal_pager
 
 from ..models.document import MAX_DOCUMENT_BYTES
+from ..models.res_users import (
+    BANK_PORTAL_COLUMN_KEYS,
+    VENDOR_PORTAL_COLUMN_KEYS,
+)
+
+
+BANK_PORTAL_COLUMNS = (
+    ("order_number", "Order Number"),
+    ("borrower", "Borrower"),
+    ("property_address", "Property Address"),
+    ("loan_number", "Loan Number"),
+    ("loan_purpose", "Loan Purpose"),
+    ("service_type", "Service Type"),
+    ("status", "Status"),
+    ("request_date", "Request Date"),
+    ("anticipated_delivery_date", "Anticipated Delivery Date"),
+    ("completion_date", "Completion Date"),
+    ("fee", "Fee"),
+)
+VENDOR_PORTAL_COLUMNS = (
+    ("order_number", "Order Number"),
+    ("borrower", "Borrower"),
+    ("property_address", "Property Address"),
+    ("loan_purpose", "Loan Purpose"),
+    ("service_type", "Service Type"),
+    ("status", "Status"),
+    ("invitation_date", "Invitation Date"),
+    ("bid_due_date", "Bid Due Date"),
+    ("agreed_vendor_fee", "Agreed Vendor Fee"),
+    ("delivery_due_date", "Delivery Due Date"),
+    ("response", "Response"),
+)
+BANK_PORTAL_DEFAULTS = {
+    "administrator": (
+        "order_number", "borrower", "property_address", "service_type",
+        "status", "anticipated_delivery_date", "fee",
+    ),
+    "requestor": (
+        "order_number", "borrower", "property_address", "loan_purpose",
+        "service_type", "status", "anticipated_delivery_date",
+    ),
+    "view_only": (
+        "order_number", "borrower", "property_address", "service_type",
+        "status", "anticipated_delivery_date",
+    ),
+}
+VENDOR_PORTAL_DEFAULTS = (
+    "order_number", "borrower", "property_address", "loan_purpose",
+    "service_type", "status", "delivery_due_date", "response",
+)
+
+assert tuple(key for key, _label in BANK_PORTAL_COLUMNS) == BANK_PORTAL_COLUMN_KEYS
+assert tuple(key for key, _label in VENDOR_PORTAL_COLUMNS) == VENDOR_PORTAL_COLUMN_KEYS
 
 
 class TruCalcVendorPortal(CustomerPortal):
@@ -28,8 +81,12 @@ class TruCalcVendorPortal(CustomerPortal):
         "order_number": "order_number",
         "borrower": "borrower",
         "property_address": "property_address",
+        "loan_number": "loan_number",
+        "loan_purpose": "loan_purpose",
         "service_type": "service_type",
+        "request_date": "order_date",
         "due_date": "due_date",
+        "fee": "current_agreed_fee",
         "status": "status",
     }
     _vendor_sort_fields = {
@@ -39,10 +96,142 @@ class TruCalcVendorPortal(CustomerPortal):
         "service_type": "service_type",
         "borrower": "borrower",
         "property_address": "property_address",
+        "loan_purpose": "loan_purpose",
         "status": "vendor_status",
         "response": "vendor_response_label",
         "due_date": "delivery_due_date",
+        "invitation_date": "invitation_date",
+        "bid_due_date": "response_deadline",
+        "agreed_vendor_fee": "agreed_vendor_fee",
     }
+
+    _column_return_keys = frozenset({
+        "filterby", "search", "status", "service", "date_field",
+        "date_from", "date_to", "sort", "direction", "page",
+    })
+
+    def _portal_column_spec(self, kind):
+        if kind == "bank":
+            role = request.env.user._trucalc_bank_role_key()
+            return {
+                "columns": BANK_PORTAL_COLUMNS,
+                "defaults": BANK_PORTAL_DEFAULTS.get(role, ("order_number",)),
+                "field": "trucalc_bank_portal_columns",
+                "route": "/my/trucalc/bank/columns",
+                "base_url": "/my/trucalc/bank/orders",
+                "filter_keys": self._bank_order_filter_keys,
+                "sort_fields": self._bank_sort_fields,
+            }
+        return {
+            "columns": VENDOR_PORTAL_COLUMNS,
+            "defaults": VENDOR_PORTAL_DEFAULTS,
+            "field": "trucalc_vendor_portal_columns",
+            "route": "/my/trucalc/vendor/columns",
+            "base_url": "/my/trucalc/orders",
+            "filter_keys": self._vendor_order_filter_keys,
+            "sort_fields": self._vendor_sort_fields,
+        }
+
+    def _normalize_portal_columns(self, kind, selected):
+        spec = self._portal_column_spec(kind)
+        selected = set(selected if isinstance(selected, (list, tuple)) else ())
+        return tuple(
+            key for key, _label in spec["columns"]
+            if key == "order_number" or key in selected
+        )
+
+    def _portal_column_values(self, kind, page):
+        spec = self._portal_column_spec(kind)
+        saved = getattr(request.env.user.sudo(), spec["field"])
+        selected = (
+            self._normalize_portal_columns(kind, saved)
+            if isinstance(saved, (list, tuple))
+            else tuple(spec["defaults"])
+        )
+        return {
+            "portal_columns": selected,
+            "portal_column_options": tuple({
+                "key": key,
+                "label": label,
+                "mandatory": key == "order_number",
+            } for key, label in spec["columns"]),
+            "portal_column_route": spec["route"],
+            "portal_column_page": max(int(page), 1),
+            "portal_column_menu_id": "trucalc-%s-column-menu" % kind,
+        }
+
+    def _portal_column_redirect(self, kind, form):
+        spec = self._portal_column_spec(kind)
+        filterby = (form.get("filterby") or "").strip()
+        if filterby not in spec["filter_keys"]:
+            filterby = "open" if kind == "bank" else "active"
+        sort = (form.get("sort") or "").strip()
+        if sort not in spec["sort_fields"]:
+            sort = "order_number"
+        direction = (form.get("direction") or "").strip().lower()
+        if direction not in ("asc", "desc"):
+            direction = "asc"
+        values = {
+            "filterby": filterby,
+            "search": (form.get("search") or "").strip()[:self._portal_search_limit],
+            "status": (form.get("status") or "").strip()[:64],
+            "service": (form.get("service") or "").strip()[:64],
+            "date_field": (form.get("date_field") or "").strip()[:64],
+            "date_from": (form.get("date_from") or "").strip()[:10],
+            "date_to": (form.get("date_to") or "").strip()[:10],
+            "sort": sort,
+            "direction": direction,
+        }
+        try:
+            page = max(int(form.get("page") or 1), 1)
+        except (TypeError, ValueError):
+            page = 1
+        base_url = spec["base_url"]
+        if page > 1:
+            base_url = "%s/page/%s" % (base_url, page)
+        return self._portal_url(base_url, values)
+
+    def _update_portal_columns(self, kind):
+        form = request.httprequest.form
+        if set(form) - (self._column_return_keys | {
+            "csrf_token", "columns", "column_action",
+        }):
+            raise request.not_found()
+        spec = self._portal_column_spec(kind)
+        if form.get("column_action") == "reset":
+            value = False
+        else:
+            value = list(self._normalize_portal_columns(
+                kind, form.getlist("columns"),
+            ))
+        request.env.user.sudo().write({spec["field"]: value})
+        return request.redirect(self._portal_column_redirect(kind, form))
+
+    @http.route(
+        "/my/trucalc/bank/columns", type="http", auth="user", website=True,
+        methods=["POST"], csrf=True,
+    )
+    def portal_bank_columns(self, **post):
+        if not self._is_trucalc_bank():
+            raise request.not_found()
+        try:
+            request.env.user._trucalc_bank_identity()
+        except AccessError:
+            raise request.not_found()
+        return self._update_portal_columns("bank")
+
+    @http.route(
+        "/my/trucalc/vendor/columns", type="http", auth="user", website=True,
+        methods=["POST"], csrf=True,
+    )
+    def portal_vendor_columns(self, **post):
+        if not self._is_trucalc_vendor():
+            raise request.not_found()
+        try:
+            request.env.user._trucalc_vendor_identity()
+        except AccessError:
+            raise request.not_found()
+        return self._update_portal_columns("vendor")
 
     def _selection_options(self, model_name, field_name):
         field = request.env[model_name]._fields[field_name]
@@ -397,6 +586,7 @@ class TruCalcVendorPortal(CustomerPortal):
                 ("delivery_due", "Delivery Due Date"),
             ),
         ))
+        values.update(self._portal_column_values("vendor", page))
         return request.render("trucalc_orders.portal_my_trucalc_orders", values)
 
     @http.route(
@@ -828,17 +1018,32 @@ class TruCalcVendorPortal(CustomerPortal):
             page=page, step=self._portal_order_page_size,
             url_args=pager_args,
         )
+        orders = model.search(
+            domain,
+            order=query_values["order"],
+            limit=self._portal_order_page_size,
+            offset=pager["offset"],
+        )
+        column_values = self._portal_column_values("bank", page)
+        completion_dates = {}
+        if orders and "completion_date" in column_values["portal_columns"]:
+            completion_events = request.env[
+                "trucalc.order.lifecycle.event"
+            ].sudo().search([
+                ("order_id", "in", orders.ids),
+                ("company_id", "=", bank.id),
+                ("event_type", "=", "order_completed"),
+            ])
+            completion_dates = {
+                event.order_id.id: event.event_at for event in completion_events
+            }
         values = self._prepare_portal_layout_values()
         values.update({
             "page_name": "trucalc_bank_orders",
-            "orders": model.search(
-                domain,
-                order=query_values["order"],
-                limit=self._portal_order_page_size,
-                offset=pager["offset"],
-            ),
+            "orders": orders,
             "can_submit": self._can_create_bank_draft(),
             "filterby": filterby,
+            "completion_dates": completion_dates,
             "empty_message": {
                 "open": "No open TruCalc requests.",
                 "recent_completed": "No requests were completed in the last 30 days.",
@@ -875,6 +1080,7 @@ class TruCalcVendorPortal(CustomerPortal):
             sort_fields=self._bank_sort_fields,
             date_options=(("request", "Request Date"),),
         ))
+        values.update(column_values)
         return request.render("trucalc_orders.portal_bank_orders", values)
 
     @http.route(

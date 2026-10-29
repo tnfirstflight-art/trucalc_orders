@@ -290,7 +290,7 @@ class TestVendorOrderPortal(HttpCase):
             "//a[contains(@href, '%s')]/ancestor::tr[1]" % order.order_number
         )[0]
         row_text = " ".join(row.itertext())
-        self.assertIn("Bid Requested", row_text)
+        self.assertIn("Open for Bid", row_text)
         self.assertIn("Open for Response", row_text)
 
         detail = self.url_open(

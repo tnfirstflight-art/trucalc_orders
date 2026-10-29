@@ -277,7 +277,9 @@ class TestBankNavigation(TestBankOrderPortal):
                 const search = document.querySelector('#trucalc-order-search');
                 const form = search?.form;
                 const searchbar = form?.querySelector('.o_trucalc_order_searchbar');
-                if (!toggle || !panel || !stickyHeader || !categories || !header || !link || !icon || !form || !searchbar) throw Error('UX controls missing');
+                const columnToggle = document.querySelector('.o_trucalc_column_toggle');
+                const columnMenu = document.querySelector('.o_trucalc_column_dropdown');
+                if (!toggle || !panel || !stickyHeader || !categories || !header || !link || !icon || !form || !searchbar || !columnToggle || !columnMenu) throw Error('UX controls missing');
                 const navControls = [...categories.querySelectorAll('a[data-filter-key]')];
                 const measuredControls = [...navControls, search, toggle];
                 if (navControls.length !== 4 || measuredControls.some(control => !control)) throw Error('Sized controls missing');
@@ -290,6 +292,7 @@ class TestBankNavigation(TestBankOrderPortal):
                     fontSizes: measuredControls.map(control => getComputedStyle(control).fontSize),
                 }));
                 if (!stickyHeader.contains(form)) throw Error('Toolbar is not sticky');
+                if (stickyHeader.contains(columnToggle)) throw Error('Column menu is in sticky navigation');
                 if (document.querySelector('.o_trucalc_bank_portal')?.contains(form)) throw Error('Toolbar remains in page content');
                 if (getComputedStyle(stickyHeader).position !== 'sticky') throw Error('Header is not sticky');
                 if (panel.classList.contains('show')) throw Error('Filters initially open');
@@ -314,6 +317,12 @@ class TestBankNavigation(TestBankOrderPortal):
                 } else if (searchbarRect.top < categoryRect.bottom - 1) {
                     throw Error('Narrow controls did not wrap below navigation');
                 }
+                columnToggle.click();
+                if (!columnMenu.classList.contains('show')) throw Error('Column menu did not open');
+                const columnMenuRect = columnMenu.getBoundingClientRect();
+                if (columnMenuRect.left < -1 || columnMenuRect.right > innerWidth + 1) throw Error('Column menu overflow');
+                if (columnMenuRect.bottom > innerHeight + 1) throw Error('Column menu clipped');
+                columnToggle.click();
                 let clearSubmitted = false;
                 form.submit = () => { clearSubmitted = true; };
                 search.value = 'unsubmitted search';

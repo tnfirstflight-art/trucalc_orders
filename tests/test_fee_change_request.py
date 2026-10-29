@@ -315,17 +315,36 @@ class TestFeeChangePortal(TestBankOrderPortal):
             row = tree.xpath(row_xpath)
             self.assertEqual(len(row), 1)
             headers = row[0].xpath('ancestor::table[1]/thead/tr/th')
-            self.assertEqual([h.text_content().strip() for h in headers],
-                             ['Order Number', 'Borrower', 'Property Address', 'Service Type', 'Client Due Date', 'Status'])
-            self.assertEqual(len(row[0].xpath('./td')), 6)
-            status_cell = row[0].xpath('./td')[5]
-            self.assertEqual(status_cell.xpath('./div')[0].text_content().strip(), 'Accepted')
-            self.assertEqual(status_cell.xpath('./div')[1].get('class'), 'mt-1')
+            header_labels = [h.text_content().strip() for h in headers]
+            expected = {
+                self.bank_requestor: [
+                    'Order Number', 'Borrower', 'Property Address', 'Loan Purpose',
+                    'Service Type', 'Status', 'Anticipated Delivery Date',
+                ],
+                self.bank_viewer: [
+                    'Order Number', 'Borrower', 'Property Address', 'Service Type',
+                    'Status', 'Anticipated Delivery Date',
+                ],
+                self.bank_admin: [
+                    'Order Number', 'Borrower', 'Property Address', 'Service Type',
+                    'Status', 'Anticipated Delivery Date', 'Fee',
+                ],
+            }[actor]
+            self.assertEqual(header_labels, expected)
+            cells = row[0].xpath('./td')
+            self.assertEqual(len(cells), len(expected))
+            status_cell = cells[expected.index('Status')]
+            self.assertEqual(status_cell.text_content().strip(), 'Accepted')
+            order_cell = cells[0]
+            self.assertEqual(order_cell.xpath('./div')[0].get('class'), 'mt-1')
             can_decide = actor in (self.bank_requestor, self.bank_admin)
-            self.assertEqual(len(status_cell.xpath('./div[2]//button')),
+            self.assertEqual(len(order_cell.xpath('./div[1]//button')),
                              int(can_decide))
             if not can_decide:
-                self.assertEqual(status_cell.xpath('./div[2]')[0].text_content().strip(), 'Pending Fee Change')
+                self.assertEqual(
+                    order_cell.xpath('./div[1]')[0].text_content().strip(),
+                    'Pending Fee Change',
+                )
             self.assertIn('o_trucalc_fee_pending', row[0].get('class', ''))
             buttons = row[0].xpath(".//button[normalize-space()='Fee Change']")
             self.assertEqual(len(buttons), int(can_decide))
@@ -376,8 +395,13 @@ class TestFeeChangePortal(TestBankOrderPortal):
         row = html.fromstring(response.content).xpath(row_xpath)[0]
         self.assertNotIn('o_trucalc_fee_pending', row.get('class', ''))
         self.assertFalse(row.xpath('.//button'))
-        self.assertEqual(len(row.xpath('./td')), 6)
-        self.assertEqual(row.xpath('./td')[5].text_content().strip(), 'Accepted')
+        headers = [
+            item.text_content().strip()
+            for item in row.xpath('ancestor::table[1]/thead/tr/th')
+        ]
+        cells = row.xpath('./td')
+        self.assertEqual(len(cells), len(headers))
+        self.assertEqual(cells[headers.index('Status')].text_content().strip(), 'Accepted')
         order.invalidate_recordset()
         self.assertEqual((order.agreed_fee, order.current_agreed_fee), (500, 650))
         rid = order.with_user(self.admin).action_request_fee_change(725, 'More scope')

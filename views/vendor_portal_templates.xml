@@ -149,6 +149,56 @@
         </th>
     </template>
 
+    <template id="portal_column_configuration" name="TruCalc Portal Column Configuration">
+        <div class="dropdown o_trucalc_column_menu">
+            <button type="button"
+                    class="btn o_trucalc_column_toggle"
+                    data-bs-toggle="dropdown"
+                    data-bs-auto-close="outside"
+                    data-bs-boundary="viewport"
+                    aria-expanded="false"
+                    t-att-aria-controls="portal_column_menu_id"
+                    aria-label="Configure Order list columns"
+                    title="Configure columns">
+                <i class="oi oi-fw oi-settings-adjust" aria-hidden="true"/>
+            </button>
+            <div t-att-id="portal_column_menu_id"
+                 class="dropdown-menu dropdown-menu-end o_trucalc_column_dropdown p-3">
+                <form method="post" t-att-action="portal_column_route">
+                    <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
+                    <input type="hidden" name="page" t-att-value="portal_column_page"/>
+                    <t t-foreach="list_query.items()" t-as="query_item">
+                        <input t-if="query_item[1]" type="hidden"
+                               t-att-name="query_item[0]" t-att-value="query_item[1]"/>
+                    </t>
+                    <div class="fw-semibold mb-2">Visible columns</div>
+                    <div class="o_trucalc_column_choices">
+                        <div t-foreach="portal_column_options" t-as="option"
+                             class="form-check mb-1">
+                            <input type="checkbox" name="columns"
+                                   class="form-check-input"
+                                   t-att-id="'%s-%s' % (portal_column_menu_id, option['key'])"
+                                   t-att-value="option['key']"
+                                   t-att-checked="option['key'] in portal_columns"
+                                   t-att-disabled="option['mandatory']"/>
+                            <label class="form-check-label"
+                                   t-att-for="'%s-%s' % (portal_column_menu_id, option['key'])">
+                                <t t-out="option['label']"/>
+                                <span t-if="option['mandatory']" class="text-muted">(required)</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="d-flex gap-2 mt-3">
+                        <button type="submit" name="column_action" value="apply"
+                                class="btn btn-primary btn-sm flex-grow-1">Apply</button>
+                        <button type="submit" name="column_action" value="reset"
+                                class="btn btn-outline-primary btn-sm">Reset to Default</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </template>
+
     <template id="portal_my_trucalc_orders" name="My TruCalc Orders">
         <t t-call="trucalc_orders.vendor_portal_layout">
             <t t-set="no_breadcrumbs" t-value="True"/>
@@ -171,53 +221,63 @@
                 <t t-out="empty_message"/>
             </div>
 
-            <t t-if="projections" t-call="portal.portal_table">
-                <thead class="o_trucalc_order_list_header">
-                    <tr>
-                        <t t-set="sort_key" t-value="'order_number'"/><t t-set="sort_label" t-value="'Order'"/><t t-call="trucalc_orders.portal_sortable_header"/>
-                        <t t-set="sort_key" t-value="'service_type'"/><t t-set="sort_label" t-value="'Service'"/><t t-call="trucalc_orders.portal_sortable_header"/>
-                        <t t-set="sort_key" t-value="'borrower'"/><t t-set="sort_label" t-value="'Borrower'"/><t t-call="trucalc_orders.portal_sortable_header"/>
-                        <t t-set="sort_key" t-value="'property_address'"/><t t-set="sort_label" t-value="'Property'"/><t t-call="trucalc_orders.portal_sortable_header"/>
-                        <t t-set="sort_key" t-value="'status'"/><t t-set="sort_label" t-value="'Status'"/><t t-call="trucalc_orders.portal_sortable_header"/>
-                        <t t-set="sort_key" t-value="'response'"/><t t-set="sort_label" t-value="'Response'"/><t t-call="trucalc_orders.portal_sortable_header"/>
-                        <t t-set="sort_key" t-value="'due_date'"/><t t-set="sort_label" t-value="'Due'"/><t t-call="trucalc_orders.portal_sortable_header"/>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr t-foreach="projections" t-as="projection">
-                        <td>
-                            <a t-att-href="'/my/trucalc/orders/%s' % projection.order_number">
-                                <t t-out="projection.order_number"/>
-                            </a>
-                        </td>
-                        <td><span t-field="projection.service_type"/></td>
-                        <td><span t-field="projection.borrower"/></td>
-                        <td>
-                            <div t-out="projection.property_address"/>
-                            <small class="text-muted">
-                                <t t-out="projection.city"/>,
-                                <t t-out="projection.state"/>
-                                <t t-out="projection.zip_code"/>
-                            </small>
-                        </td>
-                        <td>
-                            <span t-field="projection.order_status"/>
-                            <div t-if="projection.order_status == 'under_review' and projection.review_indicator"
-                                 class="text-muted small">
-                                <span t-field="projection.review_indicator"/>
-                            </div>
-                        </td>
-                        <td><t t-out="projection.vendor_response_label or '—'"/></td>
-                        <td>
-                            <span t-if="projection.vendor_phase == 'assignment' and projection.vendor_delivery_date"
-                                  t-field="projection.vendor_delivery_date"/>
-                            <span t-elif="projection.vendor_phase != 'assignment' and projection.response_deadline"
-                                  t-field="projection.response_deadline"/>
-                            <span t-else="">—</span>
-                        </td>
-                    </tr>
-                </tbody>
-            </t>
+            <div t-if="projections" class="o_trucalc_configurable_table">
+                <t t-call="trucalc_orders.portal_column_configuration"/>
+                <t t-call="portal.portal_table">
+                    <thead class="o_trucalc_order_list_header">
+                        <tr>
+                            <t t-if="'order_number' in portal_columns"><t t-set="sort_key" t-value="'order_number'"/><t t-set="sort_label" t-value="'Order Number'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
+                            <t t-if="'borrower' in portal_columns"><t t-set="sort_key" t-value="'borrower'"/><t t-set="sort_label" t-value="'Borrower'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
+                            <t t-if="'property_address' in portal_columns"><t t-set="sort_key" t-value="'property_address'"/><t t-set="sort_label" t-value="'Property Address'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
+                            <t t-if="'loan_purpose' in portal_columns"><t t-set="sort_key" t-value="'loan_purpose'"/><t t-set="sort_label" t-value="'Loan Purpose'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
+                            <t t-if="'service_type' in portal_columns"><t t-set="sort_key" t-value="'service_type'"/><t t-set="sort_label" t-value="'Service Type'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
+                            <t t-if="'status' in portal_columns"><t t-set="sort_key" t-value="'status'"/><t t-set="sort_label" t-value="'Status'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
+                            <t t-if="'invitation_date' in portal_columns"><t t-set="sort_key" t-value="'invitation_date'"/><t t-set="sort_label" t-value="'Invitation Date'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
+                            <t t-if="'bid_due_date' in portal_columns"><t t-set="sort_key" t-value="'bid_due_date'"/><t t-set="sort_label" t-value="'Bid Due Date'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
+                            <t t-if="'agreed_vendor_fee' in portal_columns"><t t-set="sort_key" t-value="'agreed_vendor_fee'"/><t t-set="sort_label" t-value="'Agreed Vendor Fee'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
+                            <t t-if="'delivery_due_date' in portal_columns"><t t-set="sort_key" t-value="'due_date'"/><t t-set="sort_label" t-value="'Delivery Due Date'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
+                            <t t-if="'response' in portal_columns"><t t-set="sort_key" t-value="'response'"/><t t-set="sort_label" t-value="'Response'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr t-foreach="projections" t-as="projection">
+                            <td t-if="'order_number' in portal_columns" data-column="order_number">
+                                <a t-att-href="'/my/trucalc/orders/%s' % projection.order_number">
+                                    <t t-out="projection.order_number"/>
+                                </a>
+                            </td>
+                            <td t-if="'borrower' in portal_columns" data-column="borrower"><t t-out="projection.borrower"/></td>
+                            <td t-if="'property_address' in portal_columns" data-column="property_address">
+                                <div t-out="projection.property_address"/>
+                                <small class="text-muted">
+                                    <t t-out="projection.city"/>,
+                                    <t t-out="projection.state"/>
+                                    <t t-out="projection.zip_code"/>
+                                </small>
+                            </td>
+                            <td t-if="'loan_purpose' in portal_columns" data-column="loan_purpose"><span t-field="projection.loan_purpose"/></td>
+                            <td t-if="'service_type' in portal_columns" data-column="service_type"><span t-field="projection.service_type"/></td>
+                            <td t-if="'status' in portal_columns" data-column="status">
+                                <span t-field="projection.vendor_status"/>
+                                <div t-if="projection.order_status == 'under_review' and projection.review_indicator"
+                                     class="text-muted small">
+                                    <span t-field="projection.review_indicator"/>
+                                </div>
+                            </td>
+                            <td t-if="'invitation_date' in portal_columns" data-column="invitation_date"><span t-if="projection.invitation_date" t-field="projection.invitation_date"/><span t-else="">—</span></td>
+                            <td t-if="'bid_due_date' in portal_columns" data-column="bid_due_date"><span t-if="projection.response_deadline" t-field="projection.response_deadline"/><span t-else="">—</span></td>
+                            <td t-if="'agreed_vendor_fee' in portal_columns" data-column="agreed_vendor_fee">
+                                <span t-if="projection.vendor_phase == 'assignment' and projection.currency_id"
+                                      t-out="projection.agreed_vendor_fee"
+                                      t-options="{'widget': 'monetary', 'display_currency': projection.currency_id}"/>
+                                <span t-else="">—</span>
+                            </td>
+                            <td t-if="'delivery_due_date' in portal_columns" data-column="delivery_due_date"><span t-if="projection.delivery_due_date" t-field="projection.delivery_due_date"/><span t-else="">—</span></td>
+                            <td t-if="'response' in portal_columns" data-column="response"><t t-out="projection.vendor_response_label or '—'"/></td>
+                        </tr>
+                    </tbody>
+                </t>
+            </div>
 
             </div>
         </t>
@@ -679,44 +739,59 @@
             <div t-if="not orders" class="alert alert-info" role="status">
                 <t t-out="empty_message"/>
             </div>
-            <t t-if="orders" t-call="portal.portal_table">
-                <thead class="o_trucalc_order_list_header">
-                    <tr>
-                        <t t-set="sort_key" t-value="'order_number'"/><t t-set="sort_label" t-value="'Order Number'"/><t t-call="trucalc_orders.portal_sortable_header"/>
-                        <t t-set="sort_key" t-value="'borrower'"/><t t-set="sort_label" t-value="'Borrower'"/><t t-call="trucalc_orders.portal_sortable_header"/>
-                        <t t-set="sort_key" t-value="'property_address'"/><t t-set="sort_label" t-value="'Property Address'"/><t t-call="trucalc_orders.portal_sortable_header"/>
-                        <t t-set="sort_key" t-value="'service_type'"/><t t-set="sort_label" t-value="'Service Type'"/><t t-call="trucalc_orders.portal_sortable_header"/>
-                        <t t-set="sort_key" t-value="'due_date'"/><t t-set="sort_label" t-value="'Client Due Date'"/><t t-call="trucalc_orders.portal_sortable_header"/>
-                        <t t-set="sort_key" t-value="'status'"/><t t-set="sort_label" t-value="'Status'"/><t t-call="trucalc_orders.portal_sortable_header"/>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr t-foreach="orders" t-as="order" t-att-data-order-id="order.id"
-                        t-att-class="'o_trucalc_fee_pending' if order.id in pending_fees else ''">
-                        <td>
-                            <a t-att-href="'/my/trucalc/bank/orders/%s/documents' % order.order_number">
-                                <t t-out="order.order_number"/>
-                            </a>
-                            <span t-if="order.status == 'draft'" class="badge text-bg-secondary ms-1">Resume Draft</span>
-                        </td>
-                        <td><t t-out="order.borrower"/></td>
-                        <td><t t-out="order.property_address"/></td>
-                        <td><span t-field="order.service_type"/></td>
-                        <td><span t-if="order.due_date" t-field="order.due_date"/></td>
-                        <td>
-                            <div><span t-field="order.status"/></div>
-                            <div t-if="order.id in pending_fees" class="mt-1">
-                            <button t-if="can_decide_fee"
-                                    type="button" class="btn btn-sm btn-primary text-nowrap"
-                                    data-bs-toggle="modal" t-att-data-bs-target="'#fee-change-%s' % order.id">
-                                Fee Change
-                            </button>
-                            <span t-else="" class="small text-nowrap">Pending Fee Change</span>
-                            </div>
-                        </td>
-                    </tr>
-                </tbody>
-            </t>
+            <div t-if="orders" class="o_trucalc_configurable_table">
+                <t t-call="trucalc_orders.portal_column_configuration"/>
+                <t t-call="portal.portal_table">
+                    <thead class="o_trucalc_order_list_header">
+                        <tr>
+                            <t t-if="'order_number' in portal_columns"><t t-set="sort_key" t-value="'order_number'"/><t t-set="sort_label" t-value="'Order Number'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
+                            <t t-if="'borrower' in portal_columns"><t t-set="sort_key" t-value="'borrower'"/><t t-set="sort_label" t-value="'Borrower'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
+                            <t t-if="'property_address' in portal_columns"><t t-set="sort_key" t-value="'property_address'"/><t t-set="sort_label" t-value="'Property Address'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
+                            <t t-if="'loan_number' in portal_columns"><t t-set="sort_key" t-value="'loan_number'"/><t t-set="sort_label" t-value="'Loan Number'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
+                            <t t-if="'loan_purpose' in portal_columns"><t t-set="sort_key" t-value="'loan_purpose'"/><t t-set="sort_label" t-value="'Loan Purpose'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
+                            <t t-if="'service_type' in portal_columns"><t t-set="sort_key" t-value="'service_type'"/><t t-set="sort_label" t-value="'Service Type'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
+                            <t t-if="'status' in portal_columns"><t t-set="sort_key" t-value="'status'"/><t t-set="sort_label" t-value="'Status'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
+                            <t t-if="'request_date' in portal_columns"><t t-set="sort_key" t-value="'request_date'"/><t t-set="sort_label" t-value="'Request Date'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
+                            <t t-if="'anticipated_delivery_date' in portal_columns"><t t-set="sort_key" t-value="'due_date'"/><t t-set="sort_label" t-value="'Anticipated Delivery Date'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
+                            <th t-if="'completion_date' in portal_columns">Completion Date</th>
+                            <t t-if="'fee' in portal_columns"><t t-set="sort_key" t-value="'fee'"/><t t-set="sort_label" t-value="'Fee'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr t-foreach="orders" t-as="order" t-att-data-order-id="order.id"
+                            t-att-class="'o_trucalc_fee_pending' if order.id in pending_fees else ''">
+                            <td t-if="'order_number' in portal_columns">
+                                <a t-att-href="'/my/trucalc/bank/orders/%s/documents' % order.order_number">
+                                    <t t-out="order.order_number"/>
+                                </a>
+                                <span t-if="order.status == 'draft'" class="badge text-bg-secondary ms-1">Resume Draft</span>
+                                <div t-if="order.id in pending_fees" class="mt-1">
+                                    <button t-if="can_decide_fee"
+                                            type="button" class="btn btn-sm btn-primary text-nowrap"
+                                            data-bs-toggle="modal" t-att-data-bs-target="'#fee-change-%s' % order.id">
+                                        Fee Change
+                                    </button>
+                                    <span t-else="" class="small text-nowrap">Pending Fee Change</span>
+                                </div>
+                            </td>
+                            <td t-if="'borrower' in portal_columns"><t t-out="order.borrower"/></td>
+                            <td t-if="'property_address' in portal_columns"><t t-out="order.property_address"/></td>
+                            <td t-if="'loan_number' in portal_columns"><t t-out="order.loan_number or '—'"/></td>
+                            <td t-if="'loan_purpose' in portal_columns"><span t-if="order.loan_purpose" t-field="order.loan_purpose"/><span t-else="">—</span></td>
+                            <td t-if="'service_type' in portal_columns"><span t-field="order.service_type"/></td>
+                            <td t-if="'status' in portal_columns"><span t-field="order.status"/></td>
+                            <td t-if="'request_date' in portal_columns"><span t-if="order.status != 'draft' and order.order_date" t-field="order.order_date"/><span t-else="">—</span></td>
+                            <td t-if="'anticipated_delivery_date' in portal_columns"><span t-if="order.due_date" t-field="order.due_date"/><span t-else="">—</span></td>
+                            <td t-if="'completion_date' in portal_columns"><span t-if="completion_dates.get(order.id)" t-out="completion_dates[order.id]" t-options="{'widget': 'date'}"/><span t-else="">—</span></td>
+                            <td t-if="'fee' in portal_columns">
+                                <span t-if="order.fee_currency_id" t-out="order.current_agreed_fee"
+                                      t-options="{'widget': 'monetary', 'display_currency': order.fee_currency_id}"/>
+                                <span t-else="">—</span>
+                            </td>
+                        </tr>
+                    </tbody>
+                </t>
+            </div>
             <t t-if="can_decide_fee" t-foreach="orders" t-as="order">
                 <t t-if="order.id in pending_fees">
                     <t t-set="fee" t-value="pending_fees[order.id]"/>

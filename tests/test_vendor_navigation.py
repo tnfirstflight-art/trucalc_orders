@@ -212,7 +212,9 @@ class TestVendorNavigation(TestVendorOrderPortal):
             "/my/trucalc/orders?%s" % urlencode(filter_query)
         ).content)
         borrowers = [
-            value.strip() for value in ascending.xpath("//table/tbody/tr/td[3]//text()")
+            value.strip() for value in ascending.xpath(
+                "//table/tbody/tr/td[@data-column='borrower']//text()"
+            )
             if value.strip()
         ]
         self.assertEqual(borrowers, sorted(borrowers))
@@ -222,7 +224,9 @@ class TestVendorNavigation(TestVendorOrderPortal):
             "/my/trucalc/orders?%s" % urlencode(filter_query)
         ).content)
         borrowers_desc = [
-            value.strip() for value in descending.xpath("//table/tbody/tr/td[3]//text()")
+            value.strip() for value in descending.xpath(
+                "//table/tbody/tr/td[@data-column='borrower']//text()"
+            )
             if value.strip()
         ]
         self.assertEqual(borrowers_desc, sorted(borrowers_desc, reverse=True))
@@ -268,7 +272,9 @@ class TestVendorNavigation(TestVendorOrderPortal):
                 const search = document.querySelector('#trucalc-order-search');
                 const form = search?.form;
                 const searchbar = form?.querySelector('.o_trucalc_order_searchbar');
-                if (!toggle || !panel || !categories || !listHeader || !sortLink || !sortIcon || !form || !searchbar) throw Error('UX controls missing');
+                const columnToggle = document.querySelector('.o_trucalc_column_toggle');
+                const columnMenu = document.querySelector('.o_trucalc_column_dropdown');
+                if (!toggle || !panel || !categories || !listHeader || !sortLink || !sortIcon || !form || !searchbar || !columnToggle || !columnMenu) throw Error('UX controls missing');
                 const measuredControls = [...controls, search, toggle];
                 if (measuredControls.some(control => !control)) throw Error('Sized controls missing');
                 if (measuredControls.some(control => Math.abs(control.getBoundingClientRect().height - 34) > .1)) throw Error('Control height is not 34px');
@@ -280,6 +286,7 @@ class TestVendorNavigation(TestVendorOrderPortal):
                     fontSizes: measuredControls.map(control => getComputedStyle(control).fontSize),
                 }));
                 if (!header.contains(form)) throw Error('Toolbar is not sticky');
+                if (header.contains(columnToggle)) throw Error('Column menu is in sticky navigation');
                 if (document.querySelector('.o_trucalc_vendor_portal')?.contains(form)) throw Error('Toolbar remains in page content');
                 if (panel.classList.contains('show')) throw Error('Filters initially open');
                 if (toggle.getAttribute('aria-expanded') !== 'false') throw Error('Initial collapse state');
@@ -302,6 +309,12 @@ class TestVendorNavigation(TestVendorOrderPortal):
                 } else if (searchbarRect.top < categoryRect.bottom - 1) {
                     throw Error('Narrow controls did not wrap below navigation');
                 }
+                columnToggle.click();
+                if (!columnMenu.classList.contains('show')) throw Error('Column menu did not open');
+                const columnMenuRect = columnMenu.getBoundingClientRect();
+                if (columnMenuRect.left < -1 || columnMenuRect.right > innerWidth + 1) throw Error('Column menu overflow');
+                if (columnMenuRect.bottom > innerHeight + 1) throw Error('Column menu clipped');
+                columnToggle.click();
                 let clearSubmitted = false;
                 form.submit = () => { clearSubmitted = true; };
                 search.value = 'unsubmitted search';

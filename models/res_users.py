@@ -13,6 +13,17 @@ from ..utils.phone import format_phone
 
 _logger = logging.getLogger(__name__)
 
+BANK_PORTAL_COLUMN_KEYS = (
+    "order_number", "borrower", "property_address", "loan_number",
+    "loan_purpose", "service_type", "status", "request_date",
+    "anticipated_delivery_date", "completion_date", "fee",
+)
+VENDOR_PORTAL_COLUMN_KEYS = (
+    "order_number", "borrower", "property_address", "loan_purpose",
+    "service_type", "status", "invitation_date", "bid_due_date",
+    "agreed_vendor_fee", "delivery_due_date", "response",
+)
+
 
 class ResPartner(models.Model):
     _inherit = "res.partner"
@@ -46,6 +57,42 @@ class ResUsers(models.Model):
         index=True,
         help="Vendor organization this user is authorized to represent in TruCalc.",
     )
+
+    trucalc_bank_portal_columns = fields.Json(
+        string="Bank Portal Columns",
+        copy=False,
+        help="Allowlisted Bank Order columns selected by this user.",
+    )
+
+    trucalc_vendor_portal_columns = fields.Json(
+        string="Vendor Portal Columns",
+        copy=False,
+        help="Allowlisted Vendor Order columns selected by this user.",
+    )
+
+    @api.constrains(
+        "trucalc_bank_portal_columns", "trucalc_vendor_portal_columns",
+    )
+    def _check_trucalc_portal_columns(self):
+        specifications = (
+            ("trucalc_bank_portal_columns", BANK_PORTAL_COLUMN_KEYS),
+            ("trucalc_vendor_portal_columns", VENDOR_PORTAL_COLUMN_KEYS),
+        )
+        for user in self:
+            for field_name, allowed in specifications:
+                value = user[field_name]
+                if value in (False, None):
+                    continue
+                if not isinstance(value, list):
+                    raise ValidationError(_(
+                        "Portal column preferences must be stored as a list."
+                    ))
+                selected = {key for key in value if isinstance(key, str)}
+                normalized = [key for key in allowed if key in selected]
+                if value != normalized or not value or value[0] != "order_number":
+                    raise ValidationError(_(
+                        "Portal column preferences contain invalid columns or ordering."
+                    ))
 
     def _notify_security_setting_update(
         self, subject, content, mail_values=None, **kwargs,

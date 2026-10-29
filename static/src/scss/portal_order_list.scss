@@ -101,6 +101,63 @@
             }
         }
     }
+
+    .o_trucalc_configurable_table {
+        position: relative;
+
+        .o_trucalc_column_menu {
+            position: absolute;
+            top: 0.125rem;
+            right: 0.25rem;
+            z-index: 1030;
+        }
+
+        .o_trucalc_column_toggle {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 1.75rem;
+            height: 1.75rem;
+            padding: 0;
+            border: 1px solid rgba(255, 255, 255, 0.8);
+            border-radius: 0.25rem;
+            color: #ffffff;
+            background-color: var(--trucalc-primary);
+
+            &:hover,
+            &:focus,
+            &[aria-expanded="true"] {
+                color: #ffffff;
+                background-color: #01417d;
+                border-color: #ffffff;
+            }
+
+            &:focus-visible {
+                outline: 0.1875rem solid #ffffff;
+                outline-offset: 0.125rem;
+            }
+        }
+
+        .o_trucalc_column_dropdown {
+            inset: 100% 0 auto auto !important;
+            transform: none !important;
+            width: max-content;
+            min-width: 16rem;
+            max-width: calc(100vw - 1.5rem);
+            max-height: calc(100vh - 2rem);
+            overflow-y: auto;
+            color: var(--trucalc-text);
+        }
+
+        .o_trucalc_column_choices {
+            max-height: calc(100vh - 10rem);
+            overflow-y: auto;
+        }
+
+        .o_trucalc_order_list_header > tr > th:last-child {
+            padding-right: 2.5rem;
+        }
+    }
 }
 
 @media (min-width: 992px) {
