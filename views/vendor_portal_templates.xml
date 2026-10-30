@@ -234,8 +234,9 @@
                             <t t-if="'status' in portal_columns"><t t-set="sort_key" t-value="'status'"/><t t-set="sort_label" t-value="'Status'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
                             <t t-if="'invitation_date' in portal_columns"><t t-set="sort_key" t-value="'invitation_date'"/><t t-set="sort_label" t-value="'Invitation Date'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
                             <t t-if="'bid_due_date' in portal_columns"><t t-set="sort_key" t-value="'bid_due_date'"/><t t-set="sort_label" t-value="'Bid Due Date'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
-                            <t t-if="'agreed_vendor_fee' in portal_columns"><t t-set="sort_key" t-value="'agreed_vendor_fee'"/><t t-set="sort_label" t-value="'Agreed Vendor Fee'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
-                            <t t-if="'delivery_due_date' in portal_columns"><t t-set="sort_key" t-value="'due_date'"/><t t-set="sort_label" t-value="'Delivery Due Date'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
+                            <t t-if="'award_date' in portal_columns"><t t-set="sort_key" t-value="'award_date'"/><t t-set="sort_label" t-value="'Award Date'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
+                            <t t-if="'agreed_vendor_fee' in portal_columns"><t t-set="sort_key" t-value="'agreed_vendor_fee'"/><t t-set="sort_label" t-value="'Vendor Fee'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
+                            <t t-if="'delivery_due_date' in portal_columns"><t t-set="sort_key" t-value="'due_date'"/><t t-set="sort_label" t-value="'Due Date'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
                             <t t-if="'response' in portal_columns"><t t-set="sort_key" t-value="'response'"/><t t-set="sort_label" t-value="'Response'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
                         </tr>
                     </thead>
@@ -264,8 +265,9 @@
                                     <span t-field="projection.review_indicator"/>
                                 </div>
                             </td>
-                            <td t-if="'invitation_date' in portal_columns" data-column="invitation_date"><span t-if="projection.invitation_date" t-field="projection.invitation_date"/><span t-else="">—</span></td>
+                            <td t-if="'invitation_date' in portal_columns" data-column="invitation_date"><span t-if="vendor_invitation_dates.get(projection.id)" t-out="vendor_invitation_dates[projection.id]" t-options="{'widget': 'date'}"/><span t-else="">—</span></td>
                             <td t-if="'bid_due_date' in portal_columns" data-column="bid_due_date"><span t-if="projection.response_deadline" t-field="projection.response_deadline"/><span t-else="">—</span></td>
+                            <td t-if="'award_date' in portal_columns" data-column="award_date"><span t-if="vendor_award_dates.get(projection.id)" t-out="vendor_award_dates[projection.id]" t-options="{'widget': 'date'}"/></td>
                             <td t-if="'agreed_vendor_fee' in portal_columns" data-column="agreed_vendor_fee">
                                 <span t-if="projection.vendor_phase == 'assignment' and projection.currency_id"
                                       t-out="projection.agreed_vendor_fee"
@@ -747,12 +749,13 @@
                             <t t-if="'order_number' in portal_columns"><t t-set="sort_key" t-value="'order_number'"/><t t-set="sort_label" t-value="'Order Number'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
                             <t t-if="'borrower' in portal_columns"><t t-set="sort_key" t-value="'borrower'"/><t t-set="sort_label" t-value="'Borrower'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
                             <t t-if="'property_address' in portal_columns"><t t-set="sort_key" t-value="'property_address'"/><t t-set="sort_label" t-value="'Property Address'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
+                            <t t-if="'city' in portal_columns"><t t-set="sort_key" t-value="'city'"/><t t-set="sort_label" t-value="'City'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
                             <t t-if="'loan_number' in portal_columns"><t t-set="sort_key" t-value="'loan_number'"/><t t-set="sort_label" t-value="'Loan Number'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
                             <t t-if="'loan_purpose' in portal_columns"><t t-set="sort_key" t-value="'loan_purpose'"/><t t-set="sort_label" t-value="'Loan Purpose'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
                             <t t-if="'service_type' in portal_columns"><t t-set="sort_key" t-value="'service_type'"/><t t-set="sort_label" t-value="'Service Type'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
                             <t t-if="'status' in portal_columns"><t t-set="sort_key" t-value="'status'"/><t t-set="sort_label" t-value="'Status'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
                             <t t-if="'request_date' in portal_columns"><t t-set="sort_key" t-value="'request_date'"/><t t-set="sort_label" t-value="'Request Date'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
-                            <t t-if="'anticipated_delivery_date' in portal_columns"><t t-set="sort_key" t-value="'due_date'"/><t t-set="sort_label" t-value="'Anticipated Delivery Date'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
+                            <t t-if="'anticipated_delivery_date' in portal_columns"><t t-set="sort_key" t-value="'due_date'"/><t t-set="sort_label" t-value="'Requested Date'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
                             <th t-if="'completion_date' in portal_columns">Completion Date</th>
                             <t t-if="'fee' in portal_columns"><t t-set="sort_key" t-value="'fee'"/><t t-set="sort_label" t-value="'Fee'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
                         </tr>
@@ -776,6 +779,7 @@
                             </td>
                             <td t-if="'borrower' in portal_columns"><t t-out="order.borrower"/></td>
                             <td t-if="'property_address' in portal_columns"><t t-out="order.property_address"/></td>
+                            <td t-if="'city' in portal_columns"><t t-out="order.city or '—'"/></td>
                             <td t-if="'loan_number' in portal_columns"><t t-out="order.loan_number or '—'"/></td>
                             <td t-if="'loan_purpose' in portal_columns"><span t-if="order.loan_purpose" t-field="order.loan_purpose"/><span t-else="">—</span></td>
                             <td t-if="'service_type' in portal_columns"><span t-field="order.service_type"/></td>

@@ -72,6 +72,7 @@ class TruCalcVendorOrder(models.Model):
     )
     response_deadline = fields.Datetime(readonly=True)
     invitation_date = fields.Datetime(readonly=True)
+    award_date = fields.Datetime(readonly=True)
     authorization_date = fields.Datetime(readonly=True)
     completion_at = fields.Datetime(readonly=True)
     delivery_due_date = fields.Date(readonly=True)
@@ -227,6 +228,8 @@ class TruCalcVendorOrder(models.Model):
                          ELSE NULL END AS vendor_status,
                     o.status AS order_status,
                     i.invited_at AS invitation_date,
+                    CASE WHEN a.source = 'assignment' THEN e.engaged_at END
+                        AS award_date,
                     a.authorized_at AS authorization_date,
                     completed.event_at AS completion_at,
                     CASE WHEN a.source = 'invitation' THEN a.expires_at END

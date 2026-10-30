@@ -1,3 +1,6 @@
+from datetime import datetime, timedelta
+from unittest.mock import patch
+
 from lxml import html
 
 from odoo import fields, http
@@ -40,15 +43,15 @@ class TestBankPortalColumns(TestBankOrderPortal):
         expected = {
             self.bank_admin: [
                 "Order Number", "Borrower", "Property Address", "Service Type",
-                "Status", "Anticipated Delivery Date", "Fee",
+                "Status", "Requested Date", "Fee",
             ],
             self.bank_requestor: [
                 "Order Number", "Borrower", "Property Address", "Loan Purpose",
-                "Service Type", "Status", "Anticipated Delivery Date",
+                "Service Type", "Status", "Requested Date",
             ],
             self.bank_viewer: [
                 "Order Number", "Borrower", "Property Address", "Service Type",
-                "Status", "Anticipated Delivery Date",
+                "Status", "Requested Date",
             ],
         }
         for user, headers in expected.items():
@@ -69,6 +72,11 @@ class TestBankPortalColumns(TestBankOrderPortal):
                 self.assertEqual(len(required), 1)
                 self.assertIsNotNone(required[0].get("checked"))
                 self.assertIsNotNone(required[0].get("disabled"))
+                city = tree.xpath(
+                    "//input[@name='columns'][@value='city']"
+                )
+                self.assertEqual(len(city), 1)
+                self.assertIsNone(city[0].get("checked"))
 
     def test_apply_persistence_reset_and_field_independence(self):
         self.bank_admin.sudo().write({
@@ -136,9 +144,12 @@ class TestBankPortalColumns(TestBankOrderPortal):
     def test_authoritative_completion_request_date_and_fee(self):
         completion_at = fields.Datetime.to_datetime("2026-10-15 14:30:00")
         self.env.cr.execute(
-            "UPDATE trucalc_order SET status='completed', order_date=%s, "
+            "UPDATE trucalc_order SET status='completed', order_date=%s, city=%s, "
             "current_agreed_fee=%s, fee_currency_id=%s WHERE id=%s",
-            ("2026-10-01", 525, self.env.company.currency_id.id, self.order_a.id),
+            (
+                "2026-10-01", "Purpose-Built City", 525,
+                self.env.company.currency_id.id, self.order_a.id,
+            ),
         )
         self.env.cr.execute(
             """
@@ -155,12 +166,17 @@ class TestBankPortalColumns(TestBankOrderPortal):
         )
         self.order_a.invalidate_recordset()
         self.bank_admin.sudo().write({self.preference_field: [
-            "order_number", "request_date", "completion_date", "fee",
+            "order_number", "city", "request_date",
+            "anticipated_delivery_date", "completion_date", "fee",
         ]})
         headers, _tree, text = self._headers(self.bank_admin)
         self.assertEqual(
-            headers, ["Order Number", "Request Date", "Completion Date", "Fee"],
+            headers, [
+                "Order Number", "City", "Request Date", "Requested Date",
+                "Completion Date", "Fee",
+            ],
         )
+        self.assertIn("Purpose-Built City", text)
         self.assertIn("10/01/2026", text)
         self.assertIn("10/15/2026", text)
         self.assertIn("525.00", text)
@@ -203,13 +219,26 @@ class TestVendorPortalColumns(TestVendorOrderPortal):
         )
         expected = [
             "Order Number", "Borrower", "Property Address", "Loan Purpose",
-            "Service Type", "Status", "Delivery Due Date", "Response",
+            "Service Type", "Status", "Due Date", "Response",
         ]
         headers, tree, text = self._headers()
         self.assertEqual(headers, expected)
         self.assertNotIn(order.loan_number, text)
         self.assertFalse(tree.xpath("//input[@name='columns'][@value='loan_number']"))
+        award = tree.xpath("//input[@name='columns'][@value='award_date']")
+        self.assertEqual(len(award), 1)
+        self.assertIsNone(award[0].get("checked"))
+        menu_labels = [
+            " ".join(node.text_content().split())
+            for node in tree.xpath(
+                "//div[contains(@class,'o_trucalc_column_choices')]//label"
+            )
+        ]
+        self.assertIn("Award Date", menu_labels)
+        self.assertIn("Vendor Fee", menu_labels)
+        self.assertIn("Due Date", menu_labels)
         self.assertIn("invitation_date", projection.fields_get())
+        self.assertIn("award_date", projection.fields_get())
         self.assertIn("delivery_due_date", projection.fields_get())
         self.assertNotIn("loan_number", projection.fields_get())
         self.assertNotIn("loan_number", projection.read()[0])
@@ -231,7 +260,7 @@ class TestVendorPortalColumns(TestVendorOrderPortal):
         headers, _tree, text = self._headers()
         self.assertEqual(headers, [
             "Order Number", "Invitation Date", "Bid Due Date",
-            "Agreed Vendor Fee", "Delivery Due Date", "Response",
+            "Vendor Fee", "Due Date", "Response",
         ])
         self.assertNotIn(order.loan_number, text)
 
@@ -247,6 +276,107 @@ class TestVendorPortalColumns(TestVendorOrderPortal):
         self.assertEqual(projection.delivery_due_date, order.vendor_delivery_date)
         self.assertEqual(projection.agreed_vendor_fee, order.vendor_fee)
         self.assertNotIn("loan_number", projection.fields_get())
+
+    def test_local_date_only_authoritative_award_and_reassignment(self):
+        self.vendor_user_a.sudo().write({
+            "tz": "America/Los_Angeles",
+            self.preference_field: [
+                "order_number", "invitation_date", "award_date",
+            ],
+        })
+        order, invitation, projection = self._authorized_order(
+            self.vendor_a, "Award Date Street",
+        )
+        invitation_at = datetime(2026, 10, 16, 0, 30)
+        self.env.cr.execute(
+            "UPDATE trucalc_bid_invitation SET invited_at=%s WHERE id=%s",
+            (invitation_at, invitation.id),
+        )
+        self.env["trucalc.vendor.order"].invalidate_model()
+
+        headers, tree, _text = self._headers()
+        self.assertEqual(headers, ["Order Number", "Invitation Date", "Award Date"])
+        row = tree.xpath(
+            "//a[contains(@href, '%s')]/ancestor::tr[1]" % order.order_number
+        )[0]
+        self.assertEqual(
+            row.xpath("./td[@data-column='invitation_date']")[0].text_content().strip(),
+            "10/15/2026",
+        )
+        self.assertEqual(
+            row.xpath("./td[@data-column='award_date']")[0].text_content().strip(),
+            "",
+        )
+
+        first_award = datetime(2026, 10, 17, 1, 30)
+        bid = invitation.with_user(
+            self.vendor_user_a
+        ).action_vendor_submit_response("standard_terms_accepted")
+        with patch.object(fields.Datetime, "now", return_value=first_award):
+            bid.with_user(self.admin)._action_confirm_engagement()
+        self.env.flush_all()
+        self.env["trucalc.vendor.order"].invalidate_model()
+        first_engagement = order.sudo().engagement_ids.filtered("active")
+        first_projection = self.env["trucalc.vendor.order"].with_user(
+            self.vendor_user_a
+        ).search([("order_number", "=", order.order_number)])
+        self.assertEqual(first_projection.award_date, first_engagement.engaged_at)
+        _headers, tree, _text = self._headers()
+        row = tree.xpath(
+            "//a[contains(@href, '%s')]/ancestor::tr[1]" % order.order_number
+        )[0]
+        self.assertEqual(
+            row.xpath("./td[@data-column='award_date']")[0].text_content().strip(),
+            "10/16/2026",
+        )
+
+        order.with_user(self.admin).action_reopen_bidding()
+        self.env.flush_all()
+        order.invalidate_recordset()
+        first_engagement.invalidate_recordset(["active", "closed_at"])
+        self.assertFalse(first_engagement.active)
+        order.with_user(self.admin).action_request_vendor_bids(
+            self.vendor_b, fields.Datetime.now() + timedelta(days=2),
+        )
+        second_invitation = order.invitation_ids.filtered(
+            lambda item: item.round_number == order.bidding_round
+            and item.vendor_id == self.vendor_b
+        )
+        second_bid = second_invitation.with_user(
+            self.vendor_user_b
+        ).action_vendor_submit_response("standard_terms_accepted")
+        second_award = datetime(2026, 10, 19, 1, 30)
+        with patch.object(fields.Datetime, "now", return_value=second_award):
+            second_bid.with_user(self.admin)._action_confirm_engagement()
+        self.env.flush_all()
+        self.env["trucalc.vendor.order"].invalidate_model()
+        active_engagement = order.sudo().engagement_ids.filtered("active")
+        self.assertNotEqual(active_engagement, first_engagement)
+        self.assertFalse(first_engagement.active)
+
+        self.vendor_user_b.sudo().write({
+            "tz": "America/Los_Angeles",
+            self.preference_field: ["order_number", "award_date"],
+        })
+        second_projection = self.env["trucalc.vendor.order"].with_user(
+            self.vendor_user_b
+        ).search([("order_number", "=", order.order_number)])
+        self.assertEqual(second_projection.award_date, active_engagement.engaged_at)
+        headers, tree, _text = self._headers(self.vendor_user_b)
+        self.assertEqual(headers, ["Order Number", "Award Date"])
+        row = tree.xpath(
+            "//a[contains(@href, '%s')]/ancestor::tr[1]" % order.order_number
+        )[0]
+        self.assertEqual(
+            row.xpath("./td[@data-column='award_date']")[0].text_content().strip(),
+            "10/18/2026",
+        )
+        _old_vendor_headers, old_vendor_tree, _text = self._headers(
+            self.vendor_user_a,
+        )
+        self.assertFalse(old_vendor_tree.xpath(
+            "//a[contains(@href, '%s')]" % order.order_number
+        ))
 
     def test_vendor_route_csrf_and_role_boundaries(self):
         self._login(self.vendor_user_a)

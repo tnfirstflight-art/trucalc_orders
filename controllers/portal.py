@@ -22,12 +22,13 @@ BANK_PORTAL_COLUMNS = (
     ("order_number", "Order Number"),
     ("borrower", "Borrower"),
     ("property_address", "Property Address"),
+    ("city", "City"),
     ("loan_number", "Loan Number"),
     ("loan_purpose", "Loan Purpose"),
     ("service_type", "Service Type"),
     ("status", "Status"),
     ("request_date", "Request Date"),
-    ("anticipated_delivery_date", "Anticipated Delivery Date"),
+    ("anticipated_delivery_date", "Requested Date"),
     ("completion_date", "Completion Date"),
     ("fee", "Fee"),
 )
@@ -40,8 +41,9 @@ VENDOR_PORTAL_COLUMNS = (
     ("status", "Status"),
     ("invitation_date", "Invitation Date"),
     ("bid_due_date", "Bid Due Date"),
-    ("agreed_vendor_fee", "Agreed Vendor Fee"),
-    ("delivery_due_date", "Delivery Due Date"),
+    ("award_date", "Award Date"),
+    ("agreed_vendor_fee", "Vendor Fee"),
+    ("delivery_due_date", "Due Date"),
     ("response", "Response"),
 )
 BANK_PORTAL_DEFAULTS = {
@@ -81,6 +83,7 @@ class TruCalcVendorPortal(CustomerPortal):
         "order_number": "order_number",
         "borrower": "borrower",
         "property_address": "property_address",
+        "city": "city",
         "loan_number": "loan_number",
         "loan_purpose": "loan_purpose",
         "service_type": "service_type",
@@ -102,6 +105,7 @@ class TruCalcVendorPortal(CustomerPortal):
         "due_date": "delivery_due_date",
         "invitation_date": "invitation_date",
         "bid_due_date": "response_deadline",
+        "award_date": "award_date",
         "agreed_vendor_fee": "agreed_vendor_fee",
     }
 
@@ -466,6 +470,13 @@ class TruCalcVendorPortal(CustomerPortal):
     def _vendor_filter_now(self):
         return fields.Datetime.now()
 
+    def _portal_local_date(self, value):
+        if not value:
+            return False
+        return fields.Datetime.context_timestamp(
+            request.env.user, value,
+        ).date()
+
     def _vendor_order_filter_domain(self, filterby):
         if filterby == "active":
             return [
@@ -557,11 +568,26 @@ class TruCalcVendorPortal(CustomerPortal):
         except AccessError:
             raise request.not_found()
 
+        column_values = self._portal_column_values("vendor", page)
+        invitation_dates = {}
+        award_dates = {}
+        if "invitation_date" in column_values["portal_columns"]:
+            invitation_dates = {
+                projection.id: self._portal_local_date(projection.invitation_date)
+                for projection in projections if projection.invitation_date
+            }
+        if "award_date" in column_values["portal_columns"]:
+            award_dates = {
+                projection.id: self._portal_local_date(projection.award_date)
+                for projection in projections if projection.award_date
+            }
         values = self._prepare_portal_layout_values()
         values.update({
             "page_name": "trucalc_orders",
             "projections": projections,
             "filterby": filterby,
+            "vendor_invitation_dates": invitation_dates,
+            "vendor_award_dates": award_dates,
             "empty_message": {
                 "active": "No active TruCalc Orders require current Vendor work.",
                 "submitted": (
@@ -586,7 +612,7 @@ class TruCalcVendorPortal(CustomerPortal):
                 ("delivery_due", "Delivery Due Date"),
             ),
         ))
-        values.update(self._portal_column_values("vendor", page))
+        values.update(column_values)
         return request.render("trucalc_orders.portal_my_trucalc_orders", values)
 
     @http.route(

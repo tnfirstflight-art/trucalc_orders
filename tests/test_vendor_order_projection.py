@@ -81,6 +81,7 @@ class TestVendorOrderProjection(TransactionCase):
         self.assertEqual(own.vendor_phase, "invitation")
         self.assertEqual(own.vendor_status, "open_for_bid")
         self.assertEqual(own.response_deadline, invitation.response_deadline)
+        self.assertFalse(own.award_date)
         self.assertEqual(own.borrower, "Forbidden Borrower")
         self.assertEqual(own.loan_purpose, "other")
         self.assertNotIn("due_date", own.fields_get())
