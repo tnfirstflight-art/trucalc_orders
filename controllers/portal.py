@@ -27,8 +27,9 @@ BANK_PORTAL_COLUMNS = (
     ("loan_purpose", "Loan Purpose"),
     ("service_type", "Service Type"),
     ("status", "Status"),
-    ("request_date", "Request Date"),
-    ("anticipated_delivery_date", "Requested Date"),
+    ("request_date", "Order Date"),
+    ("anticipated_delivery_date", "Requested Due"),
+    ("estimated_delivery_date", "Est. Delivery"),
     ("completion_date", "Completion Date"),
     ("fee", "Fee"),
 )
@@ -49,15 +50,15 @@ VENDOR_PORTAL_COLUMNS = (
 BANK_PORTAL_DEFAULTS = {
     "administrator": (
         "order_number", "borrower", "property_address", "service_type",
-        "status", "anticipated_delivery_date", "fee",
+        "status", "estimated_delivery_date", "fee",
     ),
     "requestor": (
         "order_number", "borrower", "property_address", "loan_purpose",
-        "service_type", "status", "anticipated_delivery_date",
+        "service_type", "status", "estimated_delivery_date",
     ),
     "view_only": (
         "order_number", "borrower", "property_address", "service_type",
-        "status", "anticipated_delivery_date",
+        "status", "estimated_delivery_date",
     ),
 }
 VENDOR_PORTAL_DEFAULTS = (
@@ -1063,6 +1064,28 @@ class TruCalcVendorPortal(CustomerPortal):
             completion_dates = {
                 event.order_id.id: event.event_at for event in completion_events
             }
+        vendor_delivery_dates = {}
+        late_delivery_order_ids = set()
+        if orders and "estimated_delivery_date" in column_values["portal_columns"]:
+            engagements = request.env["trucalc.vendor.engagement"].sudo().search([
+                ("order_id", "in", orders.ids),
+                ("company_id", "=", bank.id),
+                ("active", "=", True),
+                ("response_state", "=", "accepted"),
+                ("assignment_authorization_id.active", "=", True),
+            ])
+            vendor_delivery_dates = {
+                engagement.order_id.id: engagement.vendor_delivery_date
+                for engagement in engagements
+            }
+            # Both values are authoritative fields.Date business dates, so the
+            # comparison is date-only and does not cross a UTC boundary.
+            late_delivery_order_ids = {
+                order.id for order in orders
+                if vendor_delivery_dates.get(order.id)
+                and order.due_date
+                and vendor_delivery_dates[order.id] > order.due_date
+            }
         values = self._prepare_portal_layout_values()
         values.update({
             "page_name": "trucalc_bank_orders",
@@ -1070,6 +1093,8 @@ class TruCalcVendorPortal(CustomerPortal):
             "can_submit": self._can_create_bank_draft(),
             "filterby": filterby,
             "completion_dates": completion_dates,
+            "vendor_delivery_dates": vendor_delivery_dates,
+            "late_delivery_order_ids": late_delivery_order_ids,
             "empty_message": {
                 "open": "No open TruCalc requests.",
                 "recent_completed": "No requests were completed in the last 30 days.",

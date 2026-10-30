@@ -16,7 +16,8 @@ _logger = logging.getLogger(__name__)
 BANK_PORTAL_COLUMN_KEYS = (
     "order_number", "borrower", "property_address", "city", "loan_number",
     "loan_purpose", "service_type", "status", "request_date",
-    "anticipated_delivery_date", "completion_date", "fee",
+    "anticipated_delivery_date", "estimated_delivery_date",
+    "completion_date", "fee",
 )
 VENDOR_PORTAL_COLUMN_KEYS = (
     "order_number", "borrower", "property_address", "loan_purpose",

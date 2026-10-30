@@ -319,15 +319,15 @@ class TestFeeChangePortal(TestBankOrderPortal):
             expected = {
                 self.bank_requestor: [
                     'Order Number', 'Borrower', 'Property Address', 'Loan Purpose',
-                    'Service Type', 'Status', 'Requested Date',
+                    'Service Type', 'Status', 'Est. Delivery',
                 ],
                 self.bank_viewer: [
                     'Order Number', 'Borrower', 'Property Address', 'Service Type',
-                    'Status', 'Requested Date',
+                    'Status', 'Est. Delivery',
                 ],
                 self.bank_admin: [
                     'Order Number', 'Borrower', 'Property Address', 'Service Type',
-                    'Status', 'Requested Date', 'Fee',
+                    'Status', 'Est. Delivery', 'Fee',
                 ],
             }[actor]
             self.assertEqual(header_labels, expected)

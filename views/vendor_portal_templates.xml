@@ -754,8 +754,9 @@
                             <t t-if="'loan_purpose' in portal_columns"><t t-set="sort_key" t-value="'loan_purpose'"/><t t-set="sort_label" t-value="'Loan Purpose'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
                             <t t-if="'service_type' in portal_columns"><t t-set="sort_key" t-value="'service_type'"/><t t-set="sort_label" t-value="'Service Type'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
                             <t t-if="'status' in portal_columns"><t t-set="sort_key" t-value="'status'"/><t t-set="sort_label" t-value="'Status'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
-                            <t t-if="'request_date' in portal_columns"><t t-set="sort_key" t-value="'request_date'"/><t t-set="sort_label" t-value="'Request Date'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
-                            <t t-if="'anticipated_delivery_date' in portal_columns"><t t-set="sort_key" t-value="'due_date'"/><t t-set="sort_label" t-value="'Requested Date'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
+                            <t t-if="'request_date' in portal_columns"><t t-set="sort_key" t-value="'request_date'"/><t t-set="sort_label" t-value="'Order Date'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
+                            <t t-if="'anticipated_delivery_date' in portal_columns"><t t-set="sort_key" t-value="'due_date'"/><t t-set="sort_label" t-value="'Requested Due'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
+                            <th t-if="'estimated_delivery_date' in portal_columns">Est. Delivery</th>
                             <th t-if="'completion_date' in portal_columns">Completion Date</th>
                             <t t-if="'fee' in portal_columns"><t t-set="sort_key" t-value="'fee'"/><t t-set="sort_label" t-value="'Fee'"/><t t-call="trucalc_orders.portal_sortable_header"/></t>
                         </tr>
@@ -784,8 +785,16 @@
                             <td t-if="'loan_purpose' in portal_columns"><span t-if="order.loan_purpose" t-field="order.loan_purpose"/><span t-else="">—</span></td>
                             <td t-if="'service_type' in portal_columns"><span t-field="order.service_type"/></td>
                             <td t-if="'status' in portal_columns"><span t-field="order.status"/></td>
-                            <td t-if="'request_date' in portal_columns"><span t-if="order.status != 'draft' and order.order_date" t-field="order.order_date"/><span t-else="">—</span></td>
-                            <td t-if="'anticipated_delivery_date' in portal_columns"><span t-if="order.due_date" t-field="order.due_date"/><span t-else="">—</span></td>
+                            <td t-if="'request_date' in portal_columns" data-column="order_date"><span t-if="order.status != 'draft' and order.order_date" t-field="order.order_date"/></td>
+                            <td t-if="'anticipated_delivery_date' in portal_columns" data-column="requested_due"><span t-if="order.due_date" t-field="order.due_date"/><span t-else="">—</span></td>
+                            <td t-if="'estimated_delivery_date' in portal_columns" data-column="estimated_delivery">
+                                <span t-if="vendor_delivery_dates.get(order.id)" t-out="vendor_delivery_dates[order.id]" t-options="{'widget': 'date'}"/>
+                                <i t-if="order.id in late_delivery_order_ids"
+                                   class="fa fa-exclamation-triangle text-warning ms-1 o_trucalc_delivery_warning"
+                                   role="img"
+                                   aria-label="Estimated delivery exceeds the Bank's requested date."
+                                   title="Estimated delivery exceeds the Bank's requested date."/>
+                            </td>
                             <td t-if="'completion_date' in portal_columns"><span t-if="completion_dates.get(order.id)" t-out="completion_dates[order.id]" t-options="{'widget': 'date'}"/><span t-else="">—</span></td>
                             <td t-if="'fee' in portal_columns">
                                 <span t-if="order.fee_currency_id" t-out="order.current_agreed_fee"
