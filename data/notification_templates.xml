@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="1">
+        <record id="mail_template_bank_order_completed_v1" model="mail.template">
+            <field name="name">TruCalc: Bank Order Completed v1</field>
+            <field name="model_id" ref="model_trucalc_notification_delivery"/>
+            <field name="subject">TruCalc: Order {{ object.order_number }} is Complete</field>
+            <field name="description">Mandatory Phase A completion notice for the eligible original Bank Requestor</field>
+            <field name="body_html" type="html">
+<div style="margin:0;padding:24px;background:#f5f7fa;font-family:Arial,sans-serif;color:#243447">
+  <div style="max-width:600px;margin:auto;background:#ffffff;padding:32px;border-radius:8px">
+    <h2 style="margin-top:0;color:#022f5b">Your TruCalc order is complete</h2>
+    <p>Hello,</p>
+    <p>Your evaluation order <strong><t t-out="object.order_number"/></strong> has been completed.</p>
+    <p>The approved valuation is now available in your TruCalc Bank Portal. Sign in to view your completed order.</p>
+    <div style="margin:24px 0;text-align:center">
+      <a t-att-href="object.portal_url"
+         style="display:inline-block;padding:12px 18px;text-decoration:none;background:#022f5b;color:#ffffff;border-radius:5px;font-weight:bold">
+        View Completed Order
+      </a>
+    </div>
+    <p style="font-size:12px;color:#607080">This message does not include valuation documents. Sign in to TruCalc to access authorized order information securely.</p>
+    <p>— TruCalc Valuation Solutions</p>
+  </div>
+</div>
+            </field>
+            <field name="auto_delete" eval="False"/>
+        </record>
+    </data>
+</odoo>

@@ -278,6 +278,28 @@
         <field name="groups" eval="[(6, 0, [ref('group_trucalc_admin'), ref('group_trucalc_operations')])]"/>
     </record>
 
+    <record id="rule_notification_delivery_company" model="ir.rule">
+        <field name="name">Notification Deliveries in Authorized Banks</field>
+        <field name="model_id" ref="model_trucalc_notification_delivery"/>
+        <field name="domain_force">[('company_id', 'in', user.company_ids.ids)]</field>
+        <field name="groups" eval="[(4, ref('group_trucalc_admin')), (4, ref('group_trucalc_operations'))]"/>
+        <field name="perm_read" eval="True"/>
+        <field name="perm_write" eval="False"/>
+        <field name="perm_create" eval="False"/>
+        <field name="perm_unlink" eval="False"/>
+    </record>
+
+    <record id="rule_notification_delivery_audit_company" model="ir.rule">
+        <field name="name">Notification Delivery Audits in Authorized Banks</field>
+        <field name="model_id" ref="model_trucalc_notification_delivery_audit"/>
+        <field name="domain_force">[('company_id', 'in', user.company_ids.ids)]</field>
+        <field name="groups" eval="[(4, ref('group_trucalc_admin')), (4, ref('group_trucalc_operations'))]"/>
+        <field name="perm_read" eval="True"/>
+        <field name="perm_write" eval="False"/>
+        <field name="perm_create" eval="False"/>
+        <field name="perm_unlink" eval="False"/>
+    </record>
+
     <record id="rule_vendor_deliverable_admin_company" model="ir.rule">
         <field name="name">Administrator Vendor Deliverables by Company</field>
         <field name="model_id" ref="model_trucalc_vendor_deliverable"/>

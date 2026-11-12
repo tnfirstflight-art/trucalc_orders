@@ -3083,8 +3083,15 @@ class EvaluationOrder(models.Model):
             order.with_context(tracking_disable=True)._controlled_lifecycle_write({
                 "status": "completed",
             })
-            self.env["trucalc.order.lifecycle.event"]._log_order_completion(
+            completion_event = self.env[
+                "trucalc.order.lifecycle.event"
+            ]._log_order_completion(
                 order, valuation, actor, event_at=issued_at,
+            )
+            self.env[
+                "trucalc.notification.delivery"
+            ]._capture_completion_intent_nonblocking(
+                completion_event, order.requestor_id,
             )
         return True
 

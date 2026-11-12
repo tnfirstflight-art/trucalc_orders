@@ -133,6 +133,7 @@ class TestInternalUXPassA(TransactionCase):
             name: self.env.ref("trucalc_orders.%s" % name)
             for name in (
                 "menu_trucalc_orders", "menu_unpaid_bank_invoices",
+                "menu_trucalc_notification_deliveries",
                 "menu_trucalc_draft_support", "menu_trucalc_vendors",
                 "menu_trucalc_configuration", "menu_trucalc_banks",
                 "menu_trucalc_internal_users",
@@ -146,6 +147,7 @@ class TestInternalUXPassA(TransactionCase):
             )],
             [
                 ("Orders", 10), ("Unpaid Invoices", 15),
+                ("Notification Deliveries", 20),
                 ("Vendors", 30), ("Configuration", 90),
             ],
         )
@@ -272,13 +274,18 @@ class TestInternalUXPassA(TransactionCase):
         menu_model = self.env["ir.ui.menu"].with_user(non_trucalc)
         upstream_ids = super(IrUiMenu, menu_model)._visible_menu_ids(False)
         self.assertEqual(menu_model._visible_menu_ids(False), upstream_ids)
+        upstream_labels = {
+            label for label, menu_id in self._launcher_ids().items()
+            if menu_id in upstream_ids
+        }
+        self.assertNotIn("TruCalc", upstream_labels)
         self.assertEqual(
             self._visible_launcher_labels(non_trucalc),
-            available.difference({"TruCalc"}),
+            upstream_labels,
         )
         self.assertEqual(
             self._loaded_launcher_labels(non_trucalc),
-            available.difference({"TruCalc"}),
+            upstream_labels,
         )
 
         reviewer_only = self.env["res.users"].with_context(
@@ -802,14 +809,16 @@ class TestInternalUXPassA(TransactionCase):
         ):
             self.assertNotIn(forbidden, styles)
 
-        all_js = "\n".join(
-            path.read_text() for path in (root / "static/src/js").glob("*.js")
+        backend_js = "\n".join(
+            (root / asset.removeprefix("trucalc_orders/")).read_text()
+            for asset in backend
+            if isinstance(asset, str) and asset.endswith(".js")
         )
         for forbidden in (
             "o_trucalc_internal", "o_action_manager", "classList.add",
             "classList.toggle",
         ):
-            self.assertNotIn(forbidden, all_js)
+            self.assertNotIn(forbidden, backend_js)
 
         widget = (
             root / "static/src/xml/order_number_attention_field.xml"

@@ -3,6 +3,7 @@ from . import service_area
 from . import negotiated_fee
 from . import evaluation_order
 from . import order_lifecycle_event
+from . import notification_delivery
 from . import ir_rule
 from . import ir_http
 from . import res_users
