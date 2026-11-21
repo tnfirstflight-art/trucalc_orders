@@ -8,6 +8,7 @@ DEAUTHORIZATION_REASONS = [
     ("expired", "Invitation Expired"),
     ("winner_selected", "Winner Selected"),
     ("reopened", "Bidding Reopened"),
+    ("order_declined", "Order Declined"),
     ("cancelled", "Order Cancelled"),
     ("completed", "Order Completed"),
     ("vendor_deactivated", "Vendor Deactivated"),

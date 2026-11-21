@@ -40,3 +40,4 @@ from . import test_invitation_signup
 from . import test_location_correction
 from . import test_location_correction_b
 from . import test_logging_redaction
+from . import test_post_acceptance_decline

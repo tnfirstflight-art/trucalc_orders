@@ -1004,6 +1004,10 @@
                         <dd class="col-sm-8"><span t-if="order.due_date" t-field="order.due_date"/></dd>
                         <dt class="col-sm-4">Status</dt>
                         <dd class="col-sm-8"><span t-field="order.status"/></dd>
+                        <dt t-if="order.status == 'declined' and order.decline_category" class="col-sm-4">Decline Category</dt>
+                        <dd t-if="order.status == 'declined' and order.decline_category" class="col-sm-8"><span t-field="order.decline_category"/></dd>
+                        <dt t-if="order.status == 'declined' and order.decline_reason" class="col-sm-4">Decline Reason</dt>
+                        <dd t-if="order.status == 'declined' and order.decline_reason" class="col-sm-8 text-break" style="white-space: pre-wrap"><t t-out="order.decline_reason"/></dd>
                         <dt class="col-sm-4">Inspection Contact Person</dt>
                         <dd class="col-sm-8"><t t-out="order.inspection_contact_name"/></dd>
                         <dt class="col-sm-4">Inspection Contact Phone</dt>
@@ -1039,12 +1043,12 @@
                 </div>
             </div>
             <h3>Documents</h3>
-            <button t-if="can_upload and order.status != 'completed'"
+            <button t-if="can_upload"
                     type="button" class="btn btn-primary mb-3"
                     data-bs-toggle="modal" data-bs-target="#bank-document-upload-modal">
                 Add Document
             </button>
-            <div t-if="can_upload and order.status != 'completed'"
+            <div t-if="can_upload"
                  id="bank-document-upload-modal" class="modal fade" tabindex="-1"
                  aria-labelledby="bank-document-upload-modal-title" aria-hidden="true">
                 <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">

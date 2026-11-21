@@ -1150,7 +1150,7 @@ class TruCalcVendorPortal(CustomerPortal):
         tags = request.env["trucalc.document.tag"].sudo().search([
             ("active", "=", True),
         ])
-        can_upload = (
+        can_upload = order.status not in ("completed", "cancelled", "declined") and (
             request.env.user.has_group("trucalc_orders.group_bank_admin")
             or request.env.user.has_group("trucalc_orders.group_bank_requestor")
         )
@@ -1203,7 +1203,7 @@ class TruCalcVendorPortal(CustomerPortal):
     )
     def portal_bank_document_upload(self, order_number, **post):
         order, _bank = self._bank_order(order_number)
-        if order.status == "completed":
+        if order.status in ("completed", "cancelled", "declined"):
             raise request.not_found()
         upload = request.httprequest.files.get("document_file")
         draft_values = dict(post)

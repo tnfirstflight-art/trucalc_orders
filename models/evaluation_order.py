@@ -5,6 +5,10 @@ from odoo import api, fields, models, tools, _
 from odoo.exceptions import AccessError, ValidationError
 from markupsafe import Markup, escape
 
+from .decline_policy import (
+    ORDER_DECLINE_CATEGORY_SELECTION,
+    TERMINAL_ORDER_STATUSES,
+)
 from .vendor_fee import SERVICE_SELECTION
 from ..utils.phone import format_phone, normalize_phone, phone_parts
 
@@ -1208,6 +1212,26 @@ class EvaluationOrder(models.Model):
         readonly=True,
         copy=False,
     )
+    decline_category = fields.Selection(
+        ORDER_DECLINE_CATEGORY_SELECTION,
+        string="Decline Category",
+        readonly=True,
+        copy=False,
+    )
+    declined_at = fields.Datetime(readonly=True, copy=False)
+    declined_by_id = fields.Many2one(
+        "res.users", string="Declined By", readonly=True, copy=False,
+        ondelete="restrict",
+    )
+    vendor_notification_note = fields.Text(
+        string="Manual Vendor Communication",
+        readonly=True,
+        copy=False,
+        groups=(
+            "trucalc_orders.group_trucalc_admin,"
+            "trucalc_orders.group_trucalc_operations"
+        ),
+    )
 
     reviewer_id = fields.Many2one(
         "trucalc.vendor",
@@ -2009,8 +2033,13 @@ class EvaluationOrder(models.Model):
                     ))
         if "vendor_authorization_ids" in vals:
             raise AccessError(_("Vendor Order authorization is server-maintained."))
-        if "decline_reason" in vals:
-            raise AccessError(_("The decline reason requires the controlled decline action."))
+        if {
+            "decline_reason", "decline_category", "declined_at",
+            "declined_by_id", "vendor_notification_note",
+        }.intersection(vals):
+            raise AccessError(_(
+                "Decline disposition fields require a controlled decline action."
+            ))
         if "order_date" in vals:
             raise AccessError(_("Order Date is system-controlled."))
         if "status" in vals:
@@ -2065,8 +2094,11 @@ class EvaluationOrder(models.Model):
         """Serialize ordinary edits with completion; no context bypass."""
         for order in self.sudo().sorted("id"):
             order._lock_for_bid_lifecycle()
-            if order.status == "completed":
-                raise AccessError(_("Completed Orders are closed to operational editing."))
+            if order.status in TERMINAL_ORDER_STATUSES:
+                raise AccessError(_(
+                    "Completed, Cancelled, and Declined Orders are closed to "
+                    "operational editing."
+                ))
 
     @api.private
     def _controlled_lifecycle_write(self, vals):
@@ -2287,6 +2319,142 @@ class EvaluationOrder(models.Model):
             "decline_reason": reason,
         })
         self.message_post(body=_("Request declined. Reason: %s") % escape(reason))
+        return True
+
+    def action_open_post_acceptance_decline_wizard(self):
+        self._require_intake_manager()
+        self.ensure_one()
+        self._lock_for_bid_lifecycle()
+        self.invalidate_recordset()
+        if self.status != "engaged":
+            raise ValidationError(_(
+                "Decline After Acceptance is available only for an Engaged Order."
+            ))
+        return {
+            "type": "ir.actions.act_window",
+            "name": _("Decline After Acceptance"),
+            "res_model": "trucalc.order.post.acceptance.decline.wizard",
+            "view_mode": "form",
+            "view_id": self.env.ref(
+                "trucalc_orders.view_trucalc_order_post_acceptance_decline_wizard_form"
+            ).id,
+            "target": "new",
+            "context": {
+                "default_order_id": self.id,
+                "default_category": "inspection_findings",
+            },
+        }
+
+    def action_decline_after_acceptance(
+        self, category, reason, vendor_notification_note,
+    ):
+        self._require_intake_manager()
+        self.ensure_one()
+        categories = dict(ORDER_DECLINE_CATEGORY_SELECTION)
+        if category not in categories:
+            raise ValidationError(_("Select a valid decline category."))
+        reason = reason.strip() if isinstance(reason, str) else ""
+        vendor_notification_note = (
+            vendor_notification_note.strip()
+            if isinstance(vendor_notification_note, str) else ""
+        )
+        if not reason or len(reason) > 5000:
+            raise ValidationError(_(
+                "A decline reason of 1 to 5000 characters is required."
+            ))
+        if not vendor_notification_note or len(vendor_notification_note) > 5000:
+            raise ValidationError(_(
+                "A manual Vendor communication note of 1 to 5000 characters "
+                "is required."
+            ))
+        actor = self.env.user
+        with self.env.cr.savepoint():
+            order = self.sudo()
+            order._lock_for_bid_lifecycle()
+            order.invalidate_recordset()
+            order.with_user(actor)._require_intake_manager()
+            if order.status != "engaged":
+                raise ValidationError(_(
+                    "Decline After Acceptance is available only for an Engaged Order."
+                ))
+            if self.env["trucalc.vendor.deliverable"].sudo().search_count([
+                ("order_id", "=", order.id),
+                ("artifact_type", "in", ("valuation", "vendor_invoice")),
+            ]):
+                raise ValidationError(_(
+                    "This Order cannot be declined after a Valuation or Vendor "
+                    "Invoice has been submitted."
+                ))
+            if self.env["trucalc.bank.invoice"].sudo().search_count([
+                ("order_id", "=", order.id),
+            ]):
+                raise ValidationError(_(
+                    "This Order cannot be declined after a Bank Invoice exists."
+                ))
+            engagement = self.env["trucalc.vendor.engagement"].sudo().search([
+                ("order_id", "=", order.id), ("active", "=", True),
+            ])
+            if len(engagement) != 1:
+                raise ValidationError(_(
+                    "An Engaged Order requires exactly one active Vendor engagement."
+                ))
+            self.env.cr.execute(
+                "SELECT id FROM trucalc_vendor_engagement WHERE id = %s FOR UPDATE",
+                (engagement.id,),
+            )
+            engagement.invalidate_recordset()
+            authorization = engagement.assignment_authorization_id
+            authorization.invalidate_recordset()
+            if (
+                not engagement.active
+                or engagement.order_id != order
+                or engagement.vendor_id != order.assigned_vendor_id
+                or engagement.round_number != order.bidding_round
+                or not authorization.active
+                or authorization.source != "assignment"
+                or authorization.order_id != order
+                or authorization.vendor_id != order.assigned_vendor_id
+                or authorization.round_number != order.bidding_round
+            ):
+                raise ValidationError(_(
+                    "The active Vendor engagement or authorization is inconsistent."
+                ))
+            now = fields.Datetime.now()
+            engagement.with_user(actor)._close_for_order_decline(reason, when=now)
+            self.env[
+                "trucalc.order.vendor.authorization"
+            ]._deactivate([
+                ("order_id", "=", order.id),
+            ], "order_declined", when=now)
+            order._controlled_lifecycle_write({
+                "status": "declined",
+                "decline_category": category,
+                "decline_reason": reason,
+                "declined_at": now,
+                "declined_by_id": actor.id,
+                "vendor_notification_note": vendor_notification_note,
+            })
+            self.env[
+                "trucalc.order.lifecycle.event"
+            ]._log_post_acceptance_decline(
+                order, engagement, actor, event_at=now,
+            )
+            order.message_post(body=Markup(_(
+                "<p><strong>Order declined after Vendor acceptance.</strong></p>"
+                "<ul><li>Category: %(category)s</li>"
+                "<li>Reason: %(reason)s</li>"
+                "<li>Vendor: %(vendor)s</li>"
+                "<li>Declined By: %(actor)s</li>"
+                "<li>Manual Vendor Communication: %(notification)s</li></ul>"
+                "<p>No Vendor or Bank payment obligation was created, waived, "
+                "or modified by this action.</p>"
+            )) % {
+                "category": escape(categories[category]),
+                "reason": escape(reason),
+                "vendor": escape(engagement.vendor_id.display_name),
+                "actor": escape(actor.display_name),
+                "notification": escape(vendor_notification_note),
+            })
         return True
 
     @api.onchange("assigned_vendor_id", "service_type")

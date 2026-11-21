@@ -921,6 +921,57 @@ class TestBankOrderPortal(HttpCase):
         self.assertEqual(self._document_artifact_counts(self.order_a), before_a)
         self.assertEqual(self._document_artifact_counts(self.order_b), before_b)
 
+    def test_decline_reason_visibility_and_terminal_document_guards(self):
+        declined = self.order_a
+        declined._controlled_lifecycle_write({
+            "status": "declined",
+            "decline_category": "inspection_findings",
+            "decline_reason": "Synthetic inspection findings require decline.",
+        })
+        before_declined = self._document_artifact_counts(declined)
+        self._login(self.bank_admin)
+        open_orders = self.url_open(
+            "/my/trucalc/bank/orders?filterby=open"
+        ).text
+        all_orders = self.url_open(
+            "/my/trucalc/bank/orders?filterby=all"
+        ).text
+        self.assertNotIn(declined.order_number, open_orders)
+        self.assertIn(declined.order_number, all_orders)
+        detail = self.url_open(
+            "/my/trucalc/bank/orders/%s/documents" % declined.order_number
+        ).text
+        self.assertIn("Decline Category", detail)
+        self.assertIn("Inspection Findings", detail)
+        self.assertIn("Synthetic inspection findings require decline.", detail)
+        self.assertNotIn("bank-document-upload-modal", detail)
+        response = self._portal_upload(
+            self.bank_admin, declined, self.tag.id,
+            "Declined Late Upload.pdf", b"blocked",
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(
+            self._document_artifact_counts(declined), before_declined,
+        )
+
+        cancelled = self._order(
+            self.bank_a, "Cancelled Upload Guard", "303 Cancelled Way",
+        )
+        cancelled._controlled_lifecycle_write({"status": "cancelled"})
+        before_cancelled = self._document_artifact_counts(cancelled)
+        cancelled_detail = self.url_open(
+            "/my/trucalc/bank/orders/%s/documents" % cancelled.order_number
+        ).text
+        self.assertNotIn("bank-document-upload-modal", cancelled_detail)
+        response = self._portal_upload(
+            self.bank_admin, cancelled, self.tag.id,
+            "Cancelled Late Upload.pdf", b"blocked",
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(
+            self._document_artifact_counts(cancelled), before_cancelled,
+        )
+
     def test_non_bank_personas_fail_closed(self):
         self.authenticate(None, None)
         self.assertIn(

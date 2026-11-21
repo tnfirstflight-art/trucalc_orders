@@ -365,7 +365,11 @@ class TestPricingArchitecture(TransactionCase):
                 ("order_date_display", "Order Date"),
                 ("due_date", "Due Date"),
                 ("status", "Status"),
+                ("decline_category", None),
                 ("decline_reason", None),
+                ("declined_at", None),
+                ("declined_by_id", None),
+                ("vendor_notification_note", None),
             ],
         )
         identity = arch.xpath(
@@ -472,6 +476,8 @@ class TestPricingArchitecture(TransactionCase):
                 ("action_open_manage_bid_requests_wizard", "Manage Bid Requests"),
                 ("action_open_extend_bid_deadline_wizard", "Extend Bid Deadline"),
                 ("action_reopen_bidding", "Reopen Bidding"),
+                ("action_open_post_acceptance_decline_wizard",
+                 "Decline After Acceptance"),
                 ("action_open_engagement_decision_wizard", "Review Delivery Change"),
                 ("action_open_reviewer_assignment_wizard", "Assign Reviewer"),
                 ("action_open_reviewer_assignment_wizard", "Reassign Reviewer"),

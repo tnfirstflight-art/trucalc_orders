@@ -20,6 +20,7 @@ EVENT_TYPES = [
     ("delivery_change_rejected", "Delivery Change Rejected"),
     ("vendor_declined", "Vendor Declined"),
     ("engagement_closed_reopened", "Engagement Closed — Bidding Reopened"),
+    ("engagement_closed_order_declined", "Engagement Closed — Order Declined"),
 ]
 
 
@@ -118,7 +119,12 @@ class TruCalcVendorEngagement(models.Model):
     active = fields.Boolean(required=True, readonly=True, default=True, index=True)
     closed_at = fields.Datetime(readonly=True, index=True)
     closed_reason = fields.Selection(
-        [("reopened", "Bidding Reopened")], readonly=True, index=True,
+        [
+            ("reopened", "Bidding Reopened"),
+            ("order_declined", "Order Declined"),
+        ],
+        readonly=True,
+        index=True,
     )
     event_ids = fields.One2many(
         "trucalc.vendor.engagement.event", "engagement_id", readonly=True,
@@ -537,6 +543,35 @@ class TruCalcVendorEngagement(models.Model):
         )
         self._controlled_write({
             "active": False, "closed_at": now, "closed_reason": "reopened",
+        })
+        return True
+
+    @api.private
+    def _close_for_order_decline(self, reason, when=None):
+        self.ensure_one()
+        if not self.active:
+            raise ValidationError(_("The Vendor engagement is already closed."))
+        actor = self.env.user
+        reason = reason.strip() if isinstance(reason, str) else ""
+        if not reason or len(reason) > 5000:
+            raise ValidationError(_(
+                "A decline reason of 1 to 5000 characters is required."
+            ))
+        self.env["trucalc.vendor.engagement.event"]._log_event(
+            self, "engagement_closed_order_declined", actor=actor,
+            old_state=self.response_state, new_state=self.response_state,
+            agreed_vendor_fee=self.agreed_vendor_fee,
+            authoritative_delivery_date=self.vendor_delivery_date,
+            requested_delivery_date=(
+                self.pending_request_event_id.requested_delivery_date
+                if self.pending_request_event_id else False
+            ),
+            reason=reason,
+        )
+        self._controlled_write({
+            "active": False,
+            "closed_at": when or fields.Datetime.now(),
+            "closed_reason": "order_declined",
         })
         return True
 

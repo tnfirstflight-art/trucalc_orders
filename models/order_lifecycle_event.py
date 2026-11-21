@@ -2,6 +2,7 @@ from odoo import api, fields, models, _
 from odoo.exceptions import AccessError, ValidationError
 
 from .vendor_fee import SERVICE_SELECTION
+from .decline_policy import ORDER_DECLINE_CATEGORY_SELECTION
 
 
 class TruCalcOrderLifecycleEvent(models.Model):
@@ -40,6 +41,7 @@ class TruCalcOrderLifecycleEvent(models.Model):
             ("review_accepted", "Review Accepted"),
             ("valuation_approved", "Valuation Approved"),
             ("order_completed", "Order Completed"),
+            ("order_declined_after_acceptance", "Order Declined After Acceptance"),
         ],
         required=True, readonly=True, index=True,
     )
@@ -94,6 +96,31 @@ class TruCalcOrderLifecycleEvent(models.Model):
         "res.currency", readonly=True, ondelete="restrict",
     )
     fee_locked_at = fields.Datetime(readonly=True)
+
+    decline_category = fields.Selection(
+        ORDER_DECLINE_CATEGORY_SELECTION, readonly=True,
+    )
+    decline_reason = fields.Text(readonly=True)
+    vendor_notification_note = fields.Text(
+        string="Manual Vendor Communication", readonly=True,
+        groups=(
+            "trucalc_orders.group_trucalc_admin,"
+            "trucalc_orders.group_trucalc_operations"
+        ),
+    )
+    declined_vendor_id = fields.Many2one(
+        "trucalc.vendor", readonly=True, ondelete="restrict",
+    )
+    declined_engagement_id = fields.Many2one(
+        "trucalc.vendor.engagement", readonly=True, ondelete="restrict",
+    )
+    declined_vendor_fee = fields.Monetary(
+        currency_field="declined_currency_id", readonly=True,
+    )
+    declined_currency_id = fields.Many2one(
+        "res.currency", readonly=True, ondelete="restrict",
+    )
+    declined_vendor_delivery_date = fields.Date(readonly=True)
 
     correction_old_state_id = fields.Many2one(
         "res.country.state", string="Old State Record",
@@ -563,6 +590,75 @@ class TruCalcOrderLifecycleEvent(models.Model):
         "(order_id) WHERE event_type = 'order_completed'",
         "An Order may be completed only once.",
     )
+    _order_declined_after_acceptance_unique = models.UniqueIndex(
+        "(order_id) WHERE event_type = 'order_declined_after_acceptance'",
+        "An Order may be declined after acceptance only once.",
+    )
+
+    @api.constrains(
+        "event_type", "order_id", "stable_order_id", "company_id",
+        "from_status", "to_status", "actor_id", "event_at",
+        "decline_category", "decline_reason", "vendor_notification_note",
+        "declined_vendor_id", "declined_engagement_id",
+        "declined_vendor_fee", "declined_currency_id",
+        "declined_vendor_delivery_date",
+    )
+    def _check_post_acceptance_decline_event(self):
+        for event in self.sudo():
+            custom_values = (
+                event.decline_category, event.decline_reason,
+                event.vendor_notification_note, event.declined_vendor_id,
+                event.declined_engagement_id, event.declined_currency_id,
+                event.declined_vendor_delivery_date,
+            )
+            if event.event_type != "order_declined_after_acceptance":
+                if any(custom_values) or event.declined_vendor_fee:
+                    raise ValidationError(_(
+                        "Only post-acceptance decline events may contain decline provenance."
+                    ))
+                continue
+            order = event.order_id
+            engagement = event.declined_engagement_id
+            authorizations = self.env[
+                "trucalc.order.vendor.authorization"
+            ].sudo().with_context(active_test=False).search([
+                ("order_id", "=", order.id),
+            ])
+            if (
+                not order or event.stable_order_id != order.id
+                or event.company_id != order.company_id
+                or event.from_status != "engaged"
+                or event.to_status != "declined"
+                or order.status != "declined"
+                or event.actor_id != order.declined_by_id
+                or event.event_at != order.declined_at
+                or event.decline_category != order.decline_category
+                or event.decline_reason != order.decline_reason
+                or event.vendor_notification_note
+                != order.vendor_notification_note
+                or event.decline_category
+                not in dict(ORDER_DECLINE_CATEGORY_SELECTION)
+                or not (event.decline_reason or "").strip()
+                or not (event.vendor_notification_note or "").strip()
+                or len(event.decline_reason) > 5000
+                or len(event.vendor_notification_note) > 5000
+                or not engagement
+                or engagement.order_id != order
+                or engagement.vendor_id != event.declined_vendor_id
+                or engagement.vendor_id != order.assigned_vendor_id
+                or engagement.active
+                or engagement.closed_reason != "order_declined"
+                or event.declined_vendor_fee != engagement.agreed_vendor_fee
+                or event.declined_currency_id != engagement.currency_id
+                or event.declined_vendor_delivery_date
+                != engagement.vendor_delivery_date
+                or authorizations.filtered("active")
+                or engagement.assignment_authorization_id.deauthorization_reason
+                != "order_declined"
+            ):
+                raise ValidationError(_(
+                    "Post-acceptance decline event provenance is invalid."
+                ))
     _pricing_locked_unique = models.UniqueIndex(
         "(order_id) WHERE event_type = 'pricing_locked'",
         "An Order may have only one internal pricing lock event.",
@@ -736,6 +832,49 @@ class TruCalcOrderLifecycleEvent(models.Model):
                 "fee_locked_at": order.fee_locked_at,
             })
         return super(TruCalcOrderLifecycleEvent, self.sudo()).create(values)
+
+    @api.model
+    @api.private
+    def _log_post_acceptance_decline(
+        self, order, engagement, actor, event_at=None,
+    ):
+        order = order.sudo().exists()
+        engagement = engagement.sudo().exists()
+        actor = actor.sudo().exists()
+        if (
+            len(order) != 1 or len(engagement) != 1 or len(actor) != 1
+            or order.status != "declined"
+            or order.decline_category not in dict(ORDER_DECLINE_CATEGORY_SELECTION)
+            or not order.decline_reason
+            or not order.vendor_notification_note
+            or not order.declined_at
+            or order.declined_by_id != actor
+            or engagement.order_id != order
+            or engagement.vendor_id != order.assigned_vendor_id
+            or engagement.active
+            or engagement.closed_reason != "order_declined"
+        ):
+            raise ValidationError(_(
+                "Post-acceptance decline event provenance is invalid."
+            ))
+        return super(TruCalcOrderLifecycleEvent, self.sudo()).create({
+            "order_id": order.id,
+            "stable_order_id": order.id,
+            "company_id": order.company_id.id,
+            "event_type": "order_declined_after_acceptance",
+            "from_status": "engaged",
+            "to_status": "declined",
+            "actor_id": actor.id,
+            "event_at": event_at or order.declined_at,
+            "decline_category": order.decline_category,
+            "decline_reason": order.decline_reason,
+            "vendor_notification_note": order.vendor_notification_note,
+            "declined_vendor_id": engagement.vendor_id.id,
+            "declined_engagement_id": engagement.id,
+            "declined_vendor_fee": engagement.agreed_vendor_fee,
+            "declined_vendor_delivery_date": engagement.vendor_delivery_date,
+            "declined_currency_id": engagement.currency_id.id,
+        })
 
     @api.model
     @api.private
